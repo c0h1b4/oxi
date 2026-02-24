@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - IMAP_HOST=${IMAP_HOST:-mail.example.com}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - SMTP_HOST=${SMTP_HOST:-mail.example.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - TLS_ENABLED=${TLS_ENABLED:-true}
+      - RUST_LOG=${RUST_LOG:-info}
+      - SESSION_TIMEOUT_HOURS=${SESSION_TIMEOUT_HOURS:-24}
+    volumes:
+      - oxi-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/v1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  oxi-data:
