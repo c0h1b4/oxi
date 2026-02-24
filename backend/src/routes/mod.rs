@@ -1,11 +1,19 @@
 pub mod auth;
 pub mod health;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
+use axum::extract::ConnectInfo;
+use axum::http::Request;
 use axum::routing::{get, post};
 use axum::{Extension, Router, middleware};
+use tower_governor::GovernorError;
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::KeyExtractor;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -14,6 +22,28 @@ use crate::auth::csrf::csrf_protection;
 use crate::auth::middleware::auth_guard;
 use crate::auth::session::SessionStore;
 use crate::config::AppConfig;
+
+/// Per-IP key extractor that falls back to the loopback address when
+/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests using
+/// `oneshot`).  In production the server is started with
+/// `into_make_service_with_connect_info::<SocketAddr>()` so the real
+/// peer IP is always present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PeerIpKeyExtractorFallback;
+
+impl KeyExtractor for PeerIpKeyExtractorFallback {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
+        // Try ConnectInfo<SocketAddr> first (production path).
+        let ip = req
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ci: &ConnectInfo<SocketAddr>| ci.0.ip());
+
+        Ok(ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+    }
+}
 
 /// Assembles all application routes into an Axum Router.
 ///
@@ -32,10 +62,19 @@ use crate::config::AppConfig;
 /// - CSRF protection on auth routes
 /// - auth_guard on protected routes
 pub fn create_router(config: Arc<AppConfig>, store: Arc<SessionStore>) -> Router {
-    // Public auth route (CSRF only, no auth required).
+    // Rate-limit login: replenish 1 token every 12 s, burst of 5.
+    let governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(PeerIpKeyExtractorFallback)
+        .period(Duration::from_secs(12))
+        .burst_size(5)
+        .finish()
+        .expect("valid governor config");
+
+    // Public auth route: GovernorLayer (outermost) → CSRF → handler.
     let public_auth = Router::new()
         .route("/login", post(auth::login))
-        .layer(middleware::from_fn(csrf_protection));
+        .layer(middleware::from_fn(csrf_protection))
+        .layer(GovernorLayer::new(governor_conf));
 
     // Protected auth routes (auth_guard + CSRF).
     let protected_auth = Router::new()
