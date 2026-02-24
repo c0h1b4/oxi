@@ -1,0 +1,43 @@
+# =============================================================================
+# Docker build context exclusions
+# =============================================================================
+
+# Build artifacts (rebuilt inside container)
+**/target/
+**/node_modules/
+frontend/out/
+frontend/.next/
+
+# Version control
+.git/
+.gitignore
+
+# Documentation and planning (not needed in image)
+docs/
+_bmad*/
+assets/
+*.md
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local tooling state
+.agent/
+.claude/
+
+# Environment / Secrets (never bake into image)
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (avoid recursive context)
+.docker/
+docker-compose.yml
