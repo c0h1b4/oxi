@@ -90,9 +90,8 @@ dist/
 build/
 
 # =============================================================================
-# BMAD planning artifacts — NOT ignored (they are part of the project)
-# _bmad/
-# _bmad-output/
-# docs/
-# assets/
+# BMAD / Planning
 # =============================================================================
+_bmad/
+_bmad-output/
+docs/
