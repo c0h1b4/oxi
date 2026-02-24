@@ -25,7 +25,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_returns_ok() {
-        let app = create_router();
+        // Use a non-existent static dir; API routes should still work.
+        let app = create_router("nonexistent_static_dir");
 
         let response = app
             .oneshot(

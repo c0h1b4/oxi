@@ -18,8 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration via figment (serde defaults + env vars).
     let config = AppConfig::load()?;
 
-    // Build the application router.
-    let app = routes::create_router();
+    // Build the application router with static file serving.
+    let app = routes::create_router(&config.static_dir);
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);
@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(
         host = %config.host,
         port = %config.port,
+        static_dir = %config.static_dir,
         "oxi-email server starting"
     );
 
