@@ -34,6 +34,15 @@ pub fn provision_user_data(data_dir: &str, user_hash: &str) -> Result<PathBuf, S
     let tantivy_dir = user_dir.join("tantivy");
     fs::create_dir_all(&tantivy_dir).map_err(|e| format!("failed to create directories: {e}"))?;
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(mut perms) = fs::metadata(&user_dir).map(|m| m.permissions()) {
+            perms.set_mode(0o700); // rwx------
+            let _ = fs::set_permissions(&user_dir, perms);
+        }
+    }
+
     // Open (or create) the SQLite database.
     let db_path = user_dir.join("db.sqlite");
     let mut conn = rusqlite::Connection::open(&db_path)
