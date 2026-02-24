@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+}
+
+/*
+ * oxi.email — Warm Industrial Copper Theme
+ *
+ * Light palette: warm neutrals with copper accent hsl(20, 70%, 50%)
+ * Dark palette: deep warm charcoal with lighter copper accent
+ */
+
+:root {
+  --radius: 0.375rem;
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(20 15% 10%);
+  --card: hsl(30 10% 96%);
+  --card-foreground: hsl(20 15% 10%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(20 15% 10%);
+  --primary: hsl(20 70% 50%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(30 10% 96%);
+  --secondary-foreground: hsl(20 15% 10%);
+  --muted: hsl(30 10% 96%);
+  --muted-foreground: hsl(20 5% 46%);
+  --accent: hsl(30 10% 96%);
+  --accent-foreground: hsl(20 15% 10%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(30 8% 90%);
+  --input: hsl(30 8% 90%);
+  --ring: hsl(20 70% 50%);
+  --chart-1: hsl(20 70% 50%);
+  --chart-2: hsl(30 60% 55%);
+  --chart-3: hsl(40 50% 50%);
+  --chart-4: hsl(15 60% 45%);
+  --chart-5: hsl(25 55% 60%);
+  --sidebar: hsl(30 10% 96%);
+  --sidebar-foreground: hsl(20 15% 10%);
+  --sidebar-primary: hsl(20 70% 50%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(30 10% 96%);
+  --sidebar-accent-foreground: hsl(20 15% 10%);
+  --sidebar-border: hsl(30 8% 90%);
+  --sidebar-ring: hsl(20 70% 50%);
+}
+
+.dark {
+  --background: hsl(20 10% 7%);
+  --foreground: hsl(30 15% 95%);
+  --card: hsl(20 8% 12%);
+  --card-foreground: hsl(30 15% 95%);
+  --popover: hsl(20 8% 12%);
+  --popover-foreground: hsl(30 15% 95%);
+  --primary: hsl(20 75% 55%);
+  --primary-foreground: hsl(20 10% 7%);
+  --secondary: hsl(20 8% 12%);
+  --secondary-foreground: hsl(30 15% 95%);
+  --muted: hsl(20 8% 12%);
+  --muted-foreground: hsl(20 5% 55%);
+  --accent: hsl(20 8% 12%);
+  --accent-foreground: hsl(30 15% 95%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(20 6% 20%);
+  --input: hsl(20 6% 20%);
+  --ring: hsl(20 75% 55%);
+  --chart-1: hsl(20 75% 55%);
+  --chart-2: hsl(30 65% 60%);
+  --chart-3: hsl(40 55% 55%);
+  --chart-4: hsl(15 65% 50%);
+  --chart-5: hsl(25 60% 65%);
+  --sidebar: hsl(20 8% 12%);
+  --sidebar-foreground: hsl(30 15% 95%);
+  --sidebar-primary: hsl(20 75% 55%);
+  --sidebar-primary-foreground: hsl(20 10% 7%);
+  --sidebar-accent: hsl(20 8% 12%);
+  --sidebar-accent-foreground: hsl(30 15% 95%);
+  --sidebar-border: hsl(20 6% 20%);
+  --sidebar-ring: hsl(20 75% 55%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
