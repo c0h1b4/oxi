@@ -1,12 +1,16 @@
 mod config;
 #[allow(dead_code)]
 mod error;
-#[allow(dead_code)]
 mod auth;
 mod routes;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use config::AppConfig;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+use crate::auth::session::SessionStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,10 +22,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Load configuration via figment (serde defaults + env vars).
-    let config = AppConfig::load()?;
+    let config = Arc::new(AppConfig::load()?);
 
-    // Build the application router with static file serving.
-    let app = routes::create_router(&config.static_dir, &config.environment);
+    // Create the in-memory session store with the configured timeout.
+    let store = Arc::new(SessionStore::new(Duration::from_secs(
+        config.session_timeout_hours * 3600,
+    )));
+
+    // Build the application router with auth, session, and static file serving.
+    let app = routes::create_router(config.clone(), store);
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);

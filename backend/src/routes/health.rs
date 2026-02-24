@@ -17,6 +17,11 @@ pub async fn health_check() -> Json<HealthResponse> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::auth::session::SessionStore;
+    use crate::config::AppConfig;
     use crate::routes::create_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -25,8 +30,21 @@ mod tests {
 
     #[tokio::test]
     async fn health_check_returns_ok() {
-        // Use a non-existent static dir; API routes should still work.
-        let app = create_router("nonexistent_static_dir", "development");
+        let config = Arc::new(AppConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+            imap_host: None,
+            imap_port: 993,
+            smtp_host: None,
+            smtp_port: 587,
+            tls_enabled: true,
+            data_dir: "/tmp/oxi-test".to_string(),
+            session_timeout_hours: 24,
+            static_dir: "nonexistent_static_dir".to_string(),
+            environment: "development".to_string(),
+        });
+        let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
+        let app = create_router(config, store);
 
         let response = app
             .oneshot(
