@@ -33,15 +33,19 @@ WORKDIR /app/backend
 # Copy manifests first for dependency caching
 COPY backend/Cargo.toml backend/Cargo.lock ./
 
+# Copy migrations (needed at compile time by refinery embed_migrations! macro)
+COPY backend/migrations/ migrations/
+
 # Create a dummy main.rs so cargo can resolve and compile all dependencies.
 # This layer is cached as long as Cargo.toml / Cargo.lock don't change.
 RUN mkdir src && echo "fn main() {}" > src/main.rs \
     && cargo build --release \
     && rm -rf src
 
-# Copy real source and rebuild. Cargo detects the source change and
-# recompiles only the project crate, reusing cached dependencies.
+# Copy real source and migrations, then rebuild. Cargo detects the source
+# change and recompiles only the project crate, reusing cached dependencies.
 COPY backend/src/ src/
+COPY backend/migrations/ migrations/
 RUN touch src/main.rs && cargo build --release
 
 # ---------------------------------------------------------------------------
