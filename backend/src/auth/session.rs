@@ -20,9 +20,11 @@ pub struct SessionState {
     /// The user's email address (also the IMAP username).
     pub email: String,
     /// The user's password (or app-specific password).
+    #[allow(dead_code)]
     pub password: String,
     /// A SHA-256 hash that uniquely identifies the user. Used for
     /// per-user SQLite caching.
+    #[allow(dead_code)]
     pub user_hash: String,
     /// Monotonic timestamp of the last time this session was accessed.
     /// Updated on every successful `get` to implement sliding-window expiry.
@@ -99,6 +101,7 @@ impl SessionStore {
     }
 
     /// Remove all sessions that have been inactive longer than the timeout.
+    #[allow(dead_code)]
     pub fn purge_expired(&self) {
         let now = Instant::now();
         self.sessions
@@ -107,11 +110,13 @@ impl SessionStore {
 
     /// Return the number of sessions currently stored (including expired
     /// ones that have not yet been purged).
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
 
     /// Return `true` if the store contains no sessions.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
