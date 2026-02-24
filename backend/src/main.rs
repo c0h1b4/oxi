@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::load()?;
 
     // Build the application router with static file serving.
-    let app = routes::create_router(&config.static_dir);
+    let app = routes::create_router(&config.static_dir, &config.environment);
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);

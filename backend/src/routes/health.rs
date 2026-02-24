@@ -6,7 +6,7 @@ pub struct HealthResponse {
     pub status: String,
 }
 
-/// Handler for `GET /api/v1/health`.
+/// Handler for `GET /api/health`.
 ///
 /// Returns `200 OK` with `{ "status": "ok" }`.
 pub async fn health_check() -> Json<HealthResponse> {
@@ -26,12 +26,12 @@ mod tests {
     #[tokio::test]
     async fn health_check_returns_ok() {
         // Use a non-existent static dir; API routes should still work.
-        let app = create_router("nonexistent_static_dir");
+        let app = create_router("nonexistent_static_dir", "development");
 
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/health")
+                    .uri("/api/health")
                     .body(Body::empty())
                     .expect("request should build"),
             )
