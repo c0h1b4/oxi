@@ -29,6 +29,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.session_timeout_hours * 3600,
     )));
 
+    // Spawn a background task that periodically purges expired sessions.
+    {
+        let store = Arc::clone(&store);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                store.purge_expired();
+                tracing::debug!("Purged expired sessions");
+            }
+        });
+    }
+
     // Build the application router with auth, session, and static file serving.
     let app = routes::create_router(config.clone(), store);
 
