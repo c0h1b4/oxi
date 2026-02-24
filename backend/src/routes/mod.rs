@@ -11,24 +11,29 @@ use tower_http::trace::TraceLayer;
 /// Assembles all application routes into an Axum Router.
 ///
 /// Currently registers:
-/// - `GET /api/v1/health` — health check endpoint
+/// - `GET /api/health` — health check endpoint
 /// - All other paths serve static files from `static_dir`
 /// - Non-matching static paths fall back to `index.html` (SPA routing)
 ///
 /// Middleware layers:
 /// - CORS (permissive defaults for development)
 /// - tower-http tracing
-pub fn create_router(static_dir: &str) -> Router {
-    let api_v1 = Router::new().route("/health", get(health::health_check));
+pub fn create_router(static_dir: &str, environment: &str) -> Router {
+    let api_router = Router::new().route("/health", get(health::health_check));
 
     let index_path = Path::new(static_dir).join("index.html");
     let static_service = ServeDir::new(static_dir).fallback(ServeFile::new(index_path));
 
-    Router::new()
-        .nest("/api/v1", api_v1)
+    let router = Router::new()
+        .nest("/api", api_router)
         .fallback_service(static_service)
-        .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http());
+
+    if environment == "development" {
+        router.layer(CorsLayer::permissive())
+    } else {
+        router
+    }
 }
 
 #[cfg(test)]
@@ -55,12 +60,12 @@ mod tests {
     #[tokio::test]
     async fn api_health_works_with_static_fallback() {
         let dir = setup_static_dir();
-        let app = create_router(dir.path().to_str().unwrap());
+        let app = create_router(dir.path().to_str().unwrap(), "development");
 
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/v1/health")
+                    .uri("/api/health")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -82,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn root_serves_index_html() {
         let dir = setup_static_dir();
-        let app = create_router(dir.path().to_str().unwrap());
+        let app = create_router(dir.path().to_str().unwrap(), "development");
 
         let response = app
             .oneshot(
@@ -109,7 +114,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_path_falls_back_to_index_html() {
         let dir = setup_static_dir();
-        let app = create_router(dir.path().to_str().unwrap());
+        let app = create_router(dir.path().to_str().unwrap(), "development");
 
         let response = app
             .oneshot(
@@ -137,7 +142,7 @@ mod tests {
     async fn static_file_is_served_directly() {
         let dir = setup_static_dir();
         fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
-        let app = create_router(dir.path().to_str().unwrap());
+        let app = create_router(dir.path().to_str().unwrap(), "development");
 
         let response = app
             .oneshot(

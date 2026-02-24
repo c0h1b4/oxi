@@ -48,6 +48,10 @@ pub struct AppConfig {
     /// Directory to serve static frontend files from.
     #[serde(default = "default_static_dir")]
     pub static_dir: String,
+
+    /// Environment the application is running in (development, production)
+    #[serde(default = "default_environment")]
+    pub environment: String,
 }
 
 fn default_host() -> String {
@@ -82,6 +86,10 @@ fn default_static_dir() -> String {
     "./static".to_string()
 }
 
+fn default_environment() -> String {
+    "development".to_string()
+}
+
 impl AppConfig {
     /// Load configuration by layering serde defaults with environment variables.
     ///
@@ -111,10 +119,11 @@ mod tests {
         assert_eq!(config.imap_port, 993);
         assert!(config.smtp_host.is_none());
         assert_eq!(config.smtp_port, 587);
-        assert!(config.tls_enabled);
+        assert_eq!(config.tls_enabled, true);
         assert_eq!(config.data_dir, "/data");
         assert_eq!(config.session_timeout_hours, 24);
         assert_eq!(config.static_dir, "./static");
+        assert_eq!(config.environment, "development");
     }
 
     #[test]
@@ -132,6 +141,7 @@ mod tests {
             .merge(("data_dir", "/var/oxi"))
             .merge(("session_timeout_hours", 48u64))
             .merge(("static_dir", "/srv/static"))
+            .merge(("environment", "production"))
             .extract()
             .expect("overrides should load");
 
@@ -141,10 +151,11 @@ mod tests {
         assert_eq!(config.imap_port, 143);
         assert_eq!(config.smtp_host.as_deref(), Some("smtp.example.com"));
         assert_eq!(config.smtp_port, 465);
-        assert!(!config.tls_enabled);
+        assert_eq!(config.tls_enabled, false);
         assert_eq!(config.data_dir, "/var/oxi");
         assert_eq!(config.session_timeout_hours, 48);
         assert_eq!(config.static_dir, "/srv/static");
+        assert_eq!(config.environment, "production");
     }
 
     #[test]
