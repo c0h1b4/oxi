@@ -14,8 +14,8 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "fs"] }
 tower = "0.5"
 dashmap = "6"
-async-imap = "0.10"
-async-native-tls = "0.5"
+async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
 tower_governor = "0.5"
 governor = "0.8"
 rand = "0.9"
