@@ -169,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn nested_spa_path_falls_back_to_index() {
         let dir = setup_static_dir();
-        let app = create_router(dir.path().to_str().unwrap());
+        let app = create_router(dir.path().to_str().unwrap(), "development");
 
         let response = app
             .oneshot(
