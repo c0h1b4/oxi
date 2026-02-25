@@ -59,6 +59,7 @@ impl KeyExtractor for PeerIpKeyExtractorFallback {
 /// - `GET  /api/folders/:folder/messages`      — list messages (auth_guard + CSRF)
 /// - `GET  /api/messages/:folder/:uid`         — get message detail (auth_guard + CSRF)
 /// - `PATCH /api/messages/:folder/:uid/flags`  — update flags (auth_guard + CSRF)
+/// - `GET  /api/messages/:folder/:uid/attachments/:attachment_id` — download attachment (auth_guard + CSRF)
 /// - `POST /api/messages/move`                 — move message (auth_guard + CSRF)
 /// - `DELETE /api/messages/:folder/:uid`       — delete message (auth_guard + CSRF)
 ///
@@ -109,6 +110,10 @@ pub fn create_router(
             "/messages/{folder}/{uid}/flags",
             patch(messages::update_flags),
         )
+        .route(
+            "/messages/{folder}/{uid}/attachments/{attachment_id}",
+            get(messages::download_attachment),
+        )
         .route("/messages/move", post(messages::move_message_handler))
         .route(
             "/messages/{folder}/{uid}",
@@ -153,7 +158,7 @@ mod tests {
 
     use crate::imap::client::mock::MockImapClient;
     use crate::imap::client::{
-        EmailAddress, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
+        EmailAddress, ImapAttachment, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
     };
 
     /// Helper: create a test AppConfig with the given static dir.
@@ -1128,5 +1133,171 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // -----------------------------------------------------------------------
+    // Attachment download tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn download_attachment_returns_binary_with_correct_headers() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let attachment_data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+            uid: 42,
+            text_plain: Some("text".to_string()),
+            text_html: None,
+            attachments: vec![ImapAttachment {
+                filename: Some("document.pdf".to_string()),
+                content_type: "application/pdf".to_string(),
+                size: 4,
+                data: attachment_data.clone(),
+            }],
+        }]);
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/messages/INBOX/42/attachments/0")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Verify content-type header.
+        let ct = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(ct, "application/pdf");
+
+        // Verify content-disposition header.
+        let cd = response
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(cd.contains("attachment"));
+        assert!(cd.contains("document.pdf"));
+
+        // Verify body bytes match the attachment data.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.as_ref(), &attachment_data);
+    }
+
+    #[tokio::test]
+    async fn download_attachment_returns_404_for_invalid_index() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+            uid: 42,
+            text_plain: Some("text".to_string()),
+            text_html: None,
+            attachments: vec![ImapAttachment {
+                filename: Some("document.pdf".to_string()),
+                content_type: "application/pdf".to_string(),
+                size: 4,
+                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            }],
+        }]);
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/messages/INBOX/42/attachments/99")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn download_attachment_returns_400_for_non_numeric_id() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+            uid: 42,
+            text_plain: Some("text".to_string()),
+            text_html: None,
+            attachments: vec![ImapAttachment {
+                filename: Some("document.pdf".to_string()),
+                content_type: "application/pdf".to_string(),
+                size: 4,
+                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            }],
+        }]);
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/messages/INBOX/42/attachments/abc")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
