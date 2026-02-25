@@ -20,18 +20,20 @@ pub struct LoginRequest {
 
 
 /// Build a `Set-Cookie` header value for the session cookie.
-fn session_cookie(token: &str, max_age_secs: u64) -> String {
+fn session_cookie(token: &str, max_age_secs: u64, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}={}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={}",
-        SESSION_COOKIE, token, max_age_secs
+        "{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        SESSION_COOKIE, token, secure_flag, max_age_secs
     )
 }
 
 /// Build a `Set-Cookie` header value that clears the session cookie.
-fn clearing_cookie() -> String {
+fn clearing_cookie(secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
-        SESSION_COOKIE
+        "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        SESSION_COOKIE, secure_flag
     )
 }
 
@@ -135,7 +137,8 @@ pub async fn login(
             // Create session.
             let token = store.insert(body.email.clone(), body.password, user_hash);
             let max_age = config.session_timeout_hours * 3600;
-            let cookie = session_cookie(&token, max_age);
+            let secure = config.environment != "development";
+            let cookie = session_cookie(&token, max_age, secure);
 
             (
                 StatusCode::CREATED,
@@ -195,6 +198,7 @@ pub async fn get_session(Extension(session): Extension<SessionState>) -> Respons
 /// Requires authentication.
 pub async fn logout(
     Extension(store): Extension<Arc<SessionStore>>,
+    Extension(config): Extension<Arc<AppConfig>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
     // Extract token from cookie and remove from store.
@@ -202,7 +206,8 @@ pub async fn logout(
         store.remove(&token);
     }
 
-    let cookie = clearing_cookie();
+    let secure = config.environment != "development";
+    let cookie = clearing_cookie(secure);
 
     (
         StatusCode::OK,
@@ -237,8 +242,8 @@ mod tests {
     }
 
     #[test]
-    fn session_cookie_format() {
-        let cookie = session_cookie("abc123", 86400);
+    fn session_cookie_format_secure() {
+        let cookie = session_cookie("abc123", 86400, true);
         assert!(cookie.contains("oxi_session=abc123"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("Secure"));
@@ -248,14 +253,31 @@ mod tests {
     }
 
     #[test]
+    fn session_cookie_format_no_secure() {
+        let cookie = session_cookie("abc123", 86400, false);
+        assert!(cookie.contains("oxi_session=abc123"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(!cookie.contains("Secure"));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
+
+    #[test]
     fn clearing_cookie_format() {
-        let cookie = clearing_cookie();
+        let cookie = clearing_cookie(true);
         assert!(cookie.contains("oxi_session=;"));
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("Secure"));
         assert!(cookie.contains("SameSite=Strict"));
         assert!(cookie.contains("Path=/"));
+    }
+
+    #[test]
+    fn clearing_cookie_format_no_secure() {
+        let cookie = clearing_cookie(false);
+        assert!(cookie.contains("oxi_session=;"));
+        assert!(!cookie.contains("Secure"));
+        assert!(cookie.contains("HttpOnly"));
     }
 
     #[test]

@@ -22,6 +22,8 @@ mod tests {
 
     use crate::auth::session::SessionStore;
     use crate::config::AppConfig;
+    use crate::imap::client::ImapClient;
+    use crate::imap::client::mock::MockImapClient;
     use crate::routes::create_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -44,7 +46,8 @@ mod tests {
             environment: "development".to_string(),
         });
         let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
-        let app = create_router(config, store);
+        let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
+        let app = create_router(config, store, imap_client);
 
         let response = app
             .oneshot(

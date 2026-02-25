@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------
 FROM node:22-alpine AS frontend-build
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
 
 WORKDIR /app/frontend
 
