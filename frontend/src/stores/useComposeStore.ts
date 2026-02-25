@@ -16,6 +16,13 @@ export interface ForwardParams {
   body: string;
 }
 
+export interface ComposeAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
 interface ComposeState {
   isOpen: boolean;
   to: string;
@@ -28,6 +35,7 @@ interface ComposeState {
   draftId: string | null;
   showCc: boolean;
   showBcc: boolean;
+  attachments: ComposeAttachment[];
 
   openCompose: () => void;
   openReply: (params: ReplyParams) => void;
@@ -36,6 +44,9 @@ interface ComposeState {
   setField: (field: "to" | "cc" | "bcc" | "subject" | "body", value: string) => void;
   setShowCc: (show: boolean) => void;
   setShowBcc: (show: boolean) => void;
+  setDraftId: (id: string) => void;
+  addAttachments: (atts: ComposeAttachment[]) => void;
+  removeAttachment: (id: string) => void;
   reset: () => void;
 }
 
@@ -51,6 +62,7 @@ const initialState = {
   draftId: null as string | null,
   showCc: false,
   showBcc: false,
+  attachments: [] as ComposeAttachment[],
 };
 
 export const useComposeStore = create<ComposeState>((set) => ({
@@ -85,6 +97,16 @@ export const useComposeStore = create<ComposeState>((set) => ({
 
   setShowCc: (show) => set({ showCc: show }),
   setShowBcc: (show) => set({ showBcc: show }),
+
+  setDraftId: (id) => set({ draftId: id }),
+
+  addAttachments: (atts) =>
+    set((state) => ({ attachments: [...state.attachments, ...atts] })),
+
+  removeAttachment: (id) =>
+    set((state) => ({
+      attachments: state.attachments.filter((a) => a.id !== id),
+    })),
 
   reset: () => set(initialState),
 }));

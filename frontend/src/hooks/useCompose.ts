@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiPost } from "@/lib/api";
+import { apiPost, apiPostFormData, apiDelete } from "@/lib/api";
 
 interface SendParams {
   to: string;
@@ -11,11 +11,25 @@ interface SendParams {
   body: string;
   inReplyTo: string | null;
   references: string | null;
+  draftId: string | null;
 }
 
 interface SendResponse {
   status: string;
   message_id: string;
+}
+
+interface UploadResponse {
+  attachments: {
+    id: string;
+    filename: string;
+    content_type: string;
+    size: number;
+  }[];
+}
+
+interface DeleteAttachmentResponse {
+  status: string;
 }
 
 function parseRecipients(raw: string): string[] {
@@ -38,10 +52,47 @@ export function useSendMessage() {
         html_body: null,
         in_reply_to: params.inReplyTo,
         references: params.references,
+        draft_id: params.draftId,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
+  });
+}
+
+export function useUploadAttachment() {
+  return useMutation({
+    mutationFn: ({
+      draftId,
+      files,
+    }: {
+      draftId: string;
+      files: File[];
+    }) => {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("file", file);
+      }
+      return apiPostFormData<UploadResponse>(
+        `/drafts/${draftId}/attachments`,
+        formData,
+      );
+    },
+  });
+}
+
+export function useDeleteAttachment() {
+  return useMutation({
+    mutationFn: ({
+      draftId,
+      attachmentId,
+    }: {
+      draftId: string;
+      attachmentId: string;
+    }) =>
+      apiDelete<DeleteAttachmentResponse>(
+        `/drafts/${draftId}/attachments/${attachmentId}`,
+      ),
   });
 }

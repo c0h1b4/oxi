@@ -2,9 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
-import { Send, X, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import {
+  Send,
+  X,
+  ChevronUp,
+  AlertTriangle,
+  Paperclip,
+  Loader2,
+} from "lucide-react";
 import { useComposeStore } from "@/stores/useComposeStore";
-import { useSendMessage } from "@/hooks/useCompose";
+import {
+  useSendMessage,
+  useUploadAttachment,
+  useDeleteAttachment,
+} from "@/hooks/useCompose";
 import { cn } from "@/lib/utils";
 
 function countRecipients(...fields: string[]): number {
@@ -19,6 +30,17 @@ function countRecipients(...fields: string[]): number {
   );
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Generate a UUID v4 (crypto-based). */
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
 export function ComposeDialog() {
   const {
     isOpen,
@@ -29,20 +51,30 @@ export function ComposeDialog() {
     body,
     inReplyTo,
     references,
+    draftId,
     showCc,
     showBcc,
+    attachments,
     closeCompose,
     setField,
     setShowCc,
     setShowBcc,
+    setDraftId,
+    addAttachments,
+    removeAttachment,
     reset,
   } = useComposeStore();
 
   const sendMutation = useSendMessage();
-  const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const uploadMutation = useUploadAttachment();
+  const deleteMutation = useDeleteAttachment();
+  const [undoTimer, setUndoTimer] = useState<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
@@ -62,7 +94,7 @@ export function ComposeDialog() {
 
   const doSend = useCallback(() => {
     sendMutation.mutate(
-      { to, cc, bcc, subject, body, inReplyTo, references },
+      { to, cc, bcc, subject, body, inReplyTo, references, draftId },
       {
         onSuccess: () => {
           setToast("Message sent");
@@ -74,7 +106,18 @@ export function ComposeDialog() {
         },
       },
     );
-  }, [to, cc, bcc, subject, body, inReplyTo, references, sendMutation, reset]);
+  }, [
+    to,
+    cc,
+    bcc,
+    subject,
+    body,
+    inReplyTo,
+    references,
+    draftId,
+    sendMutation,
+    reset,
+  ]);
 
   const handleSend = useCallback(() => {
     if (!to.trim() && !cc.trim() && !bcc.trim()) return;
@@ -111,6 +154,65 @@ export function ComposeDialog() {
       }
     },
     [handleSend],
+  );
+
+  const handleAttachFiles = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      // Ensure we have a draft ID for uploads
+      let currentDraftId = draftId;
+      if (!currentDraftId) {
+        currentDraftId = generateId();
+        setDraftId(currentDraftId);
+      }
+
+      uploadMutation.mutate(
+        { draftId: currentDraftId, files: Array.from(files) },
+        {
+          onSuccess: (data) => {
+            addAttachments(
+              data.attachments.map((a) => ({
+                id: a.id,
+                filename: a.filename,
+                contentType: a.content_type,
+                size: a.size,
+              })),
+            );
+          },
+          onError: (error) => {
+            setToast(`Upload failed: ${error.message}`);
+          },
+        },
+      );
+
+      // Reset the input so the same file can be re-selected
+      e.target.value = "";
+    },
+    [draftId, setDraftId, uploadMutation, addAttachments],
+  );
+
+  const handleRemoveAttachment = useCallback(
+    (attachmentId: string) => {
+      if (!draftId) return;
+      deleteMutation.mutate(
+        { draftId, attachmentId },
+        {
+          onSuccess: () => {
+            removeAttachment(attachmentId);
+          },
+          onError: (error) => {
+            setToast(`Delete failed: ${error.message}`);
+          },
+        },
+      );
+    },
+    [draftId, deleteMutation, removeAttachment],
   );
 
   return (
@@ -226,6 +328,33 @@ export function ComposeDialog() {
               </div>
             )}
 
+            {/* Attachments */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-accent/50 px-2 py-1 text-xs"
+                  >
+                    <Paperclip className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="max-w-[150px] truncate" title={att.filename}>
+                      {att.filename}
+                    </span>
+                    <span className="text-muted-foreground">
+                      ({formatFileSize(att.size)})
+                    </span>
+                    <button
+                      onClick={() => handleRemoveAttachment(att.id)}
+                      className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="Remove attachment"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Body */}
             <div className="flex-1 overflow-auto px-4 py-3">
               <textarea
@@ -238,21 +367,42 @@ export function ComposeDialog() {
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-border px-4 py-3">
-              <button
-                onClick={handleSend}
-                disabled={
-                  sendMutation.isPending ||
-                  (!to.trim() && !cc.trim() && !bcc.trim())
-                }
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                  "bg-primary text-primary-foreground hover:bg-primary/90",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                )}
-              >
-                <Send className="size-4" />
-                Send
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSend}
+                  disabled={
+                    sendMutation.isPending ||
+                    (!to.trim() && !cc.trim() && !bcc.trim())
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                    "bg-primary text-primary-foreground hover:bg-primary/90",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                  )}
+                >
+                  <Send className="size-4" />
+                  Send
+                </button>
+                <button
+                  onClick={handleAttachFiles}
+                  disabled={uploadMutation.isPending}
+                  className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  title="Attach files"
+                >
+                  {uploadMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="size-4" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileSelected}
+                />
+              </div>
               <button
                 onClick={handleDiscard}
                 className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"

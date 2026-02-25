@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use axum::response::{IntoResponse, Response};
@@ -6,9 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::session::SessionState;
 use crate::config::AppConfig;
+use crate::db;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
-use crate::smtp::client::{SendableMessage, SmtpClient, SmtpCredentials};
+use crate::smtp::client::{AttachmentData, SendableMessage, SmtpClient, SmtpCredentials};
 
 #[derive(Debug, Deserialize)]
 pub struct SendRequest {
@@ -23,6 +25,9 @@ pub struct SendRequest {
     pub html_body: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+    /// If sending from a draft, include the draft ID to load attachments
+    /// and clean up after send.
+    pub draft_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,6 +79,13 @@ pub async fn send_message_handler(
         password: session.password.clone(),
     };
 
+    // Load attachments from draft if draft_id is provided.
+    let attachments = if let Some(ref draft_id) = req.draft_id {
+        load_draft_attachments(&config.data_dir, &session.user_hash, draft_id)?
+    } else {
+        vec![]
+    };
+
     // Build the sendable message.
     let message = SendableMessage {
         from: session.email.clone(),
@@ -85,7 +97,7 @@ pub async fn send_message_handler(
         html_body: req.html_body,
         in_reply_to: req.in_reply_to,
         references: req.references,
-        attachments: vec![], // Phase 4 will add attachment support
+        attachments,
     };
 
     // Send via SMTP.
@@ -116,6 +128,11 @@ pub async fn send_message_handler(
         }
     }
 
+    // Clean up draft and attachment files after successful send.
+    if let Some(ref draft_id) = req.draft_id {
+        cleanup_draft(&config.data_dir, &session.user_hash, draft_id).await;
+    }
+
     Ok(Json(SendResponse {
         status: "sent".to_string(),
         message_id,
@@ -123,9 +140,59 @@ pub async fn send_message_handler(
     .into_response())
 }
 
+/// Load attachment data from disk for a given draft.
+fn load_draft_attachments(
+    data_dir: &str,
+    user_hash: &str,
+    draft_id: &str,
+) -> Result<Vec<AttachmentData>, AppError> {
+    let conn = db::pool::open_user_db(data_dir, user_hash)
+        .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
+
+    let db_attachments = db::drafts::get_draft_attachments(&conn, draft_id)
+        .map_err(|e| AppError::InternalError(e))?;
+
+    let mut attachments = Vec::new();
+    for att in db_attachments {
+        let data = std::fs::read(&att.file_path).map_err(|e| {
+            AppError::InternalError(format!(
+                "Failed to read attachment file '{}': {e}",
+                att.filename
+            ))
+        })?;
+        attachments.push(AttachmentData {
+            filename: att.filename,
+            content_type: att.content_type,
+            data,
+        });
+    }
+    Ok(attachments)
+}
+
+/// Clean up draft record and attachment files from disk after successful send.
+async fn cleanup_draft(data_dir: &str, user_hash: &str, draft_id: &str) {
+    // Delete draft from DB (cascade deletes attachment records).
+    if let Ok(conn) = db::pool::open_user_db(data_dir, user_hash) {
+        if let Err(e) = db::drafts::delete_draft(&conn, draft_id) {
+            tracing::warn!(error = %e, "Failed to delete draft after send");
+        }
+    }
+
+    // Remove the attachment directory from disk.
+    let att_dir = Path::new(data_dir)
+        .join(user_hash)
+        .join("attachments")
+        .join(draft_id);
+    if att_dir.exists() {
+        if let Err(e) = tokio::fs::remove_dir_all(&att_dir).await {
+            tracing::warn!(error = %e, path = %att_dir.display(), "Failed to clean up attachment directory");
+        }
+    }
+}
+
 /// Build RFC822 bytes from a SendableMessage for IMAP APPEND.
 fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec<u8>, String> {
-    use lettre::message::{header::ContentType, Mailbox, MultiPart, SinglePart};
+    use lettre::message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart};
 
     let from_mailbox: Mailbox = message
         .from
@@ -172,9 +239,25 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
         )
     };
 
-    let email = builder
-        .multipart(body_part)
-        .map_err(|e| e.to_string())?;
+    // Wrap in mixed multipart if there are attachments.
+    let email = if message.attachments.is_empty() {
+        builder
+            .multipart(body_part)
+            .map_err(|e| e.to_string())?
+    } else {
+        let mut mixed = MultiPart::mixed().multipart(body_part);
+        for att in &message.attachments {
+            let ct: ContentType = att
+                .content_type
+                .parse()
+                .unwrap_or(ContentType::TEXT_PLAIN);
+            let attachment = Attachment::new(att.filename.clone()).body(att.data.clone(), ct);
+            mixed = mixed.singlepart(attachment);
+        }
+        builder
+            .multipart(mixed)
+            .map_err(|e| e.to_string())?
+    };
 
     Ok(email.formatted())
 }
