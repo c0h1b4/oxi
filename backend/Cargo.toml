@@ -25,6 +25,7 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 refinery = { version = "0.9", features = ["rusqlite"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 async-trait = "0.1.89"
+ammonia = "4.1.2"
 
 [dev-dependencies]
 http-body-util = "0.1"
