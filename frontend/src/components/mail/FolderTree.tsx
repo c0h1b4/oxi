@@ -50,6 +50,7 @@ function FolderItem({ folder }: { folder: FolderType }) {
   return (
     <button
       onClick={() => setActiveFolder(folder.name)}
+      aria-current={isActive ? "page" : undefined}
       className={cn(
         "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
         isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
