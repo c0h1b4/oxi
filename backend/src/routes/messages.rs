@@ -89,6 +89,26 @@ struct MessageDetailResponse {
     body_html: Option<String>,
     body_text: Option<String>,
     attachments: Vec<AttachmentMeta>,
+    thread: Vec<ThreadMessage>,
+}
+
+/// A message summary within a thread.
+#[derive(Serialize)]
+struct ThreadMessage {
+    uid: u32,
+    folder: String,
+    message_id: Option<String>,
+    in_reply_to: Option<String>,
+    subject: String,
+    from_address: String,
+    from_name: String,
+    to_addresses: String,
+    cc_addresses: String,
+    date: String,
+    flags: String,
+    size: u32,
+    has_attachments: bool,
+    snippet: String,
 }
 
 /// Attachment metadata (without the binary data).
@@ -307,6 +327,32 @@ pub async fn get_message(
         .find(|m| m.uid == uid)
         .ok_or_else(|| AppError::NotFound(format!("Message UID {uid} not found in cache")))?;
 
+    // Look up thread messages if this message has a message_id.
+    let thread = if let Some(ref message_id) = msg.message_id {
+        db::messages::get_thread_messages(&conn, message_id)
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
+            .into_iter()
+            .map(|m| ThreadMessage {
+                uid: m.uid,
+                folder: m.folder,
+                message_id: m.message_id,
+                in_reply_to: m.in_reply_to,
+                subject: m.subject,
+                from_address: m.from_address,
+                from_name: m.from_name,
+                to_addresses: m.to_addresses,
+                cc_addresses: m.cc_addresses,
+                date: m.date,
+                flags: m.flags,
+                size: m.size,
+                has_attachments: m.has_attachments,
+                snippet: m.snippet,
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
     Ok(Json(MessageDetailResponse {
         uid: msg.uid,
         folder: msg.folder,
@@ -321,6 +367,7 @@ pub async fn get_message(
         body_html,
         body_text,
         attachments,
+        thread,
     })
     .into_response())
 }

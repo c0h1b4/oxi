@@ -4,6 +4,7 @@ import { Paperclip } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import { useMessage } from "@/hooks/useMessages";
 import { EmailRenderer } from "./EmailRenderer";
+import { ThreadView } from "./ThreadView";
 import { Button } from "@/components/ui/button";
 import type { EmailAddress } from "@/types/message";
 
@@ -157,6 +158,11 @@ export function ReadingPane() {
             </a>
           ))}
         </div>
+      )}
+
+      {/* Thread view — only shown when there are multiple messages in the thread */}
+      {data.thread && data.thread.length > 1 && (
+        <ThreadView thread={data.thread} currentUid={data.uid} />
       )}
 
       {/* Body area */}
