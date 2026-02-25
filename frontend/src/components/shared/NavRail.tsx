@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useComposeStore } from "@/stores/useComposeStore";
 
 function NavButton({
   icon,
@@ -103,8 +104,7 @@ export function NavRail() {
         <NavButton
           icon={<PenSquare className="size-5" />}
           label="Compose"
-          disabled
-          onClick={() => showComingSoon("Compose")}
+          onClick={() => useComposeStore.getState().openCompose()}
         />
         <NavButton
           icon={<Mail className="size-5" />}
