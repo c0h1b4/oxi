@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMessages } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
@@ -32,10 +32,19 @@ export function MessageList() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
 
-  const { data, isLoading, isError, refetch } = useMessages(activeFolder);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useMessages(activeFolder);
 
-  const messages = data?.messages ?? [];
-  const totalCount = data?.total_count ?? 0;
+  // Flatten all pages into a single array of messages.
+  const messages = data?.pages.flatMap((page) => page.messages) ?? [];
+  const totalCount = data?.pages[0]?.total_count ?? 0;
 
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
@@ -46,6 +55,18 @@ export function MessageList() {
     estimateSize: () => rowHeight,
     overscan: 10,
   });
+
+  // Fetch next page when scrolling near the bottom.
+  const virtualItems = virtualizer.getVirtualItems();
+  const lastItem = virtualItems[virtualItems.length - 1];
+  const lastItemIndex = lastItem?.index;
+
+  useEffect(() => {
+    if (lastItemIndex == null) return;
+    if (lastItemIndex >= messages.length - 10 && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [lastItemIndex, messages.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleClick = useCallback(
     (uid: number) => {
@@ -98,7 +119,7 @@ export function MessageList() {
               position: "relative",
             }}
           >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
+            {virtualItems.map((virtualRow) => {
               const message = messages[virtualRow.index];
               return (
                 <div
@@ -122,6 +143,11 @@ export function MessageList() {
               );
             })}
           </div>
+          {isFetchingNextPage && (
+            <div className="flex items-center justify-center py-2">
+              <span className="text-xs text-muted-foreground">Loading more...</span>
+            </div>
+          )}
         </div>
       )}
     </div>

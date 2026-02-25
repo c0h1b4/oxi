@@ -73,6 +73,27 @@ struct MessageSummary {
     snippet: String,
 }
 
+/// An email address entry for the detail response.
+#[derive(Serialize, Deserialize, Clone)]
+struct AddressEntry {
+    name: Option<String>,
+    address: String,
+}
+
+/// Parse a JSON-encoded address list string (e.g. from the SQLite cache) into
+/// a `Vec<AddressEntry>`. Returns an empty vec on parse failure.
+fn parse_address_list(json_str: &str) -> Vec<AddressEntry> {
+    serde_json::from_str(json_str).unwrap_or_default()
+}
+
+/// Split a comma-separated flags string into a `Vec<String>`.
+fn parse_flags(flags_csv: &str) -> Vec<String> {
+    if flags_csv.is_empty() {
+        return vec![];
+    }
+    flags_csv.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
 /// Response for `GET /api/messages/:folder/:uid`.
 #[derive(Serialize)]
 struct MessageDetailResponse {
@@ -81,13 +102,14 @@ struct MessageDetailResponse {
     subject: String,
     from_address: String,
     from_name: String,
-    to_addresses: String,
-    cc_addresses: String,
+    to_addresses: Vec<AddressEntry>,
+    cc_addresses: Vec<AddressEntry>,
     date: String,
-    flags: String,
+    flags: Vec<String>,
     has_attachments: bool,
-    body_html: Option<String>,
-    body_text: Option<String>,
+    html: Option<String>,
+    text: Option<String>,
+    raw_headers: String,
     attachments: Vec<AttachmentMeta>,
     thread: Vec<ThreadMessage>,
 }
@@ -118,6 +140,7 @@ struct AttachmentMeta {
     filename: Option<String>,
     content_type: String,
     size: usize,
+    content_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -161,9 +184,15 @@ fn sanitize_html(html: &str) -> String {
 // Handlers
 // ---------------------------------------------------------------------------
 
+/// How many seconds a folder's message cache is considered fresh.
+const FOLDER_MESSAGES_TTL_SECS: u32 = 30;
+
 /// `GET /api/folders/:folder/messages?page=0&per_page=50`
 ///
-/// Syncs message headers from IMAP then returns paginated results from cache.
+/// Returns paginated messages using a cache-first strategy:
+/// 1. If the folder was synced within `FOLDER_MESSAGES_TTL_SECS`, serve from cache.
+/// 2. Otherwise do a lightweight IMAP SELECT to check for new messages and sync
+///    only what's new.
 pub async fn list_messages(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
@@ -171,58 +200,130 @@ pub async fn list_messages(
     Path(folder): Path<String>,
     Query(query): Query<ListMessagesQuery>,
 ) -> Result<Response, AppError> {
-    let creds = build_creds(&session, &config)?;
-
-    // Fetch all headers from IMAP.
-    let headers = imap_client
-        .fetch_headers(&creds, &folder, "1:*")
-        .await
-        .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
-
     // Open the per-user database.
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    // Ensure the folder exists in the folders table (for FK constraint).
-    db::folders::upsert_folder(&conn, &folder, None, None, "", true, 0, 0, 0, 0)
+    // If this folder was synced recently, skip the IMAP round-trip.
+    let folder_fresh = db::folders::is_folder_fresh(&conn, &folder, FOLDER_MESSAGES_TTL_SECS)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    // Upsert each header into cache.
-    for header in &headers {
-        let from_address = header
-            .from
-            .first()
-            .map(|a| a.address.as_str())
-            .unwrap_or("");
-        let from_name = header
-            .from
-            .first()
-            .and_then(|a| a.name.as_deref())
-            .unwrap_or("");
-        let to_json = serde_json::to_string(&header.to).unwrap_or_else(|_| "[]".to_string());
-        let subject = header.subject.as_deref().unwrap_or("");
-        let date = header.date.as_deref().unwrap_or("");
-        let flags_csv = header.flags.join(",");
+    if !folder_fresh {
+        let creds = build_creds(&session, &config)?;
 
-        db::messages::upsert_message(
-            &conn,
-            &folder,
-            header.uid,
-            None,  // message_id — not available from header
-            None,  // in_reply_to — not available from header
-            None,  // references_header — not available from header
-            subject,
-            from_address,
-            from_name,
-            &to_json,
-            "[]", // cc_json — not available from header
-            date,
-            &flags_csv,
-            0,     // size — not available from header
-            false, // has_attachments — not available from header
-            "",    // snippet — not available from header
-        )
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        // Check what we have in cache.
+        let cached_folder = db::folders::get_folder(&conn, &folder)
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        let cached_uid_validity = cached_folder.as_ref().map(|f| f.uid_validity).unwrap_or(0);
+
+        // Ensure the folder exists in the folders table (for FK constraint).
+        if cached_folder.is_none() {
+            db::folders::upsert_folder(&conn, &folder, None, None, "", true, 0, 0, 0, 0)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        }
+
+        let cached_count = db::messages::count_messages(&conn, &folder)
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+        // Do a lightweight IMAP SELECT to get folder status.
+        let status = imap_client
+            .folder_status(&creds, &folder)
+            .await
+            .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
+
+        tracing::info!(
+            folder = %folder,
+            cached_uid_validity = cached_uid_validity,
+            imap_uid_validity = status.uid_validity,
+            cached_count = cached_count,
+            imap_exists = status.exists,
+            "list_messages: folder status check"
+        );
+
+        let needs_full_sync = cached_uid_validity != 0
+            && cached_uid_validity != status.uid_validity;
+
+        if needs_full_sync {
+            tracing::info!(folder = %folder, "UIDVALIDITY changed, clearing cache");
+            db::messages::delete_folder_messages(&conn, &folder)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        }
+
+        let needs_sync = needs_full_sync || cached_count == 0 || status.exists != cached_count;
+
+        if needs_sync {
+            // Determine which UIDs to fetch.
+            let uid_range = if needs_full_sync || cached_count == 0 {
+                "1:*".to_string()
+            } else {
+                let max_cached_uid = db::messages::max_uid(&conn, &folder)
+                    .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+                if max_cached_uid > 0 {
+                    format!("{}:*", max_cached_uid + 1)
+                } else {
+                    "1:*".to_string()
+                }
+            };
+
+            tracing::info!(folder = %folder, uid_range = %uid_range, "Syncing messages from IMAP");
+
+            let headers = imap_client
+                .fetch_headers(&creds, &folder, &uid_range)
+                .await
+                .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
+
+            tracing::info!(folder = %folder, fetched = headers.len(), "Fetched headers from IMAP");
+
+            for header in &headers {
+                let from_address = header
+                    .from
+                    .first()
+                    .map(|a| a.address.as_str())
+                    .unwrap_or("");
+                let from_name = header
+                    .from
+                    .first()
+                    .and_then(|a| a.name.as_deref())
+                    .unwrap_or("");
+                let to_json =
+                    serde_json::to_string(&header.to).unwrap_or_else(|_| "[]".to_string());
+                let subject = header.subject.as_deref().unwrap_or("");
+                let date = header.date.as_deref().unwrap_or("");
+                let flags_csv = header.flags.join(",");
+
+                db::messages::upsert_message(
+                    &conn,
+                    &folder,
+                    header.uid,
+                    None,
+                    None,
+                    None,
+                    subject,
+                    from_address,
+                    from_name,
+                    &to_json,
+                    "[]",
+                    date,
+                    &flags_csv,
+                    0,
+                    header.has_attachments,
+                    "",
+                )
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+            }
+
+            // Update folder metadata with UIDVALIDITY and message count.
+            db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+            // Refresh unread count from cached messages.
+            db::folders::refresh_unread_count(&conn, &folder)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        } else {
+            // No sync needed but still update the timestamp so TTL resets.
+            db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        }
     }
 
     // Query paginated results from cache.
@@ -230,6 +331,15 @@ pub async fn list_messages(
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     let total_count = db::messages::count_messages(&conn, &folder)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    tracing::info!(
+        folder = %folder,
+        total_count = total_count,
+        page_messages = messages.len(),
+        page = query.page,
+        per_page = query.per_page,
+        "list_messages: returning results"
+    );
 
     let summaries: Vec<MessageSummary> = messages
         .into_iter()
@@ -276,8 +386,8 @@ pub async fn get_message(
     let cached_body = db::messages::get_cached_body(&conn, &folder, uid)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let (body_html, body_text, attachments) = if let Some((html, text)) = cached_body {
-        (html, text, vec![])
+    let (body_html, body_text, attachments, raw_headers) = if let Some((html, text)) = cached_body {
+        (html, text, vec![], String::new())
     } else {
         // Fetch from IMAP.
         let body = imap_client
@@ -312,10 +422,29 @@ pub async fn get_message(
                 filename: a.filename.clone(),
                 content_type: a.content_type.clone(),
                 size: a.size,
+                content_id: a.content_id.clone(),
             })
             .collect();
 
-        (sanitized_html, body.text_plain, attachment_meta)
+        // Rewrite cid: URLs in the HTML to inline data URIs so the
+        // sandboxed iframe can display embedded images without needing
+        // network access.
+        let resolved_html = sanitized_html.map(|mut html| {
+            for att in &body.attachments {
+                if let Some(ref cid) = att.content_id {
+                    let cid_url = format!("cid:{cid}");
+                    if html.contains(&cid_url) {
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
+                        let data_uri = format!("data:{};base64,{}", att.content_type, b64);
+                        html = html.replace(&cid_url, &data_uri);
+                    }
+                }
+            }
+            html
+        });
+
+        (resolved_html, body.text_plain, attachment_meta, body.raw_headers)
     };
 
     // Get the message header from cache.
@@ -359,13 +488,14 @@ pub async fn get_message(
         subject: msg.subject,
         from_address: msg.from_address,
         from_name: msg.from_name,
-        to_addresses: msg.to_addresses,
-        cc_addresses: msg.cc_addresses,
+        to_addresses: parse_address_list(&msg.to_addresses),
+        cc_addresses: parse_address_list(&msg.cc_addresses),
         date: msg.date,
-        flags: msg.flags,
+        flags: parse_flags(&msg.flags),
         has_attachments: msg.has_attachments,
-        body_html,
-        body_text,
+        html: body_html,
+        text: body_text,
+        raw_headers,
         attachments,
         thread,
     })
@@ -388,27 +518,51 @@ pub async fn update_flags(
     let flag_refs: Vec<&str> = body.flags.iter().map(|s| s.as_str()).collect();
 
     if body.add {
-        // Set flags on the IMAP server.
         imap_client
-            .set_flags(&creds, &folder, uid, &flag_refs)
+            .add_flags(&creds, &folder, uid, &flag_refs)
             .await
             .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
     } else {
-        // For removing flags, we still call set_flags with the flags to remove.
-        // The IMAP trait's set_flags replaces flags, so for "remove" we need to
-        // pass the remaining flags. For simplicity, we call set_flags with
-        // an empty set when removing all specified flags.
         imap_client
-            .set_flags(&creds, &folder, uid, &flag_refs)
+            .remove_flags(&creds, &folder, uid, &flag_refs)
             .await
             .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
     }
 
-    // Update SQLite cache.
-    let flags_csv = body.flags.join(",");
+    // Update SQLite cache: read current flags, add/remove, write back.
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-    db::messages::update_message_flags(&conn, &folder, uid, &flags_csv)
+
+    let current_flags_csv: String = conn
+        .query_row(
+            "SELECT flags FROM messages WHERE folder = ?1 AND uid = ?2",
+            rusqlite::params![&folder, uid],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+
+    let mut current_flags: Vec<String> = if current_flags_csv.is_empty() {
+        vec![]
+    } else {
+        current_flags_csv.split(',').map(|s| s.to_string()).collect()
+    };
+
+    if body.add {
+        for flag in &body.flags {
+            if !current_flags.contains(flag) {
+                current_flags.push(flag.clone());
+            }
+        }
+    } else {
+        current_flags.retain(|f| !body.flags.contains(f));
+    }
+
+    let new_flags_csv = current_flags.join(",");
+    db::messages::update_message_flags(&conn, &folder, uid, &new_flags_csv)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Refresh unread count after flag change.
+    db::folders::refresh_unread_count(&conn, &folder)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -436,6 +590,10 @@ pub async fn move_message_handler(
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     db::messages::delete_message(&conn, &body.from_folder, body.uid)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Refresh unread count for source folder.
+    db::folders::refresh_unread_count(&conn, &body.from_folder)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -515,6 +673,10 @@ pub async fn delete_message_handler(
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     db::messages::delete_message(&conn, &folder, uid)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Refresh unread count for folder.
+    db::folders::refresh_unread_count(&conn, &folder)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())

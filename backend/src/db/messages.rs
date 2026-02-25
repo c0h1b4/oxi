@@ -1,6 +1,8 @@
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
+// mail_parser is used for RFC2822 date parsing in parse_date_to_epoch.
+
 /// A cached email message header, mirroring the query-visible columns of the
 /// `messages` table.
 #[derive(Debug, Clone, Serialize)]
@@ -77,12 +79,13 @@ pub fn upsert_message(
     has_attachments: bool,
     snippet: &str,
 ) -> Result<(), String> {
+    let date_epoch = parse_date_to_epoch(date);
     conn.execute(
         "INSERT OR REPLACE INTO messages
             (uid, folder, message_id, in_reply_to, references_header,
              subject, from_address, from_name, to_addresses, cc_addresses,
-             date, flags, size, has_attachments, snippet)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             date, flags, size, has_attachments, snippet, date_epoch)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             uid,
             folder,
@@ -99,10 +102,115 @@ pub fn upsert_message(
             size,
             has_attachments as i32,
             snippet,
+            date_epoch,
         ],
     )
     .map_err(|e| format!("Failed to upsert message: {e}"))?;
     Ok(())
+}
+
+/// Delete all messages in a folder (used when UIDVALIDITY changes).
+pub fn delete_folder_messages(conn: &Connection, folder: &str) -> Result<usize, String> {
+    let deleted = conn
+        .execute("DELETE FROM messages WHERE folder = ?1", params![folder])
+        .map_err(|e| format!("Failed to delete folder messages: {e}"))?;
+    Ok(deleted)
+}
+
+/// Return the highest cached UID for a folder, or 0 if no messages are cached.
+pub fn max_uid(conn: &Connection, folder: &str) -> Result<u32, String> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(uid), 0) FROM messages WHERE folder = ?1",
+        params![folder],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("Failed to get max uid: {e}"))
+}
+
+/// Parse a date string to a Unix epoch timestamp (seconds).
+/// Tries RFC2822 first (IMAP dates), then ISO 8601.
+/// Returns 0 on parse failure.
+fn parse_date_to_epoch(date: &str) -> i64 {
+    if date.is_empty() {
+        return 0;
+    }
+    // Try ISO 8601 format first (used in test fixtures and some IMAP servers).
+    if let Ok(epoch) = parse_iso8601_to_epoch(date) {
+        return epoch;
+    }
+    // Try mail-parser's RFC2822 date parsing (standard IMAP date format).
+    if let Some(dt) = mail_parser::DateTime::parse_rfc822(date) {
+        let epoch = datetime_to_epoch(&dt);
+        // Sanity check: mail_parser can misparse non-RFC2822 dates.
+        if dt.year >= 1970 && dt.month >= 1 && dt.month <= 12 && epoch > 0 {
+            return epoch;
+        }
+    }
+    0
+}
+
+/// Convert a mail_parser::DateTime to a Unix epoch timestamp.
+fn datetime_to_epoch(dt: &mail_parser::DateTime) -> i64 {
+    // Days from year 1970 to the start of the given year
+    let year = dt.year as i64;
+    let mut days: i64 = 0;
+    for y in 1970..year {
+        days += if is_leap_year(y) { 366 } else { 365 };
+    }
+    for y in (year..1970).rev() {
+        days -= if is_leap_year(y) { 366 } else { 365 };
+    }
+    // Days from start of year to start of month
+    let month_days: [i64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month = (dt.month as usize).saturating_sub(1).min(11);
+    for (m, &d) in month_days.iter().enumerate().take(month) {
+        days += d;
+        if m == 1 && is_leap_year(year) {
+            days += 1;
+        }
+    }
+    days += (dt.day as i64) - 1;
+
+    let secs = days * 86400 + (dt.hour as i64) * 3600 + (dt.minute as i64) * 60 + (dt.second as i64);
+    // tz_before_gmt=true means the offset is negative (behind UTC)
+    let tz_offset_secs = (dt.tz_hour as i64) * 3600 + (dt.tz_minute as i64) * 60;
+    if dt.tz_before_gmt {
+        secs + tz_offset_secs
+    } else {
+        secs - tz_offset_secs
+    }
+}
+
+fn is_leap_year(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+/// Parse ISO 8601 dates like "2024-01-01T10:00:00Z"
+fn parse_iso8601_to_epoch(s: &str) -> Result<i64, ()> {
+    // Simple parser for YYYY-MM-DDTHH:MM:SSZ
+    let s = s.trim();
+    if s.len() < 19 {
+        return Err(());
+    }
+    let year: i64 = s[0..4].parse().map_err(|_| ())?;
+    let month: u32 = s[5..7].parse().map_err(|_| ())?;
+    let day: u32 = s[8..10].parse().map_err(|_| ())?;
+    let hour: u32 = s[11..13].parse().map_err(|_| ())?;
+    let minute: u32 = s[14..16].parse().map_err(|_| ())?;
+    let second: u32 = s[17..19].parse().map_err(|_| ())?;
+
+    let dt = mail_parser::DateTime {
+        year: year as u16,
+        month: month as u8,
+        day: day as u8,
+        hour: hour as u8,
+        minute: minute as u8,
+        second: second as u8,
+        tz_before_gmt: false,
+        tz_hour: 0,
+        tz_minute: 0,
+    };
+    Ok(datetime_to_epoch(&dt))
 }
 
 /// Return a page of messages for a folder, ordered by date descending.
@@ -118,7 +226,7 @@ pub fn get_messages(
         "SELECT {MSG_SELECT_COLS}
          FROM messages
          WHERE folder = ?1
-         ORDER BY date DESC
+         ORDER BY date_epoch DESC
          LIMIT ?2 OFFSET ?3"
     );
 
@@ -240,7 +348,7 @@ pub fn get_thread_messages(
          WHERE message_id = ?1
             OR in_reply_to = ?1
             OR references_header LIKE ?2
-         ORDER BY date ASC"
+         ORDER BY date_epoch ASC"
     );
 
     let mut stmt = conn
@@ -292,6 +400,24 @@ mod tests {
             "snippet",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_parse_date_to_epoch() {
+        let e1 = parse_date_to_epoch("2024-01-01T10:00:00Z");
+        let e2 = parse_date_to_epoch("2024-01-02T10:00:00Z");
+        let e3 = parse_date_to_epoch("2024-01-03T10:00:00Z");
+        assert!(e1 > 0, "epoch for date 1 should be > 0, got {e1}");
+        assert!(e2 > e1, "date 2 ({e2}) should be after date 1 ({e1})");
+        assert!(e3 > e2, "date 3 ({e3}) should be after date 2 ({e2})");
+
+        // RFC2822 format.
+        let e4 = parse_date_to_epoch("Mon, 1 Jan 2024 10:00:00 +0000");
+        assert!(e4 > 0, "epoch for rfc2822 date should be > 0, got {e4}");
+        assert_eq!(e1, e4, "ISO and RFC2822 should produce same epoch");
+
+        // Empty returns 0.
+        assert_eq!(parse_date_to_epoch(""), 0);
     }
 
     #[test]

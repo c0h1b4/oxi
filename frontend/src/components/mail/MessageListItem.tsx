@@ -38,24 +38,32 @@ function formatDate(dateStr: string): string {
     (now.getTime() - date.getTime()) / msPerDay,
   );
 
+  const time = date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   if (daysDiff < 7 && daysDiff >= 0) {
-    return date.toLocaleDateString(undefined, { weekday: "short" });
+    const day = date.toLocaleDateString(undefined, { weekday: "short" });
+    return `${day} ${time}`;
   }
 
   // Same year
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString(undefined, {
+    const day = date.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
     });
+    return `${day} ${time}`;
   }
 
   // Older
-  return date.toLocaleDateString(undefined, {
+  const day = date.toLocaleDateString(undefined, {
     month: "2-digit",
     day: "2-digit",
     year: "2-digit",
   });
+  return `${day} ${time}`;
 }
 
 export const MessageListItem = memo(function MessageListItem({
@@ -120,7 +128,7 @@ export const MessageListItem = memo(function MessageListItem({
           <span
             className={cn(
               "size-1.5 rounded-full",
-              isUnread ? "bg-primary" : "bg-transparent",
+              isUnread ? "bg-primary" : "bg-border",
             )}
           />
         </button>
@@ -193,7 +201,7 @@ export const MessageListItem = memo(function MessageListItem({
           <span
             className={cn(
               "size-1.5 rounded-full",
-              isUnread ? "bg-primary" : "bg-transparent",
+              isUnread ? "bg-primary" : "bg-border",
             )}
           />
         </button>

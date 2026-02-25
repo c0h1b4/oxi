@@ -217,13 +217,9 @@ mod tests {
     }
 
     /// Helper: provision a user database so that route handlers can open it.
+    /// Migrations are applied automatically by `open_user_db`.
     fn provision_user_db(data_dir: &str, user_hash: &str) {
-        let conn = crate::db::pool::open_user_db(data_dir, user_hash).unwrap();
-        // Run migrations.
-        let v001 = include_str!("../../migrations/V001__initial_schema.sql");
-        let v002 = include_str!("../../migrations/V002__folders_and_messages.sql");
-        conn.execute_batch(v001).unwrap();
-        conn.execute_batch(v002).unwrap();
+        let _conn = crate::db::pool::open_user_db(data_dir, user_hash).unwrap();
     }
 
     // -----------------------------------------------------------------------
@@ -839,6 +835,7 @@ mod tests {
                 }],
                 date: Some("2024-01-01T10:00:00Z".to_string()),
                 flags: vec!["\\Seen".to_string()],
+                has_attachments: false,
             },
             ImapMessageHeader {
                 uid: 2,
@@ -853,6 +850,7 @@ mod tests {
                 }],
                 date: Some("2024-01-02T10:00:00Z".to_string()),
                 flags: vec![],
+                has_attachments: false,
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
@@ -915,6 +913,7 @@ mod tests {
                 }],
                 date: Some("2024-01-01T10:00:00Z".to_string()),
                 flags: vec!["\\Seen".to_string()],
+                has_attachments: false,
             }])
             .with_bodies(vec![ImapMessageBody {
                 uid: 42,
@@ -923,6 +922,7 @@ mod tests {
                     "<p>Hello</p><script>alert('xss')</script><b>bold</b>".to_string(),
                 ),
                 attachments: vec![],
+                raw_headers: String::new(),
             }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config.clone(), store.clone(), imap_client.clone());
@@ -964,13 +964,19 @@ mod tests {
         assert_eq!(json["subject"], "Test Subject");
 
         // Script tag should be stripped by ammonia.
-        let html = json["body_html"].as_str().unwrap();
+        let html = json["html"].as_str().unwrap();
         assert!(!html.contains("script"));
         assert!(html.contains("<b>bold</b>"));
         assert!(html.contains("<p>Hello</p>"));
 
         // Plain text should be preserved.
-        assert_eq!(json["body_text"], "Hello plain text");
+        assert_eq!(json["text"], "Hello plain text");
+
+        // Flags should be an array.
+        assert!(json["flags"].is_array());
+
+        // to_addresses should be an array.
+        assert!(json["to_addresses"].is_array());
     }
 
     #[tokio::test]
@@ -1166,7 +1172,9 @@ mod tests {
                 content_type: "application/pdf".to_string(),
                 size: 4,
                 data: attachment_data.clone(),
+                content_id: None,
             }],
+            raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client);
@@ -1235,7 +1243,9 @@ mod tests {
                 content_type: "application/pdf".to_string(),
                 size: 4,
                 data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                content_id: None,
             }],
+            raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client);
@@ -1281,7 +1291,9 @@ mod tests {
                 content_type: "application/pdf".to_string(),
                 size: 4,
                 data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                content_id: None,
             }],
+            raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client);

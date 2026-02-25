@@ -8,5 +8,6 @@ export function useFolders() {
   return useQuery({
     queryKey: ["folders"],
     queryFn: () => apiGet<FoldersResponse>("/folders"),
+    refetchInterval: 30_000, // Poll every 30 seconds for folder count updates
   });
 }
