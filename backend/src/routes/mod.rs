@@ -2,6 +2,7 @@ pub mod auth;
 pub mod folders;
 pub mod health;
 pub mod messages;
+pub mod send;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -117,6 +118,7 @@ pub fn create_router(
             get(messages::download_attachment),
         )
         .route("/messages/move", post(messages::move_message_handler))
+        .route("/messages/send", post(send::send_message_handler))
         .route(
             "/messages/{folder}/{uid}",
             delete(messages::delete_message_handler),
@@ -163,6 +165,7 @@ mod tests {
     use crate::imap::client::{
         EmailAddress, ImapAttachment, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
     };
+    use crate::smtp::client::SmtpError;
     use crate::smtp::client::mock::MockSmtpClient;
 
     /// Helper: create a test AppConfig with the given static dir.
@@ -190,6 +193,23 @@ mod tests {
             imap_host: Some("imap.example.com".to_string()),
             imap_port: 993,
             smtp_host: None,
+            smtp_port: 587,
+            tls_enabled: true,
+            data_dir: data_dir.to_string(),
+            session_timeout_hours: 24,
+            static_dir: static_dir.to_string(),
+            environment: "development".to_string(),
+        })
+    }
+
+    /// Helper: create a test AppConfig with IMAP + SMTP hosts configured.
+    fn test_config_with_smtp(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
+        Arc::new(AppConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+            imap_host: Some("imap.example.com".to_string()),
+            imap_port: 993,
+            smtp_host: Some("smtp.example.com".to_string()),
             smtp_port: 587,
             tls_enabled: true,
             data_dir: data_dir.to_string(),
@@ -1320,5 +1340,226 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // -----------------------------------------------------------------------
+    // Send message endpoint tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn send_returns_200_on_success() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_smtp(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
+        let mock_imap: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
+        let app = create_router(config, store, mock_imap, mock_smtp);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/messages/send")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "sent");
+        assert!(json["message_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn send_returns_400_without_recipients() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_smtp(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/messages/send")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"to":[],"subject":"Hello","text_body":"Hi"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "BAD_REQUEST");
+    }
+
+    #[tokio::test]
+    async fn send_returns_400_with_empty_body_and_subject() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_smtp(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/messages/send")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"to":["bob@example.com"],"subject":"","text_body":""}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn send_returns_503_when_smtp_not_configured() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        // Use config WITHOUT smtp_host
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/messages/send")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn send_returns_503_when_smtp_fails() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_smtp(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let token = store.insert(
+            "alice@example.com".to_string(),
+            "pass".to_string(),
+            "testhash".to_string(),
+        );
+
+        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+
+        let failing_smtp: Arc<dyn SmtpClient> = Arc::new(
+            MockSmtpClient::new()
+                .with_error(SmtpError::SendFailed("relay denied".to_string())),
+        );
+        let app = create_router(config, store, test_imap_client(), failing_smtp);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/messages/send")
+                    .header("cookie", format!("oxi_session={token}"))
+                    .header("x-requested-with", "XMLHttpRequest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("relay denied"));
     }
 }
