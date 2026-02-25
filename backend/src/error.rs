@@ -19,6 +19,7 @@ struct ErrorBody {
 /// Application-level error type that converts into an Axum response
 /// with a structured JSON error envelope.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum AppError {
     /// Internal server error (500).
     InternalError(String),

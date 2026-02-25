@@ -1,6 +1,7 @@
 mod config;
-#[allow(dead_code)]
 mod error;
+mod db;
+mod imap;
 mod auth;
 mod routes;
 
@@ -11,6 +12,7 @@ use config::AppConfig;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::auth::session::SessionStore;
+use crate::imap::client::RealImapClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,8 +44,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Create the IMAP client for production use.
+    let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient);
+
     // Build the application router with auth, session, and static file serving.
-    let app = routes::create_router(config.clone(), store);
+    let app = routes::create_router(config.clone(), store, imap_client);
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);
