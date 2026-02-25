@@ -57,6 +57,27 @@ export async function apiPatch<T>(
   return res.json();
 }
 
+export async function apiPostFormData<T>(
+  path: string,
+  formData: FormData,
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    credentials: "same-origin",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error?.message ?? "An unexpected error occurred");
+  }
+
+  return res.json();
+}
+
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "DELETE",
