@@ -16,6 +16,18 @@ export interface ForwardParams {
   body: string;
 }
 
+export interface DraftResumeParams {
+  id: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+  inReplyTo: string | null;
+  references: string | null;
+  attachments: ComposeAttachment[];
+}
+
 export interface ComposeAttachment {
   id: string;
   filename: string;
@@ -40,6 +52,7 @@ interface ComposeState {
   openCompose: () => void;
   openReply: (params: ReplyParams) => void;
   openForward: (params: ForwardParams) => void;
+  openDraft: (params: DraftResumeParams) => void;
   closeCompose: () => void;
   setField: (field: "to" | "cc" | "bcc" | "subject" | "body", value: string) => void;
   setShowCc: (show: boolean) => void;
@@ -89,6 +102,23 @@ export const useComposeStore = create<ComposeState>((set) => ({
       isOpen: true,
       subject: params.subject,
       body: params.body,
+    }),
+
+  openDraft: (params) =>
+    set({
+      ...initialState,
+      isOpen: true,
+      draftId: params.id,
+      to: params.to,
+      cc: params.cc,
+      bcc: params.bcc,
+      subject: params.subject,
+      body: params.body,
+      inReplyTo: params.inReplyTo,
+      references: params.references,
+      showCc: params.cc.length > 0,
+      showBcc: params.bcc.length > 0,
+      attachments: params.attachments,
     }),
 
   closeCompose: () => set({ isOpen: false }),
