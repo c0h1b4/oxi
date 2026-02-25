@@ -13,6 +13,9 @@ import {
   Type,
   FileCode,
   ShieldAlert,
+  Reply,
+  ReplyAll,
+  Forward,
 } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import {
@@ -25,6 +28,16 @@ import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { MoveToFolderMenu } from "./MoveToFolderMenu";
 import { Button } from "@/components/ui/button";
+import { useComposeStore } from "@/stores/useComposeStore";
+import { useAuthStore } from "@/stores/useAuthStore";
+import {
+  extractHeader,
+  buildReplySubject,
+  buildForwardSubject,
+  buildReplyBody,
+  buildForwardBody,
+  buildReferences,
+} from "@/lib/email-utils";
 import type { EmailAddress } from "@/types/message";
 
 type HeaderMode = "summary" | "details";
@@ -339,6 +352,91 @@ export function ReadingPane() {
             );
           }}
         />
+
+        <div className="mx-1 h-5 w-px bg-border" />
+
+        {/* Reply */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            const messageId = extractHeader(data.raw_headers, "Message-ID");
+            const refs = extractHeader(data.raw_headers, "References");
+            useComposeStore.getState().openReply({
+              to: data.from_address,
+              cc: "",
+              subject: buildReplySubject(data.subject),
+              body: buildReplyBody(data.text, data.from_address, data.date),
+              inReplyTo: messageId,
+              references: buildReferences(refs, messageId),
+            });
+          }}
+        >
+          <Reply className="size-4" />
+          Reply
+        </Button>
+
+        {/* Reply All */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            const myEmail = useAuthStore.getState().email ?? "";
+            const messageId = extractHeader(data.raw_headers, "Message-ID");
+            const refs = extractHeader(data.raw_headers, "References");
+
+            // To: original sender
+            const replyTo = data.from_address;
+
+            // CC: all original To + CC, excluding ourselves and the sender
+            const allRecipients = [
+              ...data.to_addresses,
+              ...data.cc_addresses,
+            ].filter(
+              (a) =>
+                a.address.toLowerCase() !== myEmail.toLowerCase() &&
+                a.address.toLowerCase() !== data.from_address.toLowerCase(),
+            );
+            const ccList = allRecipients.map((a) => a.address).join(", ");
+
+            useComposeStore.getState().openReply({
+              to: replyTo,
+              cc: ccList,
+              subject: buildReplySubject(data.subject),
+              body: buildReplyBody(data.text, data.from_address, data.date),
+              inReplyTo: messageId,
+              references: buildReferences(refs, messageId),
+            });
+          }}
+        >
+          <ReplyAll className="size-4" />
+          Reply all
+        </Button>
+
+        {/* Forward */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            const toList = formatAddressList(data.to_addresses);
+            useComposeStore.getState().openForward({
+              subject: buildForwardSubject(data.subject),
+              body: buildForwardBody(
+                data.text,
+                data.from_address,
+                data.date,
+                data.subject,
+                toList,
+              ),
+            });
+          }}
+        >
+          <Forward className="size-4" />
+          Forward
+        </Button>
       </div>
 
       {/* Attachment bar */}

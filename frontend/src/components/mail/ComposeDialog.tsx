@@ -2,10 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
-import { Send, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, X, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useSendMessage } from "@/hooks/useCompose";
 import { cn } from "@/lib/utils";
+
+function countRecipients(...fields: string[]): number {
+  return fields.reduce(
+    (count, field) =>
+      count +
+      field
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0).length,
+    0,
+  );
+}
 
 export function ComposeDialog() {
   const {
@@ -203,6 +215,16 @@ export function ComposeDialog() {
                 />
               </div>
             </div>
+
+            {/* Recipient count warning */}
+            {countRecipients(to, cc, bcc) > 10 && (
+              <div className="flex items-center gap-2 border-b border-yellow-300/50 bg-yellow-50 px-4 py-2 dark:border-yellow-700/50 dark:bg-yellow-950/30">
+                <AlertTriangle className="size-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
+                <span className="text-xs text-yellow-700 dark:text-yellow-400">
+                  You are sending to more than 10 recipients.
+                </span>
+              </div>
+            )}
 
             {/* Body */}
             <div className="flex-1 overflow-auto px-4 py-3">
