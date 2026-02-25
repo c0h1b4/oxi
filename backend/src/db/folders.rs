@@ -16,6 +16,7 @@ pub struct CachedFolder {
 }
 
 /// Insert or replace a folder row in the `folders` table.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_folder(
     conn: &Connection,
     folder_name: &str,

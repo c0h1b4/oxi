@@ -183,6 +183,7 @@ pub fn cache_message_body(
 }
 
 /// Return the cached body if `body_cached = 1`, otherwise `None`.
+#[allow(clippy::type_complexity)]
 pub fn get_cached_body(
     conn: &Connection,
     folder: &str,
