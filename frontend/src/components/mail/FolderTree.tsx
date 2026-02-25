@@ -112,7 +112,7 @@ function LocalDrafts() {
         cc: d.cc,
         bcc: d.bcc,
         subject: d.subject,
-        body: d.text_body,
+        body: d.html_body ?? d.text_body,
         inReplyTo: d.in_reply_to,
         references: d.references,
         attachments: d.attachments.map((a) => ({
