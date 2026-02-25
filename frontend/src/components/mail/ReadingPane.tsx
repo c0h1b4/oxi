@@ -5,14 +5,18 @@ import {
   Star,
   Mail,
   MailOpen,
+  Trash2,
 } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import {
   useMessage,
   useUpdateFlags,
+  useMoveMessage,
+  useDeleteMessage,
 } from "@/hooks/useMessages";
 import { EmailRenderer } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
+import { MoveToFolderMenu } from "./MoveToFolderMenu";
 import { Button } from "@/components/ui/button";
 import type { EmailAddress } from "@/types/message";
 
@@ -68,6 +72,7 @@ function BodySkeleton() {
 export function ReadingPane() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
+  const selectMessage = useUiStore((s) => s.selectMessage);
 
   const { data, isLoading, isError, refetch } = useMessage(
     activeFolder,
@@ -75,6 +80,8 @@ export function ReadingPane() {
   );
 
   const updateFlags = useUpdateFlags();
+  const moveMessage = useMoveMessage();
+  const deleteMessage = useDeleteMessage();
 
   // No message selected
   if (selectedMessageUid === null) {
@@ -205,6 +212,50 @@ export function ReadingPane() {
             </>
           )}
         </Button>
+
+        <div className="mx-1 h-5 w-px bg-border" />
+
+        {/* Delete button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            if (activeFolder === "Trash") {
+              deleteMessage.mutate(
+                { folder: activeFolder, uid: data.uid },
+                { onSuccess: () => selectMessage(null) },
+              );
+            } else {
+              moveMessage.mutate(
+                {
+                  fromFolder: activeFolder,
+                  toFolder: "Trash",
+                  uid: data.uid,
+                },
+                { onSuccess: () => selectMessage(null) },
+              );
+            }
+          }}
+        >
+          <Trash2 className="size-4" />
+          {activeFolder === "Trash" ? "Delete forever" : "Delete"}
+        </Button>
+
+        {/* Move to folder */}
+        <MoveToFolderMenu
+          currentFolder={activeFolder}
+          onMove={(toFolder) => {
+            moveMessage.mutate(
+              {
+                fromFolder: activeFolder,
+                toFolder,
+                uid: data.uid,
+              },
+              { onSuccess: () => selectMessage(null) },
+            );
+          }}
+        />
       </div>
 
       {/* Attachment bar */}
