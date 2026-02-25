@@ -244,8 +244,11 @@ pub struct RealImapClient;
 async fn connect(
     creds: &ImapCredentials,
 ) -> Result<async_imap::Session<ImapStream>, ImapError> {
-    let tcp = tokio::net::TcpStream::connect((creds.host.as_str(), creds.port))
+    let connect_future = tokio::net::TcpStream::connect((creds.host.as_str(), creds.port));
+    // 10 second timeout for the initial TCP connection
+    let tcp = tokio::time::timeout(std::time::Duration::from_secs(10), connect_future)
         .await
+        .map_err(|_| ImapError::ConnectionFailed("connection timed out".to_string()))?
         .map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
 
     if creds.tls {
