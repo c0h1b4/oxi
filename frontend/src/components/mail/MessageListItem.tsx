@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { Star, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useUpdateFlags } from "@/hooks/useMessages";
 import type { MessageHeader } from "@/types/message";
 
 interface MessageListItemProps {
@@ -67,6 +68,27 @@ export const MessageListItem = memo(function MessageListItem({
   const isFlagged = message.flags.includes("\\Flagged");
   const sender = message.from_name || message.from_address;
   const formattedDate = formatDate(message.date);
+  const updateFlags = useUpdateFlags();
+
+  const toggleStar = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateFlags.mutate({
+      folder: message.folder,
+      uid: message.uid,
+      flags: ["\\Flagged"],
+      add: !isFlagged,
+    });
+  };
+
+  const toggleRead = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateFlags.mutate({
+      folder: message.folder,
+      uid: message.uid,
+      flags: ["\\Seen"],
+      add: isUnread, // if unread, add \Seen; if read, remove \Seen
+    });
+  };
 
   if (density === "compact") {
     return (
@@ -89,19 +111,33 @@ export const MessageListItem = memo(function MessageListItem({
         )}
       >
         {/* Unread indicator dot */}
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            isUnread ? "bg-primary" : "bg-transparent",
-          )}
-        />
+        <button
+          type="button"
+          aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+          onClick={toggleRead}
+          className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
+        >
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              isUnread ? "bg-primary" : "bg-transparent",
+            )}
+          />
+        </button>
 
         {/* Star */}
-        {isFlagged ? (
-          <Star className="size-3.5 shrink-0 fill-primary text-primary" />
-        ) : (
-          <span className="size-3.5 shrink-0" />
-        )}
+        <button
+          type="button"
+          aria-label={isFlagged ? "Unstar" : "Star"}
+          onClick={toggleStar}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
+        >
+          {isFlagged ? (
+            <Star className="size-3.5 fill-primary text-primary" />
+          ) : (
+            <Star className="size-3.5 text-muted-foreground/40" />
+          )}
+        </button>
 
         {/* Sender */}
         <span className="w-32 shrink-0 truncate">{sender}</span>
@@ -148,17 +184,33 @@ export const MessageListItem = memo(function MessageListItem({
       {/* Top row: sender + date */}
       <div className="flex items-center gap-2">
         {/* Unread indicator dot */}
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            isUnread ? "bg-primary" : "bg-transparent",
-          )}
-        />
+        <button
+          type="button"
+          aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+          onClick={toggleRead}
+          className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
+        >
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              isUnread ? "bg-primary" : "bg-transparent",
+            )}
+          />
+        </button>
 
         {/* Star */}
-        {isFlagged && (
-          <Star className="size-3.5 shrink-0 fill-primary text-primary" />
-        )}
+        <button
+          type="button"
+          aria-label={isFlagged ? "Unstar" : "Star"}
+          onClick={toggleStar}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
+        >
+          {isFlagged ? (
+            <Star className="size-3.5 fill-primary text-primary" />
+          ) : (
+            <Star className="size-3.5 text-muted-foreground/40" />
+          )}
+        </button>
 
         {/* Sender name */}
         <span className="min-w-0 flex-1 truncate text-sm">{sender}</span>

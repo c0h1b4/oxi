@@ -1,8 +1,16 @@
 "use client";
 
-import { Paperclip } from "lucide-react";
+import {
+  Paperclip,
+  Star,
+  Mail,
+  MailOpen,
+} from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
-import { useMessage } from "@/hooks/useMessages";
+import {
+  useMessage,
+  useUpdateFlags,
+} from "@/hooks/useMessages";
 import { EmailRenderer } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { Button } from "@/components/ui/button";
@@ -65,6 +73,8 @@ export function ReadingPane() {
     activeFolder,
     selectedMessageUid ?? 0,
   );
+
+  const updateFlags = useUpdateFlags();
 
   // No message selected
   if (selectedMessageUid === null) {
@@ -136,6 +146,65 @@ export function ReadingPane() {
         <div className="text-sm text-muted-foreground">
           {formatDate(data.date)}
         </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-4 py-1.5">
+        {/* Read/Unread toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            const isSeen = data.flags.includes("\\Seen");
+            updateFlags.mutate({
+              folder: activeFolder,
+              uid: data.uid,
+              flags: ["\\Seen"],
+              add: !isSeen,
+            });
+          }}
+        >
+          {data.flags.includes("\\Seen") ? (
+            <>
+              <Mail className="size-4" />
+              Mark unread
+            </>
+          ) : (
+            <>
+              <MailOpen className="size-4" />
+              Mark read
+            </>
+          )}
+        </Button>
+
+        {/* Star/Unstar toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => {
+            const isFlagged = data.flags.includes("\\Flagged");
+            updateFlags.mutate({
+              folder: activeFolder,
+              uid: data.uid,
+              flags: ["\\Flagged"],
+              add: !isFlagged,
+            });
+          }}
+        >
+          {data.flags.includes("\\Flagged") ? (
+            <>
+              <Star className="size-4 fill-primary text-primary" />
+              Unstar
+            </>
+          ) : (
+            <>
+              <Star className="size-4" />
+              Star
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Attachment bar */}
