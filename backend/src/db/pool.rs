@@ -9,6 +9,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (2, include_str!("../../migrations/V002__folders_and_messages.sql")),
     (3, include_str!("../../migrations/V003__add_date_epoch.sql")),
     (4, include_str!("../../migrations/V004__folder_messages_updated_at.sql")),
+    (5, include_str!("../../migrations/V005__drafts_and_attachments.sql")),
 ];
 
 /// Run any pending migrations based on SQLite's `user_version` PRAGMA.
@@ -112,6 +113,8 @@ mod tests {
         assert!(tables.contains(&"user_meta".to_string()));
         assert!(tables.contains(&"folders".to_string()));
         assert!(tables.contains(&"messages".to_string()));
+        assert!(tables.contains(&"drafts".to_string()));
+        assert!(tables.contains(&"draft_attachments".to_string()));
     }
 
     #[test]

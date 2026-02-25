@@ -1,3 +1,4 @@
+pub mod attachments;
 pub mod auth;
 pub mod folders;
 pub mod health;
@@ -122,6 +123,14 @@ pub fn create_router(
         .route(
             "/messages/{folder}/{uid}",
             delete(messages::delete_message_handler),
+        )
+        .route(
+            "/drafts/{draft_id}/attachments",
+            post(attachments::upload_attachment),
+        )
+        .route(
+            "/drafts/{draft_id}/attachments/{attachment_id}",
+            delete(attachments::delete_attachment),
         )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
