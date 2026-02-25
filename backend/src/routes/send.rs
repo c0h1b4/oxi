@@ -164,6 +164,7 @@ fn load_draft_attachments(
             filename: att.filename,
             content_type: att.content_type,
             data,
+            content_id: Some(att.id),
         });
     }
     Ok(attachments)
@@ -219,18 +220,53 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
         builder = builder.references(refs.clone());
     }
 
+    // Separate inline images from regular file attachments.
+    let html_body = message.html_body.as_deref().unwrap_or("");
+    let (inline_atts, file_atts): (Vec<_>, Vec<_>) =
+        message.attachments.iter().partition(|att| {
+            att.content_id
+                .as_ref()
+                .map_or(false, |cid| html_body.contains(&format!("cid:{cid}")))
+        });
+
     let body_part = if let Some(ref html) = message.html_body {
-        MultiPart::alternative()
-            .singlepart(
-                SinglePart::builder()
-                    .content_type(ContentType::TEXT_PLAIN)
-                    .body(message.text_body.clone()),
-            )
-            .singlepart(
+        if inline_atts.is_empty() {
+            MultiPart::alternative()
+                .singlepart(
+                    SinglePart::builder()
+                        .content_type(ContentType::TEXT_PLAIN)
+                        .body(message.text_body.clone()),
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .content_type(ContentType::TEXT_HTML)
+                        .body(html.clone()),
+                )
+        } else {
+            let mut related = MultiPart::related().singlepart(
                 SinglePart::builder()
                     .content_type(ContentType::TEXT_HTML)
                     .body(html.clone()),
-            )
+            );
+            for att in &inline_atts {
+                let ct: ContentType = att
+                    .content_type
+                    .parse()
+                    .unwrap_or(ContentType::TEXT_PLAIN);
+                let cid = att.content_id.as_deref().unwrap_or("unknown");
+                let inline_part =
+                    Attachment::new_inline(cid.to_string()).body(att.data.clone(), ct);
+                related = related.singlepart(inline_part);
+            }
+
+            MultiPart::alternative()
+                .singlepart(
+                    SinglePart::builder()
+                        .content_type(ContentType::TEXT_PLAIN)
+                        .body(message.text_body.clone()),
+                )
+                .multipart(related)
+        }
     } else {
         MultiPart::alternative().singlepart(
             SinglePart::builder()
@@ -239,14 +275,14 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
         )
     };
 
-    // Wrap in mixed multipart if there are attachments.
-    let email = if message.attachments.is_empty() {
+    // Wrap in mixed multipart if there are file attachments.
+    let email = if file_atts.is_empty() {
         builder
             .multipart(body_part)
             .map_err(|e| e.to_string())?
     } else {
         let mut mixed = MultiPart::mixed().multipart(body_part);
-        for att in &message.attachments {
+        for att in &file_atts {
             let ct: ContentType = att
                 .content_type
                 .parse()

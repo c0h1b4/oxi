@@ -17,6 +17,7 @@ import {
   useUploadAttachment,
   useDeleteAttachment,
 } from "@/hooks/useCompose";
+import { RichTextEditor } from "@/components/mail/RichTextEditor";
 import { cn } from "@/lib/utils";
 
 function countRecipients(...fields: string[]): number {
@@ -35,6 +36,12 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Strip HTML tags to produce a plain-text fallback. */
+function stripHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.body.textContent ?? "";
 }
 
 /** Generate a UUID v4 (crypto-based). */
@@ -106,7 +113,7 @@ export function ComposeDialog() {
     const hash = computeHash();
     // Don't save if nothing changed or compose is empty
     if (hash === lastSavedHashRef.current) return;
-    if (!to.trim() && !cc.trim() && !bcc.trim() && !subject.trim() && !body.trim()) return;
+    if (!to.trim() && !cc.trim() && !bcc.trim() && !subject.trim() && !stripHtml(body).trim()) return;
 
     let currentDraftId = draftId;
     if (!currentDraftId) {
@@ -121,7 +128,8 @@ export function ComposeDialog() {
         cc,
         bcc,
         subject,
-        textBody: body,
+        textBody: stripHtml(body),
+        htmlBody: body,
         inReplyTo: inReplyTo,
         references: references,
       },
@@ -152,8 +160,9 @@ export function ComposeDialog() {
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSend = useCallback(() => {
+    const plainText = stripHtml(body);
     sendMutation.mutate(
-      { to, cc, bcc, subject, body, inReplyTo, references, draftId },
+      { to, cc, bcc, subject, body: plainText, htmlBody: body, inReplyTo, references, draftId },
       {
         onSuccess: () => {
           setToast("Message sent");
@@ -256,6 +265,47 @@ export function ComposeDialog() {
 
       // Reset the input so the same file can be re-selected
       e.target.value = "";
+    },
+    [draftId, setDraftId, uploadMutation, addAttachments],
+  );
+
+  const handleImageUpload = useCallback(
+    async (file: File): Promise<string | null> => {
+      // Ensure we have a draft ID for the upload
+      let currentDraftId = draftId;
+      if (!currentDraftId) {
+        currentDraftId = generateId();
+        setDraftId(currentDraftId);
+      }
+
+      return new Promise((resolve) => {
+        uploadMutation.mutate(
+          { draftId: currentDraftId!, files: [file] },
+          {
+            onSuccess: (data) => {
+              if (data.attachments.length > 0) {
+                const att = data.attachments[0];
+                addAttachments([
+                  {
+                    id: att.id,
+                    filename: att.filename,
+                    contentType: att.content_type,
+                    size: att.size,
+                  },
+                ]);
+                // Return a cid: URL so the backend can resolve it as an inline image
+                resolve(`cid:${att.id}`);
+              } else {
+                resolve(null);
+              }
+            },
+            onError: (error) => {
+              setToast(`Image upload failed: ${error.message}`);
+              resolve(null);
+            },
+          },
+        );
+      });
     },
     [draftId, setDraftId, uploadMutation, addAttachments],
   );
@@ -419,14 +469,13 @@ export function ComposeDialog() {
             )}
 
             {/* Body */}
-            <div className="flex-1 overflow-auto px-4 py-3">
-              <textarea
-                value={body}
-                onChange={(e) => setField("body", e.target.value)}
-                placeholder="Write your message..."
-                className="min-h-[200px] w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
-              />
-            </div>
+            <RichTextEditor
+              content={body}
+              onChange={(html) => setField("body", html)}
+              onImageUpload={handleImageUpload}
+              placeholder="Write your message..."
+              className="flex-1 overflow-auto"
+            />
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-border px-4 py-3">

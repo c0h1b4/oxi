@@ -9,6 +9,7 @@ interface SendParams {
   bcc: string;
   subject: string;
   body: string;
+  htmlBody: string | null;
   inReplyTo: string | null;
   references: string | null;
   draftId: string | null;
@@ -39,6 +40,7 @@ interface SaveDraftParams {
   bcc: string;
   subject: string;
   textBody: string;
+  htmlBody: string | null;
   inReplyTo: string | null;
   references: string | null;
 }
@@ -96,7 +98,7 @@ export function useSendMessage() {
         bcc: parseRecipients(params.bcc),
         subject: params.subject,
         text_body: params.body,
-        html_body: null,
+        html_body: params.htmlBody,
         in_reply_to: params.inReplyTo,
         references: params.references,
         draft_id: params.draftId,
@@ -155,7 +157,7 @@ export function useSaveDraft() {
         bcc: params.bcc,
         subject: params.subject,
         text_body: params.textBody,
-        html_body: null,
+        html_body: params.htmlBody,
         in_reply_to: params.inReplyTo,
         references: params.references,
       }),

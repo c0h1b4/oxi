@@ -50,6 +50,10 @@ pub struct AttachmentData {
     pub content_type: String,
     /// Raw file content.
     pub data: Vec<u8>,
+    /// Optional Content-ID for inline images (referenced via `cid:` in HTML).
+    /// When set, the attachment is treated as an inline image rather than a
+    /// regular file attachment.
+    pub content_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -177,19 +181,57 @@ impl SmtpClient for RealSmtpClient {
             builder = builder.references(refs.clone());
         }
 
+        // Separate inline images (those with content_id referenced in HTML)
+        // from regular file attachments.
+        let html_body = message.html_body.as_deref().unwrap_or("");
+        let (inline_atts, file_atts): (Vec<_>, Vec<_>) =
+            message.attachments.iter().partition(|att| {
+                att.content_id
+                    .as_ref()
+                    .map_or(false, |cid| html_body.contains(&format!("cid:{cid}")))
+            });
+
         // Build the body part(s).
         let body_part = if let Some(ref html) = message.html_body {
-            MultiPart::alternative()
-                .singlepart(
-                    SinglePart::builder()
-                        .content_type(ContentType::TEXT_PLAIN)
-                        .body(message.text_body.clone()),
-                )
-                .singlepart(
+            if inline_atts.is_empty() {
+                // Simple alternative: text + HTML.
+                MultiPart::alternative()
+                    .singlepart(
+                        SinglePart::builder()
+                            .content_type(ContentType::TEXT_PLAIN)
+                            .body(message.text_body.clone()),
+                    )
+                    .singlepart(
+                        SinglePart::builder()
+                            .content_type(ContentType::TEXT_HTML)
+                            .body(html.clone()),
+                    )
+            } else {
+                // Alternative with related HTML part containing inline images.
+                let mut related = MultiPart::related().singlepart(
                     SinglePart::builder()
                         .content_type(ContentType::TEXT_HTML)
                         .body(html.clone()),
-                )
+                );
+                for att in &inline_atts {
+                    let ct: ContentType = att
+                        .content_type
+                        .parse()
+                        .unwrap_or(ContentType::TEXT_PLAIN);
+                    let cid = att.content_id.as_deref().unwrap_or("unknown");
+                    let inline_part =
+                        Attachment::new_inline(cid.to_string()).body(att.data.clone(), ct);
+                    related = related.singlepart(inline_part);
+                }
+
+                MultiPart::alternative()
+                    .singlepart(
+                        SinglePart::builder()
+                            .content_type(ContentType::TEXT_PLAIN)
+                            .body(message.text_body.clone()),
+                    )
+                    .multipart(related)
+            }
         } else {
             MultiPart::alternative().singlepart(
                 SinglePart::builder()
@@ -198,14 +240,14 @@ impl SmtpClient for RealSmtpClient {
             )
         };
 
-        // Build the final email — wrap in mixed multipart if there are attachments.
-        let email = if message.attachments.is_empty() {
+        // Build the final email — wrap in mixed multipart if there are file attachments.
+        let email = if file_atts.is_empty() {
             builder
                 .multipart(body_part)
                 .map_err(|e| SmtpError::SendFailed(e.to_string()))?
         } else {
             let mut mixed = MultiPart::mixed().multipart(body_part);
-            for att in &message.attachments {
+            for att in &file_atts {
                 let ct: ContentType = att
                     .content_type
                     .parse()
@@ -400,6 +442,7 @@ pub mod mock {
                     filename: "notes.txt".to_string(),
                     content_type: "text/plain".to_string(),
                     data: b"some content".to_vec(),
+                    content_id: None,
                 }],
             };
 
