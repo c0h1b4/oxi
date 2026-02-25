@@ -94,6 +94,7 @@ struct MessageDetailResponse {
 /// Attachment metadata (without the binary data).
 #[derive(Serialize)]
 struct AttachmentMeta {
+    id: String,
     filename: Option<String>,
     content_type: String,
     size: usize,
@@ -285,7 +286,9 @@ pub async fn get_message(
         let attachment_meta: Vec<AttachmentMeta> = body
             .attachments
             .iter()
-            .map(|a| AttachmentMeta {
+            .enumerate()
+            .map(|(i, a)| AttachmentMeta {
+                id: i.to_string(),
                 filename: a.filename.clone(),
                 content_type: a.content_type.clone(),
                 size: a.size,
@@ -389,6 +392,59 @@ pub async fn move_message_handler(
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
+}
+
+/// `GET /api/messages/:folder/:uid/attachments/:attachment_id`
+///
+/// Downloads an attachment by its index from the message.
+pub async fn download_attachment(
+    Extension(session): Extension<SessionState>,
+    Extension(config): Extension<Arc<AppConfig>>,
+    Extension(imap_client): Extension<Arc<dyn ImapClient>>,
+    Path((folder, uid, attachment_id)): Path<(String, u32, String)>,
+) -> Result<Response, AppError> {
+    let creds = build_creds(&session, &config)?;
+
+    // Parse the attachment index.
+    let index: usize = attachment_id
+        .parse()
+        .map_err(|_| AppError::BadRequest(format!("Invalid attachment id: {attachment_id}")))?;
+
+    // Fetch the full message body from IMAP.
+    let body = imap_client
+        .fetch_body(&creds, &folder, uid)
+        .await
+        .map_err(|e| match e {
+            crate::imap::client::ImapError::MessageNotFound { .. } => {
+                AppError::NotFound(format!("Message UID {uid} not found in folder {folder}"))
+            }
+            other => AppError::ServiceUnavailable(format!("IMAP error: {other}")),
+        })?;
+
+    // Find the attachment by index.
+    let attachment = body
+        .attachments
+        .into_iter()
+        .nth(index)
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "Attachment {attachment_id} not found on message UID {uid}"
+            ))
+        })?;
+
+    // Build the response with appropriate headers.
+    let filename = attachment
+        .filename
+        .unwrap_or_else(|| format!("attachment_{index}"));
+    let content_type = attachment.content_type;
+
+    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""));
+
+    Ok(Response::builder()
+        .header("content-type", &content_type)
+        .header("content-disposition", &disposition)
+        .body(axum::body::Body::from(attachment.data))
+        .unwrap())
 }
 
 /// `DELETE /api/messages/:folder/:uid`
