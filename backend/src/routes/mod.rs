@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod auth;
+pub mod drafts;
 pub mod folders;
 pub mod health;
 pub mod messages;
@@ -124,6 +125,10 @@ pub fn create_router(
             "/messages/{folder}/{uid}",
             delete(messages::delete_message_handler),
         )
+        .route("/drafts", post(drafts::upsert_draft_handler))
+        .route("/drafts", get(drafts::list_drafts_handler))
+        .route("/drafts/{id}", get(drafts::get_draft_handler))
+        .route("/drafts/{id}", delete(drafts::delete_draft_handler))
         .route(
             "/drafts/{draft_id}/attachments",
             post(attachments::upload_attachment),

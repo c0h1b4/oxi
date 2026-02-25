@@ -13,6 +13,7 @@ import {
 import { useComposeStore } from "@/stores/useComposeStore";
 import {
   useSendMessage,
+  useSaveDraft,
   useUploadAttachment,
   useDeleteAttachment,
 } from "@/hooks/useCompose";
@@ -66,6 +67,7 @@ export function ComposeDialog() {
   } = useComposeStore();
 
   const sendMutation = useSendMessage();
+  const saveDraftMutation = useSaveDraft();
   const uploadMutation = useUploadAttachment();
   const deleteMutation = useDeleteAttachment();
   const [undoTimer, setUndoTimer] = useState<ReturnType<
@@ -73,8 +75,10 @@ export function ComposeDialog() {
   > | null>(null);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
   const toInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastSavedHashRef = useRef<string>("");
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
@@ -91,6 +95,61 @@ export function ComposeDialog() {
     const t = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Compute a simple hash of compose fields for dirty tracking
+  const computeHash = useCallback(() => {
+    return `${to}|${cc}|${bcc}|${subject}|${body}`;
+  }, [to, cc, bcc, subject, body]);
+
+  // Save draft function
+  const saveDraft = useCallback(() => {
+    const hash = computeHash();
+    // Don't save if nothing changed or compose is empty
+    if (hash === lastSavedHashRef.current) return;
+    if (!to.trim() && !cc.trim() && !bcc.trim() && !subject.trim() && !body.trim()) return;
+
+    let currentDraftId = draftId;
+    if (!currentDraftId) {
+      currentDraftId = generateId();
+      setDraftId(currentDraftId);
+    }
+
+    saveDraftMutation.mutate(
+      {
+        id: currentDraftId,
+        to,
+        cc,
+        bcc,
+        subject,
+        textBody: body,
+        inReplyTo: inReplyTo,
+        references: references,
+      },
+      {
+        onSuccess: () => {
+          lastSavedHashRef.current = hash;
+          setDraftSaved(true);
+          setTimeout(() => setDraftSaved(false), 3000);
+        },
+      },
+    );
+  }, [computeHash, to, cc, bcc, subject, body, draftId, setDraftId, inReplyTo, references, saveDraftMutation]);
+
+  // Auto-save every 30s when dialog is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const interval = setInterval(() => {
+      saveDraft();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isOpen, saveDraft]);
+
+  // Reset saved hash when dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      lastSavedHashRef.current = computeHash();
+    }
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSend = useCallback(() => {
     sendMutation.mutate(
@@ -152,8 +211,12 @@ export function ComposeDialog() {
         e.preventDefault();
         handleSend();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        saveDraft();
+      }
     },
-    [handleSend],
+    [handleSend, saveDraft],
   );
 
   const handleAttachFiles = useCallback(() => {
@@ -403,12 +466,19 @@ export function ComposeDialog() {
                   onChange={handleFileSelected}
                 />
               </div>
-              <button
-                onClick={handleDiscard}
-                className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                Discard
-              </button>
+              <div className="flex items-center gap-2">
+                {draftSaved && (
+                  <span className="text-xs text-muted-foreground">
+                    Draft saved
+                  </span>
+                )}
+                <button
+                  onClick={handleDiscard}
+                  className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Discard
+                </button>
+              </div>
             </div>
           </Dialog.Content>
         </Dialog.Portal>

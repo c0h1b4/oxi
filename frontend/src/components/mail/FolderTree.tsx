@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   Inbox,
   Send,
@@ -9,12 +10,16 @@ import {
   Star,
   Folder,
   Loader2,
+  PenLine,
+  X,
 } from "lucide-react";
 import { useIsFetching } from "@tanstack/react-query";
 import { useFolders } from "@/hooks/useFolders";
+import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
 import { usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { useComposeStore } from "@/stores/useComposeStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";
@@ -89,6 +94,81 @@ function FolderItem({ folder }: { folder: FolderType }) {
   );
 }
 
+function LocalDrafts() {
+  const { data } = useListDrafts(true);
+  const deleteDraft = useDeleteDraft();
+  const openDraft = useComposeStore((s) => s.openDraft);
+  const isComposeOpen = useComposeStore((s) => s.isOpen);
+  const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null);
+  const getDraft = useGetDraft(loadingDraftId);
+
+  // When draft detail loads, open compose dialog
+  useEffect(() => {
+    if (getDraft.data && loadingDraftId) {
+      const d = getDraft.data;
+      openDraft({
+        id: d.id,
+        to: d.to,
+        cc: d.cc,
+        bcc: d.bcc,
+        subject: d.subject,
+        body: d.text_body,
+        inReplyTo: d.in_reply_to,
+        references: d.references,
+        attachments: d.attachments.map((a) => ({
+          id: a.id,
+          filename: a.filename,
+          contentType: a.content_type,
+          size: a.size,
+        })),
+      });
+      setLoadingDraftId(null);
+    }
+  }, [getDraft.data, loadingDraftId, openDraft]);
+
+  const drafts = data?.drafts ?? [];
+  if (drafts.length === 0) return null;
+
+  return (
+    <div className="border-t border-sidebar-border pt-2">
+      <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Local Drafts
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {drafts.map((draft) => (
+          <div
+            key={draft.id}
+            className="group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent"
+          >
+            <PenLine className="size-4 shrink-0 text-muted-foreground" />
+            <button
+              onClick={() => {
+                if (!isComposeOpen) {
+                  setLoadingDraftId(draft.id);
+                }
+              }}
+              className="flex-1 truncate text-left"
+              title={draft.subject || "(No subject)"}
+            >
+              {draft.subject || "(No subject)"}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteDraft.mutate(draft.id);
+              }}
+              className="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:block"
+              title="Delete draft"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function FolderTree() {
   const { data, isLoading, isError, refetch } = useFolders();
   const email = useAuthStore((s) => s.email);
@@ -135,6 +215,8 @@ export function FolderTree() {
               ))}
           </div>
         )}
+
+        <LocalDrafts />
       </nav>
     </div>
   );
