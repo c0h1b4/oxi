@@ -25,6 +25,7 @@ use crate::auth::middleware::auth_guard;
 use crate::auth::session::SessionStore;
 use crate::config::AppConfig;
 use crate::imap::client::ImapClient;
+use crate::smtp::client::SmtpClient;
 
 /// Per-IP key extractor that falls back to the loopback address when
 /// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests using
@@ -75,6 +76,7 @@ pub fn create_router(
     config: Arc<AppConfig>,
     store: Arc<SessionStore>,
     imap_client: Arc<dyn ImapClient>,
+    smtp_client: Arc<dyn SmtpClient>,
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
@@ -133,6 +135,7 @@ pub fn create_router(
     let router = Router::new()
         .nest("/api", api_router)
         .fallback_service(static_service)
+        .layer(Extension(smtp_client))
         .layer(Extension(imap_client))
         .layer(Extension(store))
         .layer(Extension(config.clone()))
@@ -160,6 +163,7 @@ mod tests {
     use crate::imap::client::{
         EmailAddress, ImapAttachment, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
     };
+    use crate::smtp::client::mock::MockSmtpClient;
 
     /// Helper: create a test AppConfig with the given static dir.
     fn test_config(static_dir: &str) -> Arc<AppConfig> {
@@ -205,6 +209,11 @@ mod tests {
         Arc::new(MockImapClient::new())
     }
 
+    /// Helper: create a default mock SMTP client.
+    fn test_smtp_client() -> Arc<dyn SmtpClient> {
+        Arc::new(MockSmtpClient::new())
+    }
+
     /// Helper: create a temporary static directory with an index.html.
     fn setup_static_dir() -> TempDir {
         let dir = TempDir::new().expect("should create temp dir");
@@ -231,7 +240,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -260,7 +269,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -289,7 +298,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -319,7 +328,7 @@ mod tests {
         fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -348,7 +357,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -377,7 +386,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -401,7 +410,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -438,7 +447,7 @@ mod tests {
         cfg.imap_host = Some("127.0.0.1".to_string());
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -472,7 +481,7 @@ mod tests {
         cfg.imap_host = Some("127.0.0.1".to_string());
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -501,7 +510,7 @@ mod tests {
         cfg.tls_enabled = false;
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -536,7 +545,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -561,7 +570,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -591,7 +600,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -618,7 +627,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store.clone(), test_imap_client());
+        let app = create_router(config, store.clone(), test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -658,7 +667,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -720,7 +729,7 @@ mod tests {
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -763,7 +772,7 @@ mod tests {
         let mock = MockImapClient::new()
             .with_error(ImapError::ConnectionFailed("test failure".to_string()));
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -789,7 +798,7 @@ mod tests {
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let app = create_router(config, store, test_imap_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client());
 
         let response = app
             .oneshot(
@@ -854,7 +863,7 @@ mod tests {
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -925,7 +934,7 @@ mod tests {
                 raw_headers: String::new(),
             }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config.clone(), store.clone(), imap_client.clone());
+        let app = create_router(config.clone(), store.clone(), imap_client.clone(), test_smtp_client());
 
         // First, populate the message cache by listing messages.
         let response = app
@@ -942,7 +951,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Now get the full message.
-        let app2 = create_router(config, store, imap_client);
+        let app2 = create_router(config, store, imap_client, test_smtp_client());
         let response = app2
             .oneshot(
                 Request::builder()
@@ -1013,7 +1022,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -1068,7 +1077,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -1123,7 +1132,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -1177,7 +1186,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -1248,7 +1257,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
@@ -1296,7 +1305,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client);
+        let app = create_router(config, store, imap_client, test_smtp_client());
 
         let response = app
             .oneshot(
