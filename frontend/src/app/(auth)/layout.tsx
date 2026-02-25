@@ -13,9 +13,17 @@ export default function AuthLayout({
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     apiGet("/auth/session")
-      .then(() => setAuthenticated(true))
-      .catch(() => router.replace("/login"));
+      .then(() => {
+        if (!cancelled) setAuthenticated(true);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace("/login");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!authenticated) {
