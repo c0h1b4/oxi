@@ -341,13 +341,15 @@ pub fn get_thread_messages(
     conn: &Connection,
     target_message_id: &str,
 ) -> Result<Vec<CachedMessage>, String> {
-    let like_pattern = format!("%{target_message_id}%");
+    // Escape % and _ characters in the message_id to prevent LIKE injection.
+    let escaped_target = target_message_id.replace("%", "\\%").replace("_", "\\_");
+    let like_pattern = format!("%{}%", escaped_target);
     let sql = format!(
         "SELECT {MSG_SELECT_COLS}
          FROM messages
          WHERE message_id = ?1
             OR in_reply_to = ?1
-            OR references_header LIKE ?2
+            OR references_header LIKE ?2 ESCAPE '\\'
          ORDER BY date_epoch ASC"
     );
 
