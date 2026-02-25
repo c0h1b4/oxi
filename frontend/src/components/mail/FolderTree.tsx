@@ -8,12 +8,29 @@ import {
   AlertCircle,
   Star,
   Folder,
+  Loader2,
 } from "lucide-react";
+import { useIsFetching } from "@tanstack/react-query";
 import { useFolders } from "@/hooks/useFolders";
+import { usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";
+
+/** Sort priority for well-known folders.  Lower = higher in the list. */
+function folderSortOrder(name: string): number {
+  const lower = name.toLowerCase();
+  if (lower === "inbox") return 0;
+  if (lower === "drafts" || lower.includes("draft")) return 1;
+  if (lower === "sent" || lower.includes("sent")) return 2;
+  if (lower === "junk" || lower === "spam" || lower.includes("junk") || lower.includes("spam"))
+    return 3;
+  if (lower === "trash" || lower.includes("trash")) return 4;
+  if (lower === "archive" || lower.includes("archive")) return 5;
+  return 6; // everything else
+}
 
 function getFolderIcon(name: string) {
   const lower = name.toLowerCase();
@@ -46,41 +63,52 @@ function FolderItem({ folder }: { folder: FolderType }) {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const setActiveFolder = useUiStore((s) => s.setActiveFolder);
   const isActive = activeFolder === folder.name;
+  const isFetching = useIsFetching({ queryKey: ["messages", folder.name] });
 
   return (
     <button
       onClick={() => setActiveFolder(folder.name)}
       aria-current={isActive ? "page" : undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent",
-        isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+        isActive
+          ? "bg-primary/10 font-semibold text-primary"
+          : "font-medium text-sidebar-foreground hover:bg-sidebar-accent",
       )}
     >
       {getFolderIcon(folder.name)}
       <span className="flex-1 truncate text-left">{folder.name}</span>
-      {folder.unread_count > 0 && (
+      {folder.unread_count > 0 ? (
         <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold text-primary-foreground">
           {folder.unread_count}
         </span>
-      )}
+      ) : isFetching > 0 ? (
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+      ) : null}
     </button>
   );
 }
 
 export function FolderTree() {
   const { data, isLoading, isError, refetch } = useFolders();
+  const email = useAuthStore((s) => s.email);
+  const activeFolder = useUiStore((s) => s.activeFolder);
+
+  // Prefetch messages for all folders in the background after folder list loads.
+  const folderNames = data?.folders.map((f) => f.name) ?? [];
+  usePrefetchAllFolders(folderNames, activeFolder);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Branding */}
-      <div className="flex items-center px-4 py-4">
-        <h1 className="text-lg font-bold tracking-tight text-sidebar-foreground">
-          oxi<span className="text-primary">.email</span>
-        </h1>
+      {/* User email */}
+      <div className="flex items-center justify-center border-b border-sidebar-border px-3 py-3">
+        <span className="truncate text-sm font-bold text-sidebar-foreground">
+          {email ?? ""}
+        </span>
       </div>
 
       {/* Folder list */}
-      <nav className="flex-1 overflow-y-auto px-2">
+      <nav className="flex-1 overflow-y-auto">
         {isLoading && <SkeletonList />}
 
         {isError && (
@@ -96,9 +124,15 @@ export function FolderTree() {
 
         {data && (
           <div className="flex flex-col gap-0.5">
-            {data.folders.map((folder) => (
-              <FolderItem key={folder.name} folder={folder} />
-            ))}
+            {[...data.folders]
+              .sort(
+                (a, b) =>
+                  folderSortOrder(a.name) - folderSortOrder(b.name) ||
+                  a.name.localeCompare(b.name),
+              )
+              .map((folder) => (
+                <FolderItem key={folder.name} folder={folder} />
+              ))}
           </div>
         )}
       </nav>

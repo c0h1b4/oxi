@@ -32,6 +32,7 @@ export interface MessageDetail {
   flags: string[];
   html: string | null;
   text: string | null;
+  raw_headers: string;
   attachments: Attachment[];
   thread: MessageHeader[];
 }

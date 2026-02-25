@@ -5,9 +5,58 @@ import { useRef, useCallback } from "react";
 interface EmailRendererProps {
   html: string | null;
   text: string | null;
+  blockRemoteResources?: boolean;
 }
 
-export function EmailRenderer({ html, text }: EmailRendererProps) {
+/**
+ * Strip remote resource URLs from HTML, keeping data: and cid: URIs intact.
+ * Returns the cleaned HTML and whether any remote resources were found.
+ */
+function stripRemoteResources(html: string): { cleaned: string; hasRemote: boolean } {
+  let hasRemote = false;
+
+  // Strip remote src attributes on img tags (keep data: and cid:)
+  let cleaned = html.replace(
+    /(<img\b[^>]*?\bsrc\s*=\s*)(["'])((?:https?:\/\/)[^"']*?)\2/gi,
+    (_match, prefix, quote, _url) => {
+      hasRemote = true;
+      return `${prefix}${quote}${quote} data-blocked-src=${quote}${_url}${quote}`;
+    },
+  );
+
+  // Strip remote srcset attributes
+  cleaned = cleaned.replace(
+    /(<img\b[^>]*?\bsrcset\s*=\s*)(["'])([^"']*?)\2/gi,
+    (match, prefix, quote, value) => {
+      if (/https?:\/\//i.test(value)) {
+        hasRemote = true;
+        return `${prefix}${quote}${quote} data-blocked-srcset=${quote}${value}${quote}`;
+      }
+      return match;
+    },
+  );
+
+  // Strip remote background images in inline styles
+  cleaned = cleaned.replace(
+    /url\(\s*(["']?)(https?:\/\/[^)]*?)\1\s*\)/gi,
+    (_match, quote, url) => {
+      hasRemote = true;
+      return `url(${quote}${quote}) /* blocked: ${url} */`;
+    },
+  );
+
+  return { cleaned, hasRemote };
+}
+
+/** Check if HTML contains any remote resource URLs (http/https). */
+export function hasRemoteResources(html: string | null): boolean {
+  if (!html) return false;
+  // Check for remote src, srcset, or background-image URLs
+  return /(?:src|srcset)\s*=\s*["']https?:\/\//i.test(html) ||
+    /url\(\s*["']?https?:\/\//i.test(html);
+}
+
+export function EmailRenderer({ html, text, blockRemoteResources = false }: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handleIframeLoad = useCallback(() => {
@@ -42,6 +91,9 @@ export function EmailRenderer({ html, text }: EmailRendererProps) {
   }, []);
 
   if (html) {
+    const processedHtml = blockRemoteResources ? stripRemoteResources(html) : { cleaned: html, hasRemote: false };
+    const displayHtml = processedHtml.cleaned;
+
     const wrappedHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -57,7 +109,7 @@ export function EmailRenderer({ html, text }: EmailRendererProps) {
       word-wrap: break-word;
       overflow-wrap: break-word;
       margin: 0;
-      padding: 0;
+      padding: 16px;
     }
     img { max-width: 100%; height: auto; }
     a { color: #2563eb; }
@@ -65,7 +117,7 @@ export function EmailRenderer({ html, text }: EmailRendererProps) {
     table { max-width: 100%; }
   </style>
 </head>
-<body>${html}</body>
+<body>${displayHtml}</body>
 </html>`;
 
     return (
@@ -73,7 +125,7 @@ export function EmailRenderer({ html, text }: EmailRendererProps) {
         ref={iframeRef}
         sandbox="allow-popups allow-popups-to-escape-sandbox"
         srcDoc={wrappedHtml}
-        style={{ width: "100%", border: "none", minHeight: 200 }}
+        className="h-full w-full border-none"
         title="Email content"
         onLoad={handleIframeLoad}
       />

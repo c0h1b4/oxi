@@ -1,11 +1,18 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
   Paperclip,
   Star,
   Mail,
   MailOpen,
   Trash2,
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Type,
+  FileCode,
+  ShieldAlert,
 } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import {
@@ -14,11 +21,14 @@ import {
   useMoveMessage,
   useDeleteMessage,
 } from "@/hooks/useMessages";
-import { EmailRenderer } from "./EmailRenderer";
+import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { MoveToFolderMenu } from "./MoveToFolderMenu";
 import { Button } from "@/components/ui/button";
 import type { EmailAddress } from "@/types/message";
+
+type HeaderMode = "summary" | "details";
+type BodyMode = "html" | "plain";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -73,6 +83,10 @@ export function ReadingPane() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
+  const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
+  const [bodyMode, setBodyMode] = useState<BodyMode>("html");
+  const [showHeaders, setShowHeaders] = useState(false);
+  const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(new Set());
 
   const { data, isLoading, isError, refetch } = useMessage(
     activeFolder,
@@ -82,6 +96,19 @@ export function ReadingPane() {
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
   const deleteMessage = useDeleteMessage();
+
+  // Auto-mark unread messages as read when opened.
+  useEffect(() => {
+    if (data && !data.flags.includes("\\Seen")) {
+      updateFlags.mutate({
+        folder: activeFolder,
+        uid: data.uid,
+        flags: ["\\Seen"],
+        add: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.uid, data?.folder]);
 
   // No message selected
   if (selectedMessageUid === null) {
@@ -117,41 +144,97 @@ export function ReadingPane() {
   }
 
   const attachmentBaseUrl = `/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
+  const messageKey = `${data.folder}:${data.uid}`;
+  const remoteAllowed = allowedRemoteUids.has(messageKey);
+  const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Header area */}
-      <div className="shrink-0 space-y-1 border-b border-border p-4">
+      <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
         <h2 className="text-lg font-bold leading-tight">{data.subject}</h2>
 
-        <div className="text-sm text-foreground">
-          <span className="font-medium text-muted-foreground">From: </span>
-          {data.from_name ? (
-            <>
-              {data.from_name}{" "}
-              <span className="text-muted-foreground">
-                &lt;{data.from_address}&gt;
-              </span>
-            </>
-          ) : (
-            data.from_address
-          )}
-        </div>
-
-        <div className="text-sm text-foreground">
-          <span className="font-medium text-muted-foreground">To: </span>
-          {formatAddressList(data.to_addresses)}
-        </div>
-
-        {data.cc_addresses.length > 0 && (
+        {headerMode === "summary" ? (
           <div className="text-sm text-foreground">
-            <span className="font-medium text-muted-foreground">Cc: </span>
-            {formatAddressList(data.cc_addresses)}
+            From {data.from_address} on {formatDate(data.date)}
           </div>
+        ) : (
+          <>
+            <div className="text-sm text-foreground">
+              <span className="font-medium text-muted-foreground">From: </span>
+              {data.from_name ? (
+                <>
+                  {data.from_name}{" "}
+                  <span className="text-muted-foreground">
+                    &lt;{data.from_address}&gt;
+                  </span>
+                </>
+              ) : (
+                data.from_address
+              )}
+            </div>
+
+            <div className="text-sm text-foreground">
+              <span className="font-medium text-muted-foreground">To: </span>
+              {formatAddressList(data.to_addresses)}
+            </div>
+
+            {data.cc_addresses.length > 0 && (
+              <div className="text-sm text-foreground">
+                <span className="font-medium text-muted-foreground">Cc: </span>
+                {formatAddressList(data.cc_addresses)}
+              </div>
+            )}
+
+            <div className="text-sm text-muted-foreground">
+              {formatDate(data.date)}
+            </div>
+          </>
         )}
 
-        <div className="text-sm text-muted-foreground">
-          {formatDate(data.date)}
+        {/* View toggle buttons */}
+        <div className="flex gap-1 pt-1">
+          {/* Details / Summary toggle */}
+          <button
+            onClick={() => setHeaderMode(headerMode === "details" ? "summary" : "details")}
+            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {headerMode === "details" ? (
+              <ChevronUp className="size-3" />
+            ) : (
+              <ChevronDown className="size-3" />
+            )}
+            {headerMode === "details" ? "Summary" : "Details"}
+          </button>
+
+          {/* Plain text / HTML toggle */}
+          <button
+            onClick={() => {
+              setBodyMode(bodyMode === "html" ? "plain" : "html");
+              setShowHeaders(false);
+            }}
+            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {bodyMode === "html" ? (
+              <Type className="size-3" />
+            ) : (
+              <Code className="size-3" />
+            )}
+            {bodyMode === "html" ? "Plain text" : "HTML"}
+          </button>
+
+          {/* Headers toggle (shows as selected when active) */}
+          <button
+            onClick={() => setShowHeaders(!showHeaders)}
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
+              showHeaders
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <FileCode className="size-3" />
+            Headers
+          </button>
         </div>
       </div>
 
@@ -285,9 +368,43 @@ export function ReadingPane() {
         <ThreadView thread={data.thread} currentUid={data.uid} />
       )}
 
-      {/* Body area */}
+      {/* Remote resources banner */}
+      {showRemoteBanner && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-4 py-2">
+          <ShieldAlert className="size-4 shrink-0 text-muted-foreground" />
+          <span className="flex-1 text-xs text-muted-foreground">
+            To protect your privacy, remote resources have been blocked.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() =>
+              setAllowedRemoteUids((prev) => new Set(prev).add(messageKey))
+            }
+          >
+            Allow
+          </Button>
+        </div>
+      )}
+
+      {/* Body area — fills remaining space */}
       <div className="min-h-0 flex-1">
-        <EmailRenderer html={data.html} text={data.text} />
+        {showHeaders ? (
+          <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-foreground">
+            {data.raw_headers || "No headers available"}
+          </pre>
+        ) : bodyMode === "plain" ? (
+          <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground">
+            {data.text || "No plain text available"}
+          </pre>
+        ) : (
+          <EmailRenderer
+            html={data.html}
+            text={data.text}
+            blockRemoteResources={!remoteAllowed}
+          />
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
+import { useAuthStore } from "@/stores/useAuthStore";
 
 export default function AuthLayout({
   children,
@@ -11,12 +12,16 @@ export default function AuthLayout({
 }) {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
+  const setEmail = useAuthStore((s) => s.setEmail);
 
   useEffect(() => {
     let cancelled = false;
-    apiGet("/auth/session")
-      .then(() => {
-        if (!cancelled) setAuthenticated(true);
+    apiGet<{ user: { email: string } }>("/auth/session")
+      .then((data) => {
+        if (!cancelled) {
+          setEmail(data.user.email);
+          setAuthenticated(true);
+        }
       })
       .catch(() => {
         if (!cancelled) router.replace("/login");
@@ -24,7 +29,7 @@ export default function AuthLayout({
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, setEmail]);
 
   if (!authenticated) {
     return (

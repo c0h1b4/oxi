@@ -42,6 +42,8 @@ pub struct ImapMessageHeader {
     pub date: Option<String>,
     /// IMAP flags currently set on this message (e.g. `\Seen`, `\Flagged`).
     pub flags: Vec<String>,
+    /// Whether this message has attachments (derived from BODYSTRUCTURE).
+    pub has_attachments: bool,
 }
 
 /// The full body of an email message, including attachments.
@@ -55,6 +57,8 @@ pub struct ImapMessageBody {
     pub text_html: Option<String>,
     /// List of attachments found in the message.
     pub attachments: Vec<ImapAttachment>,
+    /// Raw RFC 822 headers as a single string.
+    pub raw_headers: String,
 }
 
 /// Metadata about a single attachment in an email message.
@@ -68,6 +72,8 @@ pub struct ImapAttachment {
     pub size: usize,
     /// Raw attachment content.
     pub data: Vec<u8>,
+    /// Content-ID for inline images (e.g. "image001@01D1234"), without angle brackets.
+    pub content_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +130,17 @@ pub struct ImapCredentials {
 // Trait definition
 // ---------------------------------------------------------------------------
 
+/// Lightweight result of an IMAP `SELECT` command.
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderStatus {
+    /// UIDVALIDITY — changes when the mailbox is rebuilt or UIDs are reassigned.
+    pub uid_validity: u32,
+    /// The total number of messages currently in the folder.
+    pub exists: u32,
+    /// The highest UID that will be assigned to the next appended message.
+    pub uid_next: u32,
+}
+
 /// Abstraction over IMAP operations.
 ///
 /// Every method receives explicit connection parameters so that the trait
@@ -131,10 +148,19 @@ pub struct ImapCredentials {
 ///
 /// The `Send + Sync` bounds allow implementations to be shared across
 /// Tokio tasks and stored in `Arc`.
+#[allow(dead_code)]
 #[async_trait]
 pub trait ImapClient: Send + Sync {
     /// List all folders (mailboxes) on the server.
     async fn list_folders(&self, creds: &ImapCredentials) -> Result<Vec<ImapFolder>, ImapError>;
+
+    /// Perform a lightweight `SELECT` on a folder to get its status
+    /// (UIDVALIDITY, EXISTS count, UIDNEXT) without fetching any messages.
+    async fn folder_status(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<FolderStatus, ImapError>;
 
     /// Fetch message headers (envelopes) for a range of UIDs in a folder.
     async fn fetch_headers(
@@ -151,6 +177,24 @@ pub trait ImapClient: Send + Sync {
         folder: &str,
         uid: u32,
     ) -> Result<ImapMessageBody, ImapError>;
+
+    /// Add flags to a message (IMAP +FLAGS).
+    async fn add_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        uid: u32,
+        flags: &[&str],
+    ) -> Result<(), ImapError>;
+
+    /// Remove flags from a message (IMAP -FLAGS).
+    async fn remove_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        uid: u32,
+        flags: &[&str],
+    ) -> Result<(), ImapError>;
 
     /// Set (replace) the flags on a message.
     async fn set_flags(
@@ -343,6 +387,104 @@ fn flag_to_string(flag: &async_imap::types::Flag<'_>) -> String {
     }
 }
 
+// ---- Helper: decode RFC 2047 encoded words --------------------------------
+
+/// Decode RFC 2047 encoded-word sequences like `=?utf-8?b?SGVsbG8=?=`.
+fn decode_rfc2047(input: &str) -> String {
+    // Quick check: if there's no encoded-word marker, return as-is.
+    if !input.contains("=?") {
+        return input.to_string();
+    }
+
+    let mut result = String::with_capacity(input.len());
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find("=?") {
+        // Add any text before the encoded word.
+        result.push_str(&remaining[..start]);
+
+        let after_start = &remaining[start + 2..];
+        // Find charset?encoding?text?= pattern.
+        if let Some(q1) = after_start.find('?') {
+            let charset = &after_start[..q1];
+            let after_charset = &after_start[q1 + 1..];
+            if let Some(q2) = after_charset.find('?') {
+                let encoding = &after_charset[..q2];
+                let after_encoding = &after_charset[q2 + 1..];
+                if let Some(end) = after_encoding.find("?=") {
+                    let encoded_text = &after_encoding[..end];
+                    let decoded_bytes = match encoding.to_ascii_uppercase().as_str() {
+                        "B" => base64::Engine::decode(
+                            &base64::engine::general_purpose::STANDARD,
+                            encoded_text,
+                        )
+                        .ok(),
+                        "Q" => decode_quoted_printable_header(encoded_text),
+                        _ => None,
+                    };
+
+                    if let Some(bytes) = decoded_bytes {
+                        let text = decode_charset(charset, &bytes);
+                        result.push_str(&text);
+                    } else {
+                        // Failed to decode — keep the original encoded word.
+                        let full_len = 2 + q1 + 1 + q2 + 1 + end + 2;
+                        result.push_str(&remaining[start..start + full_len]);
+                    }
+
+                    // Skip past the encoded word.
+                    let skip = q1 + 1 + q2 + 1 + end + 2;
+                    remaining = &after_start[skip..];
+                    // Strip whitespace between consecutive encoded words (RFC 2047 §6.2).
+                    if remaining.starts_with("=?") || remaining.trim_start().starts_with("=?") {
+                        remaining = remaining.trim_start();
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // Malformed encoded word — keep the `=?` and move past it.
+        result.push_str("=?");
+        remaining = after_start;
+    }
+
+    result.push_str(remaining);
+    result
+}
+
+/// Decode quoted-printable as used in RFC 2047 headers (underscores = spaces).
+fn decode_quoted_printable_header(input: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(input.len());
+    let mut chars = input.bytes();
+    while let Some(b) = chars.next() {
+        match b {
+            b'_' => bytes.push(b' '),
+            b'=' => {
+                let hi = chars.next()?;
+                let lo = chars.next()?;
+                let hex = [hi, lo];
+                let hex_str = std::str::from_utf8(&hex).ok()?;
+                let byte = u8::from_str_radix(hex_str, 16).ok()?;
+                bytes.push(byte);
+            }
+            _ => bytes.push(b),
+        }
+    }
+    Some(bytes)
+}
+
+/// Best-effort charset decoding. UTF-8 and Latin-1 are the most common.
+fn decode_charset(charset: &str, bytes: &[u8]) -> String {
+    match charset.to_ascii_lowercase().as_str() {
+        "utf-8" | "utf8" => String::from_utf8_lossy(bytes).into_owned(),
+        "iso-8859-1" | "latin1" | "latin-1" => bytes.iter().map(|&b| b as char).collect(),
+        // For other charsets, try UTF-8 first, then fall back to Latin-1.
+        _ => String::from_utf8(bytes.to_vec())
+            .unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect()),
+    }
+}
+
 // ---- Helper: convert imap_proto::Address to EmailAddress ------------------
 
 fn imap_address_to_email(addr: &async_imap::imap_proto::types::Address<'_>) -> EmailAddress {
@@ -350,7 +492,7 @@ fn imap_address_to_email(addr: &async_imap::imap_proto::types::Address<'_>) -> E
         .name
         .as_ref()
         .and_then(|b| std::str::from_utf8(b).ok())
-        .map(|s| s.to_string());
+        .map(decode_rfc2047);
 
     let mailbox = addr
         .mailbox
@@ -372,10 +514,72 @@ fn imap_address_to_email(addr: &async_imap::imap_proto::types::Address<'_>) -> E
     EmailAddress { name, address }
 }
 
+// ---- Helper: detect attachments from BODYSTRUCTURE -----------------------
+
+fn has_attachments(bs: &async_imap::imap_proto::types::BodyStructure<'_>) -> bool {
+    use async_imap::imap_proto::types::BodyStructure;
+    match bs {
+        BodyStructure::Basic { common, .. } => {
+            // Check for explicit "attachment" disposition.
+            if let Some(ref disp) = common.disposition
+                && disp.ty.eq_ignore_ascii_case("attachment")
+            {
+                return true;
+            }
+            // Non-text basic parts (image, application, audio, video) are likely attachments.
+            let ty = common.ty.ty.to_ascii_lowercase();
+            matches!(ty.as_str(), "application" | "image" | "audio" | "video")
+        }
+        BodyStructure::Text { common, .. } => {
+            // Text parts with "attachment" disposition count.
+            if let Some(ref disp) = common.disposition {
+                return disp.ty.eq_ignore_ascii_case("attachment");
+            }
+            false
+        }
+        BodyStructure::Message { body, .. } => has_attachments(body),
+        BodyStructure::Multipart { bodies, .. } => bodies.iter().any(has_attachments),
+    }
+}
+
 // ---- Trait implementation -------------------------------------------------
 
 #[async_trait]
 impl ImapClient for RealImapClient {
+    async fn folder_status(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<FolderStatus, ImapError> {
+        let mut session = connect(creds).await?;
+
+        let mailbox = session
+            .select(folder)
+            .await
+            .map_err(|e| match &e {
+                async_imap::error::Error::No(msg)
+                    if msg.to_lowercase().contains("not found")
+                        || msg.to_lowercase().contains("doesn't exist")
+                        || msg.to_lowercase().contains("does not exist")
+                        || msg.to_lowercase().contains("no such") =>
+                {
+                    ImapError::FolderNotFound(folder.to_string())
+                }
+                _ => map_imap_error(e),
+            })?;
+
+        let uid_validity = mailbox.uid_validity.unwrap_or(0);
+        let exists = mailbox.exists;
+        let uid_next = mailbox.uid_next.unwrap_or(0);
+
+        let _ = session.logout().await;
+        Ok(FolderStatus {
+            uid_validity,
+            exists,
+            uid_next,
+        })
+    }
+
     async fn list_folders(&self, creds: &ImapCredentials) -> Result<Vec<ImapFolder>, ImapError> {
         let mut session = connect(creds).await?;
 
@@ -434,7 +638,7 @@ impl ImapClient for RealImapClient {
 
         let headers = {
             let mut fetch_stream = session
-                .uid_fetch(uid_range, "(UID ENVELOPE FLAGS RFC822.SIZE)")
+                .uid_fetch(uid_range, "(UID ENVELOPE FLAGS BODYSTRUCTURE)")
                 .await
                 .map_err(map_imap_error)?;
 
@@ -455,7 +659,7 @@ impl ImapClient for RealImapClient {
                         .subject
                         .as_ref()
                         .and_then(|b| std::str::from_utf8(b).ok())
-                        .map(|s| s.to_string());
+                        .map(decode_rfc2047);
 
                     let from: Vec<EmailAddress> = env
                         .from
@@ -482,6 +686,11 @@ impl ImapClient for RealImapClient {
 
                 let flags: Vec<String> = fetch.flags().map(|f| flag_to_string(&f)).collect();
 
+                let has_attach = fetch
+                    .bodystructure()
+                    .map(|bs| has_attachments(bs))
+                    .unwrap_or(false);
+
                 headers.push(ImapMessageHeader {
                     uid,
                     subject,
@@ -489,6 +698,7 @@ impl ImapClient for RealImapClient {
                     to,
                     date,
                     flags,
+                    has_attachments: has_attach,
                 });
             }
             headers
@@ -555,6 +765,8 @@ impl ImapClient for RealImapClient {
             let text_html: Option<String> = parsed.body_html(0).map(|s| s.to_string());
 
             let mut attachments = Vec::new();
+
+            // Collect explicit attachments.
             for attachment in parsed.attachments() {
                 let filename: Option<String> =
                     attachment.attachment_name().map(|s| s.to_string());
@@ -568,6 +780,9 @@ impl ImapClient for RealImapClient {
                         }
                     },
                 );
+                let content_id = attachment
+                    .content_id()
+                    .map(|s| s.trim_matches(|c| c == '<' || c == '>').to_string());
                 let data = attachment.contents().to_vec();
                 let size = data.len();
                 attachments.push(ImapAttachment {
@@ -575,19 +790,123 @@ impl ImapClient for RealImapClient {
                     content_type,
                     size,
                     data,
+                    content_id,
                 });
             }
+
+            // Also collect inline parts with Content-ID (e.g. embedded images
+            // referenced via cid: URLs in the HTML body).
+            for part in parsed.parts.iter() {
+                if part.content_id().is_none() {
+                    continue;
+                }
+                // Skip if this is a text/html or text/plain body part.
+                let is_text = part
+                    .content_type()
+                    .is_some_and(|ct| ct.ctype() == "text");
+                if is_text {
+                    continue;
+                }
+                let cid = part
+                    .content_id()
+                    .unwrap()
+                    .trim_matches(|c| c == '<' || c == '>')
+                    .to_string();
+                // Skip if we already captured this part via attachments().
+                if attachments.iter().any(|a| a.content_id.as_deref() == Some(&cid)) {
+                    continue;
+                }
+                let content_type: String = part.content_type().map_or_else(
+                    || "application/octet-stream".to_string(),
+                    |ct: &mail_parser::ContentType<'_>| {
+                        if let Some(subtype) = ct.subtype() {
+                            format!("{}/{}", ct.ctype(), subtype)
+                        } else {
+                            ct.ctype().to_string()
+                        }
+                    },
+                );
+                let data = part.contents().to_vec();
+                let size = data.len();
+                attachments.push(ImapAttachment {
+                    filename: part.attachment_name().map(|s| s.to_string()),
+                    content_type,
+                    size,
+                    data,
+                    content_id: Some(cid),
+                });
+            }
+
+            // Extract raw headers from the RFC 822 message.
+            let raw_str = String::from_utf8_lossy(raw);
+            let raw_headers = raw_str
+                .split_once("\r\n\r\n")
+                .or_else(|| raw_str.split_once("\n\n"))
+                .map_or_else(|| raw_str.to_string(), |(h, _)| h.to_string());
 
             ImapMessageBody {
                 uid,
                 text_plain,
                 text_html,
                 attachments,
+                raw_headers,
             }
         };
 
         let _ = session.logout().await;
         Ok(body)
+    }
+
+    async fn add_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        uid: u32,
+        flags: &[&str],
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        session.select(folder).await.map_err(map_imap_error)?;
+
+        let uid_str = uid.to_string();
+        let flags_str = format!("+FLAGS ({})", flags.join(" "));
+        {
+            let mut store_stream = session
+                .uid_store(&uid_str, &flags_str)
+                .await
+                .map_err(map_imap_error)?;
+            while let Some(result) = store_stream.next().await {
+                result.map_err(map_imap_error)?;
+            }
+        }
+
+        let _ = session.logout().await;
+        Ok(())
+    }
+
+    async fn remove_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        uid: u32,
+        flags: &[&str],
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        session.select(folder).await.map_err(map_imap_error)?;
+
+        let uid_str = uid.to_string();
+        let flags_str = format!("-FLAGS ({})", flags.join(" "));
+        {
+            let mut store_stream = session
+                .uid_store(&uid_str, &flags_str)
+                .await
+                .map_err(map_imap_error)?;
+            while let Some(result) = store_stream.next().await {
+                result.map_err(map_imap_error)?;
+            }
+        }
+
+        let _ = session.logout().await;
+        Ok(())
     }
 
     async fn set_flags(
@@ -739,6 +1058,7 @@ pub mod mock {
         folders: Mutex<Vec<ImapFolder>>,
         headers: Mutex<Vec<ImapMessageHeader>>,
         bodies: Mutex<Vec<ImapMessageBody>>,
+        folder_status: Mutex<Option<FolderStatus>>,
         should_fail: Mutex<Option<ImapError>>,
     }
 
@@ -749,6 +1069,7 @@ pub mod mock {
                 folders: Mutex::new(Vec::new()),
                 headers: Mutex::new(Vec::new()),
                 bodies: Mutex::new(Vec::new()),
+                folder_status: Mutex::new(None),
                 should_fail: Mutex::new(None),
             }
         }
@@ -762,6 +1083,12 @@ pub mod mock {
         /// Pre-load message headers that `fetch_headers` will return.
         pub fn with_headers(self, headers: Vec<ImapMessageHeader>) -> Self {
             *self.headers.lock().unwrap() = headers;
+            self
+        }
+
+        /// Pre-load a folder status that `folder_status` will return.
+        pub fn with_folder_status(self, status: FolderStatus) -> Self {
+            *self.folder_status.lock().unwrap() = Some(status);
             self
         }
 
@@ -805,6 +1132,34 @@ pub mod mock {
             Ok(self.folders.lock().unwrap().clone())
         }
 
+        async fn folder_status(
+            &self,
+            _creds: &ImapCredentials,
+            _folder: &str,
+        ) -> Result<FolderStatus, ImapError> {
+            {
+                let fail = self.should_fail.lock().unwrap();
+                if let Some(ref err) = *fail {
+                    return Err(clone_error(err));
+                }
+            }
+            {
+                let status = self.folder_status.lock().unwrap();
+                if let Some(ref s) = *status {
+                    return Ok(s.clone());
+                }
+            }
+            // Derive from headers (separate lock scope).
+            let headers = self.headers.lock().unwrap();
+            let exists = headers.len() as u32;
+            let uid_next = headers.iter().map(|h| h.uid).max().unwrap_or(0) + 1;
+            Ok(FolderStatus {
+                uid_validity: 1,
+                exists,
+                uid_next,
+            })
+        }
+
         async fn fetch_headers(
             &self,
             _creds: &ImapCredentials,
@@ -835,6 +1190,32 @@ pub mod mock {
                     uid,
                     folder: _folder.to_string(),
                 })
+        }
+
+        async fn add_flags(
+            &self,
+            _creds: &ImapCredentials,
+            _folder: &str,
+            _uid: u32,
+            _flags: &[&str],
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            Ok(())
+        }
+
+        async fn remove_flags(
+            &self,
+            _creds: &ImapCredentials,
+            _folder: &str,
+            _uid: u32,
+            _flags: &[&str],
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            Ok(())
         }
 
         async fn set_flags(
@@ -931,6 +1312,7 @@ pub mod mock {
                 }],
                 date: Some("Mon, 1 Jan 2024 00:00:00 +0000".to_string()),
                 flags: vec!["\\Seen".to_string()],
+                has_attachments: false,
             }]);
 
             let headers = mock
@@ -950,6 +1332,7 @@ pub mod mock {
                     text_plain: Some("First message".to_string()),
                     text_html: None,
                     attachments: vec![],
+                    raw_headers: String::new(),
                 },
                 ImapMessageBody {
                     uid: 2,
@@ -960,7 +1343,9 @@ pub mod mock {
                         content_type: "application/pdf".to_string(),
                         size: 1024,
                         data: vec![0u8; 1024],
+                        content_id: None,
                     }],
+                    raw_headers: String::new(),
                 },
             ]);
 
@@ -978,6 +1363,7 @@ pub mod mock {
                 text_plain: Some("only message".to_string()),
                 text_html: None,
                 attachments: vec![],
+                raw_headers: String::new(),
             }]);
 
             let err = mock
