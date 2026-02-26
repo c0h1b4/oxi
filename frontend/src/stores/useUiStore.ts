@@ -47,6 +47,8 @@ interface UiState {
   messageListWidth: number;
   readingPaneVisible: boolean;
   density: "compact" | "comfortable";
+  searchQuery: string;
+  searchActive: boolean;
 
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
@@ -54,6 +56,9 @@ interface UiState {
   setMessageListWidth: (width: number) => void;
   setReadingPaneVisible: (visible: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
+  setSearchQuery: (query: string) => void;
+  setSearchActive: (active: boolean) => void;
+  clearSearch: () => void;
 }
 
 const initial = loadSettings();
@@ -65,6 +70,8 @@ export const useUiStore = create<UiState>((set) => ({
   messageListWidth: initial.messageListWidth,
   readingPaneVisible: true,
   density: "comfortable",
+  searchQuery: "",
+  searchActive: false,
 
   setActiveFolder: (folder) =>
     set({ activeFolder: folder, selectedMessageUid: null }),
@@ -79,4 +86,7 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
   setDensity: (density) => set({ density }),
+  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchActive: (active) => set({ searchActive: active }),
+  clearSearch: () => set({ searchQuery: "", searchActive: false }),
 }));
