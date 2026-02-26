@@ -9,6 +9,7 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { MessageListItem } from "./MessageListItem";
 import { formatFolderName, isDraftsFolder } from "./FolderTree";
+import { BulkActionBar } from "./BulkActionBar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -161,6 +162,11 @@ export function MessageList() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
   const showDrafts = isDraftsFolder(activeFolder);
+  const selectedMessageUids = useUiStore((s) => s.selectedMessageUids);
+  const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
+  const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
+  const selectAllMessages = useUiStore((s) => s.selectAllMessages);
+  const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
 
   const {
     data,
@@ -206,15 +212,60 @@ export function MessageList() {
     [selectMessage],
   );
 
+  const allUids = messages.map((m) => m.uid);
+  const allSelected =
+    messages.length > 0 && selectedMessageUids.length === messages.length;
+
+  const handleSelectAllToggle = useCallback(() => {
+    if (allSelected) {
+      clearBulkSelection();
+    } else {
+      selectAllMessages(allUids);
+    }
+  }, [allSelected, allUids, clearBulkSelection, selectAllMessages]);
+
   return (
     <div className="flex h-full flex-col">
       {/* Header bar */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <h2 className="text-sm font-semibold">{formatFolderName(activeFolder)}</h2>
+        <div className="flex items-center gap-2">
+          {/* Select all checkbox */}
+          {!isLoading && !isError && messages.length > 0 && (
+            <button
+              type="button"
+              aria-label={allSelected ? "Deselect all" : "Select all"}
+              onClick={handleSelectAllToggle}
+              className={cn(
+                "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                allSelected
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-muted-foreground/40 bg-transparent hover:border-primary",
+              )}
+            >
+              {allSelected && (
+                <svg
+                  className="size-3"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M2.5 6l2.5 2.5 4.5-5" />
+                </svg>
+              )}
+            </button>
+          )}
+          <h2 className="text-sm font-semibold">{formatFolderName(activeFolder)}</h2>
+        </div>
         <span className="text-xs text-muted-foreground">
           {isLoading ? "\u2026" : `${totalCount} messages`}
         </span>
       </div>
+
+      {/* Bulk action bar */}
+      <BulkActionBar />
 
       {/* Loading state */}
       {isLoading && (
@@ -274,6 +325,9 @@ export function MessageList() {
                       isSelected={selectedMessageUid === message.uid}
                       density={density}
                       onClick={() => handleClick(message.uid)}
+                      bulkSelectMode={bulkSelectMode}
+                      isBulkSelected={selectedMessageUids.includes(message.uid)}
+                      onBulkToggle={toggleBulkSelect}
                     />
                   </div>
                 );

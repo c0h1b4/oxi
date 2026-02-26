@@ -51,3 +51,23 @@ export interface MessagesResponse {
   page: number;
   per_page: number;
 }
+
+export interface SearchResultItem {
+  uid: number;
+  folder: string;
+  score: number;
+  subject: string;
+  from_address: string;
+  from_name: string;
+  to_addresses: string;
+  date: string;
+  flags: string;
+  has_attachments: boolean;
+  snippet: string;
+}
+
+export interface SearchResponse {
+  results: SearchResultItem[];
+  total_count: number;
+  query: string;
+}

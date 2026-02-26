@@ -188,6 +188,17 @@ pub fn refresh_unread_count(conn: &Connection, folder_name: &str) -> Result<(), 
     Ok(())
 }
 
+/// Adjust a folder's unread count by a signed delta (positive to increase, negative to decrease).
+/// Clamps to zero to avoid negative counts.
+pub fn adjust_unread_count(conn: &Connection, folder_name: &str, delta: i32) -> Result<(), String> {
+    conn.execute(
+        "UPDATE folders SET unread_count = MAX(0, CAST(unread_count AS INTEGER) + ?1) WHERE name = ?2",
+        params![delta, folder_name],
+    )
+    .map_err(|e| format!("Failed to adjust unread_count: {e}"))?;
+    Ok(())
+}
+
 /// Check whether any folder was updated within the last `max_age_secs` seconds.
 /// Returns `true` if the cache is still fresh, `false` if stale or empty.
 pub fn is_folder_cache_fresh(conn: &Connection, max_age_secs: u32) -> Result<bool, String> {
@@ -221,6 +232,31 @@ pub fn is_folder_fresh(conn: &Connection, folder_name: &str, max_age_secs: u32) 
     Ok(fresh)
 }
 
+/// Check whether a folder's messages cache has been invalidated
+/// (i.e., `messages_updated_at IS NULL`), meaning its unread count was
+/// manually adjusted and should not be recomputed from the messages table.
+pub fn is_folder_messages_invalidated(conn: &Connection, folder_name: &str) -> Result<bool, String> {
+    let invalidated: bool = conn
+        .query_row(
+            "SELECT messages_updated_at IS NULL FROM folders WHERE name = ?1",
+            params![folder_name],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    Ok(invalidated)
+}
+
+/// Clear a folder's `messages_updated_at` so the next `is_folder_fresh` check
+/// returns `false` and forces an IMAP resync.
+pub fn invalidate_folder_freshness(conn: &Connection, folder_name: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE folders SET messages_updated_at = NULL WHERE name = ?1",
+        params![folder_name],
+    )
+    .map_err(|e| format!("Failed to invalidate folder freshness: {e}"))?;
+    Ok(())
+}
+
 /// Return a single folder by name, or `None` if not found.
 pub fn get_folder(conn: &Connection, name: &str) -> Result<Option<CachedFolder>, String> {
     let result = conn.query_row(
@@ -251,6 +287,30 @@ pub fn get_folder(conn: &Connection, name: &str) -> Result<Option<CachedFolder>,
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(format!("Failed to get folder: {e}")),
     }
+}
+
+/// Delete a folder and all its cached messages.
+pub fn delete_folder_and_messages(conn: &Connection, folder_name: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM messages WHERE folder = ?1", params![folder_name])
+        .map_err(|e| format!("Failed to delete folder messages: {e}"))?;
+    conn.execute("DELETE FROM folders WHERE name = ?1", params![folder_name])
+        .map_err(|e| format!("Failed to delete folder: {e}"))?;
+    Ok(())
+}
+
+/// Rename a folder in the cache, updating both folders and messages tables.
+pub fn rename_folder_in_cache(conn: &Connection, old_name: &str, new_name: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE messages SET folder = ?1 WHERE folder = ?2",
+        params![new_name, old_name],
+    )
+    .map_err(|e| format!("Failed to rename messages folder: {e}"))?;
+    conn.execute(
+        "UPDATE folders SET name = ?1 WHERE name = ?2",
+        params![new_name, old_name],
+    )
+    .map_err(|e| format!("Failed to rename folder: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -47,6 +47,11 @@ interface UiState {
   messageListWidth: number;
   readingPaneVisible: boolean;
   density: "compact" | "comfortable";
+  searchQuery: string;
+  searchActive: boolean;
+  viewMode: "mail" | "contacts";
+  selectedMessageUids: number[];
+  bulkSelectMode: boolean;
 
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
@@ -54,6 +59,14 @@ interface UiState {
   setMessageListWidth: (width: number) => void;
   setReadingPaneVisible: (visible: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
+  setSearchQuery: (query: string) => void;
+  setSearchActive: (active: boolean) => void;
+  clearSearch: () => void;
+  setViewMode: (mode: "mail" | "contacts") => void;
+  toggleBulkSelect: (uid: number) => void;
+  selectAllMessages: (uids: number[]) => void;
+  clearBulkSelection: () => void;
+  setBulkSelectMode: (mode: boolean) => void;
 }
 
 const initial = loadSettings();
@@ -65,9 +78,14 @@ export const useUiStore = create<UiState>((set) => ({
   messageListWidth: initial.messageListWidth,
   readingPaneVisible: true,
   density: "comfortable",
+  searchQuery: "",
+  searchActive: false,
+  viewMode: "mail",
+  selectedMessageUids: [],
+  bulkSelectMode: false,
 
   setActiveFolder: (folder) =>
-    set({ activeFolder: folder, selectedMessageUid: null }),
+    set({ activeFolder: folder, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   selectMessage: (uid) => set({ selectedMessageUid: uid }),
   setSidebarWidth: (width) => {
     saveSettings({ sidebarWidth: width });
@@ -79,4 +97,23 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
   setDensity: (density) => set({ density }),
+  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchActive: (active) => set({ searchActive: active }),
+  clearSearch: () => set({ searchQuery: "", searchActive: false }),
+  setViewMode: (mode) => set({ viewMode: mode }),
+  toggleBulkSelect: (uid) =>
+    set((state) => {
+      const exists = state.selectedMessageUids.includes(uid);
+      const next = exists
+        ? state.selectedMessageUids.filter((id) => id !== uid)
+        : [...state.selectedMessageUids, uid];
+      return {
+        selectedMessageUids: next,
+        bulkSelectMode: next.length > 0 ? true : state.bulkSelectMode,
+      };
+    }),
+  selectAllMessages: (uids) => set({ selectedMessageUids: uids, bulkSelectMode: true }),
+  clearBulkSelection: () => set({ selectedMessageUids: [], bulkSelectMode: false }),
+  setBulkSelectMode: (mode) =>
+    set({ bulkSelectMode: mode, selectedMessageUids: mode ? [] : [] }),
 }));

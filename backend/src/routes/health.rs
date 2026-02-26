@@ -50,7 +50,10 @@ mod tests {
         let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
         let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
         let smtp_client: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
-        let app = create_router(config, store, imap_client, smtp_client);
+        let search_engine = Arc::new(crate::search::engine::SearchEngine::new(
+            std::path::PathBuf::from("/tmp/oxi-test"),
+        ));
+        let app = create_router(config, store, imap_client, smtp_client, search_engine);
 
         let response = app
             .oneshot(

@@ -16,6 +16,7 @@ import {
 import { apiPost } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
+import { useUiStore } from "@/stores/useUiStore";
 
 function NavButton({
   icon,
@@ -49,6 +50,8 @@ function NavButton({
 
 export function NavRail() {
   const router = useRouter();
+  const viewMode = useUiStore((s) => s.viewMode);
+  const setViewMode = useUiStore((s) => s.setViewMode);
   const [dark, setDark] = useState(() => {
     if (typeof window === "undefined") return false;
     const stored = localStorage.getItem("oxi-theme");
@@ -102,13 +105,14 @@ export function NavRail() {
         <NavButton
           icon={<Mail className="size-5" />}
           label="Mail"
-          active
+          active={viewMode === "mail"}
+          onClick={() => setViewMode("mail")}
         />
         <NavButton
           icon={<Users className="size-5" />}
           label="Contacts"
-          disabled
-          onClick={() => showComingSoon("Contacts")}
+          active={viewMode === "contacts"}
+          onClick={() => setViewMode(viewMode === "contacts" ? "mail" : "contacts")}
         />
         <NavButton
           icon={<Settings className="size-5" />}

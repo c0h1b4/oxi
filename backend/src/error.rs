@@ -97,13 +97,12 @@ impl std::fmt::Display for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
     use http_body_util::BodyExt;
 
     async fn error_to_json(error: AppError) -> (StatusCode, serde_json::Value) {
         let response = error.into_response();
         let status = response.status();
-        let body = Body::from(response.into_body())
+        let body = response.into_body()
             .collect()
             .await
             .expect("body should collect")
