@@ -11,9 +11,6 @@ interface MessageListItemProps {
   isSelected: boolean;
   density: "compact" | "comfortable";
   onClick: () => void;
-  bulkSelectMode?: boolean;
-  isBulkSelected?: boolean;
-  onBulkToggle?: (uid: number) => void;
 }
 
 function formatDate(dateStr: string): string {
@@ -69,44 +66,12 @@ function formatDate(dateStr: string): string {
   return `${day} ${time}`;
 }
 
-function BulkCheckbox({
-  checked,
-  bulkSelectMode,
-  onToggle,
-}: {
-  checked: boolean;
-  bulkSelectMode: boolean;
-  onToggle: (e: React.MouseEvent) => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={checked ? "Deselect message" : "Select message"}
-      onClick={onToggle}
-      className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-        checked
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-muted-foreground/40 bg-transparent hover:border-primary",
-        // Show on hover when not in bulk mode; always visible in bulk mode
-        bulkSelectMode ? "visible" : "invisible group-hover/row:visible",
-      )}
-    >
-      {checked && (
-        <svg
-          className="size-3"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M2.5 6l2.5 2.5 4.5-5" />
-        </svg>
-      )}
-    </button>
-  );
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
 }
 
 export const MessageListItem = memo(function MessageListItem({
@@ -114,15 +79,14 @@ export const MessageListItem = memo(function MessageListItem({
   isSelected,
   density,
   onClick,
-  bulkSelectMode = false,
-  isBulkSelected = false,
-  onBulkToggle,
 }: MessageListItemProps) {
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
   const sender = message.from_name || message.from_address;
   const formattedDate = formatDate(message.date);
+  const formattedSize = formatSize(message.size);
   const updateFlags = useUpdateFlags();
+  const [isHovered, setIsHovered] = useState(false);
 
   const toggleStar = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -143,14 +107,6 @@ export const MessageListItem = memo(function MessageListItem({
       add: isUnread, // if unread, add \Seen; if read, remove \Seen
     });
   };
-
-  const handleBulkToggle = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onBulkToggle?.(message.uid);
-    },
-    [onBulkToggle, message.uid],
-  );
 
   const [isDragging, setIsDragging] = useState(false);
 
@@ -180,9 +136,6 @@ export const MessageListItem = memo(function MessageListItem({
         role="row"
         aria-selected={isSelected}
         tabIndex={0}
-        draggable="true"
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
         onClick={onClick}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -190,22 +143,19 @@ export const MessageListItem = memo(function MessageListItem({
             onClick();
           }
         }}
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         className={cn(
-          "group/row flex h-9 cursor-pointer items-center gap-2 border-b border-border px-3 text-sm transition-colors",
+          "flex h-9 cursor-pointer items-center gap-2 border-b border-border px-3 text-sm transition-colors",
           "hover:bg-muted",
           isUnread ? "bg-background font-semibold" : "bg-transparent font-normal",
           isSelected && "bg-accent hover:bg-accent",
-          isBulkSelected && "bg-primary/5",
           isDragging && "opacity-50",
         )}
       >
-        {/* Bulk selection checkbox */}
-        <BulkCheckbox
-          checked={isBulkSelected}
-          bulkSelectMode={bulkSelectMode}
-          onToggle={handleBulkToggle}
-        />
-
         {/* Unread indicator dot */}
         <button
           type="button"
@@ -236,22 +186,22 @@ export const MessageListItem = memo(function MessageListItem({
         </button>
 
         {/* Sender */}
-        <span className="w-32 shrink-0 truncate">{sender}</span>
+        <span className={cn("w-32 shrink-0 truncate font-normal", isFlagged ? "text-primary" : "text-muted-foreground")}>{sender}</span>
 
         {/* Dash separator */}
         <span className="shrink-0 text-muted-foreground">&mdash;</span>
 
         {/* Subject */}
-        <span className="min-w-0 flex-1 truncate">{message.subject}</span>
+        <span className={cn("min-w-0 flex-1 truncate", isFlagged && "text-primary")}>{message.subject || "(no subject)"}</span>
 
         {/* Attachment icon */}
         {message.has_attachments && (
           <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
         )}
 
-        {/* Date */}
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {formattedDate}
+        {/* Date / Size on hover */}
+        <span className={cn("shrink-0 text-xs", isFlagged ? "text-primary" : "text-muted-foreground")}>
+          {isHovered ? formattedSize : formattedDate}
         </span>
       </div>
     );
@@ -263,9 +213,6 @@ export const MessageListItem = memo(function MessageListItem({
       role="row"
       aria-selected={isSelected}
       tabIndex={0}
-      draggable="true"
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -273,24 +220,46 @@ export const MessageListItem = memo(function MessageListItem({
           onClick();
         }
       }}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       className={cn(
-        "group/row flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 transition-colors",
+        "flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 transition-colors",
         "hover:bg-muted",
-        isUnread ? "bg-background font-semibold" : "bg-transparent font-normal",
+        isUnread ? "bg-background" : "bg-transparent",
         isSelected && "bg-accent hover:bg-accent",
-        isBulkSelected && "bg-primary/5",
         isDragging && "opacity-50",
       )}
     >
-      {/* Top row: sender + date */}
-      <div className="flex items-center gap-2">
-        {/* Bulk selection checkbox */}
-        <BulkCheckbox
-          checked={isBulkSelected}
-          bulkSelectMode={bulkSelectMode}
-          onToggle={handleBulkToggle}
-        />
+      {/* Top row: sender + date + star */}
+      <div className="flex items-center gap-2 pl-6">
+        {/* Sender name */}
+        <span className={cn("min-w-0 flex-1 truncate text-xs font-normal", isFlagged ? "text-primary" : "text-muted-foreground")}>{sender}</span>
 
+        {/* Date / Size on hover */}
+        <span className={cn("shrink-0 text-xs font-normal", isFlagged ? "text-primary" : "text-muted-foreground")}>
+          {isHovered ? formattedSize : formattedDate}
+        </span>
+
+        {/* Star */}
+        <button
+          type="button"
+          aria-label={isFlagged ? "Unstar" : "Star"}
+          onClick={toggleStar}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
+        >
+          {isFlagged ? (
+            <Star className="size-3.5 fill-primary text-primary" />
+          ) : (
+            <Star className="size-3.5 text-muted-foreground/40" />
+          )}
+        </button>
+      </div>
+
+      {/* Bottom row: dot + subject + snippet */}
+      <div className="flex items-center gap-2">
         {/* Unread indicator dot */}
         <button
           type="button"
@@ -306,37 +275,12 @@ export const MessageListItem = memo(function MessageListItem({
           />
         </button>
 
-        {/* Star */}
-        <button
-          type="button"
-          aria-label={isFlagged ? "Unstar" : "Star"}
-          onClick={toggleStar}
-          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
-        >
-          {isFlagged ? (
-            <Star className="size-3.5 fill-primary text-primary" />
-          ) : (
-            <Star className="size-3.5 text-muted-foreground/40" />
-          )}
-        </button>
-
-        {/* Sender name */}
-        <span className="min-w-0 flex-1 truncate text-sm">{sender}</span>
-
-        {/* Date */}
-        <span className="shrink-0 text-xs font-normal text-muted-foreground">
-          {formattedDate}
-        </span>
-      </div>
-
-      {/* Bottom row: subject + snippet + attachments */}
-      <div className="flex items-center gap-2 pl-[calc(0.375rem+0.375rem+1rem+0.5rem)]">
-        <span className="min-w-0 flex-1 truncate text-sm font-normal text-muted-foreground">
-          <span className={cn(isUnread && "font-medium text-foreground")}>
-            {message.subject}
+        <span className="min-w-0 flex-1 truncate text-sm">
+          <span className={cn(isUnread ? "font-medium" : "font-normal", isFlagged ? "text-primary" : "text-foreground")}>
+            {message.subject || "(no subject)"}
           </span>
           {message.snippet && (
-            <span className="text-muted-foreground">
+            <span className="font-normal text-muted-foreground">
               {" "}
               &mdash; {message.snippet}
             </span>

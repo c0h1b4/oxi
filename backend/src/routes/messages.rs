@@ -12,7 +12,7 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
-use crate::search::engine::{IndexableMessage, SearchEngine};
+use crate::search::engine::{IndexableMessage, SearchEngine, UserIndex};
 
 // ---------------------------------------------------------------------------
 // Query / request types
@@ -70,6 +70,7 @@ struct MessageSummary {
     to_addresses: String,
     date: String,
     flags: String,
+    size: u32,
     has_attachments: bool,
     snippet: String,
 }
@@ -307,7 +308,7 @@ pub async fn list_messages(
                     "[]",
                     date,
                     &flags_csv,
-                    0,
+                    header.size,
                     header.has_attachments,
                     "",
                 )
@@ -315,7 +316,9 @@ pub async fn list_messages(
             }
 
             // Index newly synced messages into the search engine.
+            // Skip indexing for Spam/Junk/Trash folders.
             if !headers.is_empty()
+                && !UserIndex::is_excluded_folder(&folder)
                 && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
             {
                 let indexable: Vec<IndexableMessage> = headers
@@ -391,6 +394,7 @@ pub async fn list_messages(
             to_addresses: m.to_addresses,
             date: m.date,
             flags: m.flags,
+            size: m.size,
             has_attachments: m.has_attachments,
             snippet: m.snippet,
         })
@@ -507,7 +511,9 @@ pub async fn get_message(
         .ok_or_else(|| AppError::NotFound(format!("Message UID {uid} not found in cache")))?;
 
     // Re-index message with full body text for search.
+    // Skip indexing for Spam/Junk/Trash folders.
     if let Some(ref text) = body_text
+        && !UserIndex::is_excluded_folder(&folder)
         && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
     {
         let indexable = IndexableMessage {
@@ -656,14 +662,35 @@ pub async fn move_message_handler(
         .await
         .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
 
-    // Delete from source folder in SQLite cache.
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Check if the message was unread before removing it from the source cache,
+    // so we can adjust the destination folder's unread count.
+    let was_unread = db::messages::get_single_message(&conn, &body.from_folder, body.uid)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
+        .map(|m| !m.flags.contains("\\Seen"))
+        .unwrap_or(false);
+
+    // Delete from source folder cache. We don't keep the row in the destination
+    // because the UID changes after an IMAP MOVE, and a stale UID would cause
+    // 404s when trying to fetch the message body.
     db::messages::delete_message(&conn, &body.from_folder, body.uid)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    // Refresh unread count for source folder.
+    // Refresh source folder unread count (now accurate since the row is gone).
     db::folders::refresh_unread_count(&conn, &body.from_folder)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Bump destination folder unread count if the moved message was unread.
+    if was_unread {
+        db::folders::adjust_unread_count(&conn, &body.to_folder, 1)
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    }
+
+    // Invalidate destination folder cache so the next list request forces an
+    // IMAP resync and picks up the moved message with its new UID.
+    db::folders::invalidate_folder_freshness(&conn, &body.to_folder)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -713,9 +740,22 @@ pub async fn download_attachment(
         .unwrap_or_else(|| format!("attachment_{index}"));
     let content_type = attachment.content_type;
 
+<<<<<<< ours
     let is_inline = content_type.starts_with("image/") || content_type == "application/pdf";
     let disp_type = if is_inline { "inline" } else { "attachment" };
     let disposition = format!("{disp_type}; filename=\"{}\"", filename.replace('"', "\\\""));
+=======
+    // Use inline disposition for types the browser can display natively
+    // (PDF, images) so the preview works; use attachment for everything else.
+    let is_inline = content_type == "application/pdf"
+        || content_type.starts_with("image/")
+        || content_type.starts_with("text/");
+    let disposition = if is_inline {
+        format!("inline; filename=\"{}\"", filename.replace('"', "\\\""))
+    } else {
+        format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""))
+    };
+>>>>>>> theirs
 
     Ok(Response::builder()
         .header("content-type", &content_type)

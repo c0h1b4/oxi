@@ -44,6 +44,8 @@ pub struct ImapMessageHeader {
     pub flags: Vec<String>,
     /// Whether this message has attachments (derived from BODYSTRUCTURE).
     pub has_attachments: bool,
+    /// RFC 2822 size of the message in bytes.
+    pub size: u32,
 }
 
 /// The full body of an email message, including attachments.
@@ -680,7 +682,7 @@ impl ImapClient for RealImapClient {
 
         let headers = {
             let mut fetch_stream = session
-                .uid_fetch(uid_range, "(UID ENVELOPE FLAGS BODYSTRUCTURE)")
+                .uid_fetch(uid_range, "(UID ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE)")
                 .await
                 .map_err(map_imap_error)?;
 
@@ -733,6 +735,8 @@ impl ImapClient for RealImapClient {
                     .map(|bs| has_attachments(bs))
                     .unwrap_or(false);
 
+                let size = fetch.size.unwrap_or(0);
+
                 headers.push(ImapMessageHeader {
                     uid,
                     subject,
@@ -741,6 +745,7 @@ impl ImapClient for RealImapClient {
                     date,
                     flags,
                     has_attachments: has_attach,
+                    size,
                 });
             }
             headers
@@ -1510,6 +1515,7 @@ pub mod mock {
                 date: Some("Mon, 1 Jan 2024 00:00:00 +0000".to_string()),
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
+                size: 1024,
             }]);
 
             let headers = mock
