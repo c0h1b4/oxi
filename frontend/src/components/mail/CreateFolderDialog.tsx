@@ -16,10 +16,10 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const createFolder = useCreateFolder();
 
-  // Focus input when dialog opens
+  // Reset state and focus input when dialog opens.
   useEffect(() => {
     if (open) {
-      setName("");
+      setName(""); // eslint-disable-line react-hooks/set-state-in-effect -- intentional reset on dialog open
       createFolder.reset();
       // Small delay to ensure the DOM has rendered
       const timer = setTimeout(() => inputRef.current?.focus(), 50);
