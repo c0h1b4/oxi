@@ -230,6 +230,36 @@ pub trait ImapClient: Send + Sync {
         message_bytes: &[u8],
         flags: &[&str],
     ) -> Result<(), ImapError>;
+
+    /// Create a new folder (mailbox) and subscribe to it.
+    async fn create_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+    ) -> Result<(), ImapError>;
+
+    /// Rename an existing folder.
+    async fn rename_folder(
+        &self,
+        creds: &ImapCredentials,
+        from: &str,
+        to: &str,
+    ) -> Result<(), ImapError>;
+
+    /// Permanently delete a folder (mailbox).
+    async fn delete_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+    ) -> Result<(), ImapError>;
+
+    /// Subscribe to or unsubscribe from a folder.
+    async fn subscribe_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+        subscribe: bool,
+    ) -> Result<(), ImapError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1109,66 @@ impl ImapClient for RealImapClient {
         let _ = session.logout().await;
         Ok(())
     }
+
+    async fn create_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        session.create(folder_name).await.map_err(map_imap_error)?;
+        session
+            .subscribe(folder_name)
+            .await
+            .map_err(map_imap_error)?;
+        session.logout().await.ok();
+        Ok(())
+    }
+
+    async fn rename_folder(
+        &self,
+        creds: &ImapCredentials,
+        from: &str,
+        to: &str,
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        session.rename(from, to).await.map_err(map_imap_error)?;
+        session.logout().await.ok();
+        Ok(())
+    }
+
+    async fn delete_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        session.delete(folder_name).await.map_err(map_imap_error)?;
+        session.logout().await.ok();
+        Ok(())
+    }
+
+    async fn subscribe_folder(
+        &self,
+        creds: &ImapCredentials,
+        folder_name: &str,
+        subscribe: bool,
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+        if subscribe {
+            session
+                .subscribe(folder_name)
+                .await
+                .map_err(map_imap_error)?;
+        } else {
+            session
+                .unsubscribe(folder_name)
+                .await
+                .map_err(map_imap_error)?;
+        }
+        session.logout().await.ok();
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,6 +1403,52 @@ pub mod mock {
                 .lock()
                 .unwrap()
                 .push((folder.to_string(), message_bytes.to_vec()));
+            Ok(())
+        }
+
+        async fn create_folder(
+            &self,
+            _creds: &ImapCredentials,
+            _folder_name: &str,
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            Ok(())
+        }
+
+        async fn rename_folder(
+            &self,
+            _creds: &ImapCredentials,
+            _from: &str,
+            _to: &str,
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            Ok(())
+        }
+
+        async fn delete_folder(
+            &self,
+            _creds: &ImapCredentials,
+            _folder_name: &str,
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            Ok(())
+        }
+
+        async fn subscribe_folder(
+            &self,
+            _creds: &ImapCredentials,
+            _folder_name: &str,
+            _subscribe: bool,
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
             Ok(())
         }
     }
@@ -1588,6 +1724,43 @@ pub mod mock {
 
             let headers = mock.fetch_headers(&creds, "INBOX", "1:*").await.unwrap();
             assert!(headers.is_empty());
+        }
+
+        #[tokio::test]
+        async fn mock_create_folder_succeeds() {
+            let mock = MockImapClient::new();
+            let result = mock.create_folder(&test_creds(), "NewFolder").await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn mock_rename_folder_succeeds() {
+            let mock = MockImapClient::new();
+            let result = mock
+                .rename_folder(&test_creds(), "OldName", "NewName")
+                .await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn mock_delete_folder_succeeds() {
+            let mock = MockImapClient::new();
+            let result = mock.delete_folder(&test_creds(), "OldFolder").await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn mock_subscribe_folder_succeeds() {
+            let mock = MockImapClient::new();
+            let result = mock
+                .subscribe_folder(&test_creds(), "SomeFolder", true)
+                .await;
+            assert!(result.is_ok());
+
+            let result = mock
+                .subscribe_folder(&test_creds(), "SomeFolder", false)
+                .await;
+            assert!(result.is_ok());
         }
 
         // -------------------------------------------------------------------
