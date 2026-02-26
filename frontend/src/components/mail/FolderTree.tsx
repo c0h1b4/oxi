@@ -25,6 +25,25 @@ import { CreateFolderDialog } from "@/components/mail/CreateFolderDialog";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";
 
+/** Map raw folder names to user-friendly display names. */
+export function formatFolderName(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower === "inbox") return "Inbox";
+  if (lower === "drafts" || lower === "[gmail]/drafts") return "Drafts";
+  if (lower === "sent" || lower === "[gmail]/sent mail") return "Sent";
+  if (lower === "trash" || lower === "[gmail]/trash") return "Trash";
+  if (lower === "junk" || lower === "spam" || lower === "[gmail]/spam") return "Spam";
+  if (lower === "archive" || lower === "[gmail]/all mail") return "Archive";
+  if (lower === "starred" || lower === "flagged") return "Starred";
+  return name;
+}
+
+/** Check whether a folder name refers to the Drafts folder. */
+export function isDraftsFolder(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "drafts" || lower === "[gmail]/drafts";
+}
+
 /** Sort priority for well-known folders.  Lower = higher in the list. */
 function folderSortOrder(name: string): number {
   const lower = name.toLowerCase();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef } from "react";
 import { Loader2, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
@@ -131,7 +131,8 @@ function SearchResultRow({
 
 export function SearchResults() {
   const searchQuery = useUiStore((s) => s.searchQuery);
-  const navigateToMessage = useUiStore((s) => s.navigateToMessage);
+  const setActiveFolder = useUiStore((s) => s.setActiveFolder);
+  const selectMessage = useUiStore((s) => s.selectMessage);
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
 
@@ -139,38 +140,19 @@ export function SearchResults() {
     data,
     isLoading,
     isError,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
   } = useSearch(searchQuery);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Flatten all pages into a single array.
-  const results = data?.pages.flatMap((page) => page.results) ?? [];
-  const totalCount = data?.pages[0]?.total_count ?? 0;
-
-  // Infinite scroll: fetch next page when near bottom.
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      if (scrollHeight - scrollTop - clientHeight < 200 && hasNextPage && !isFetchingNextPage) {
-        fetchNextPage();
-      }
-    };
-
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const results = data?.results ?? [];
+  const totalCount = data?.total_count ?? 0;
 
   const handleResultClick = useCallback(
     (result: SearchResultItem) => {
-      navigateToMessage(result.folder, result.uid);
+      setActiveFolder(result.folder);
+      selectMessage(result.uid);
     },
-    [navigateToMessage],
+    [setActiveFolder, selectMessage],
   );
 
   return (
@@ -222,11 +204,6 @@ export function SearchResults() {
                 onClick={() => handleResultClick(result)}
               />
             ))}
-            {isFetchingNextPage && (
-              <div className="flex items-center justify-center py-2">
-                <span className="text-xs text-muted-foreground">Loading more...</span>
-              </div>
-            )}
           </div>
         </>
       )}

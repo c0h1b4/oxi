@@ -84,7 +84,6 @@ pub fn create_router(
     imap_client: Arc<dyn ImapClient>,
     smtp_client: Arc<dyn SmtpClient>,
     search_engine: Arc<crate::search::engine::SearchEngine>,
-    smtp_client: Arc<dyn crate::smtp::client::SmtpClient>,
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
@@ -170,27 +169,6 @@ pub fn create_router(
             "/contacts/{id}",
             get(contacts::get_contact_handler).delete(contacts::delete_contact_handler),
         )
-        .route("/messages/send", post(send::send_message_handler))
-        .route(
-            "/drafts",
-            get(drafts::list_drafts_handler).post(drafts::upsert_draft_handler),
-        )
-        .route(
-            "/drafts/{id}",
-            get(drafts::get_draft_handler).delete(drafts::delete_draft_handler),
-        )
-        .route(
-            "/drafts/{draft_id}/attachments",
-            post(attachments::upload_attachment),
-        )
-        .route(
-            "/drafts/{draft_id}/attachments/{attachment_id}",
-            delete(attachments::delete_attachment),
-        )
-        .route(
-            "/drafts/{draft_id}/attachments/{attachment_id}/content",
-            get(attachments::get_attachment_content),
-        )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 
@@ -207,7 +185,6 @@ pub fn create_router(
         .fallback_service(static_service)
         .layer(Extension(smtp_client))
         .layer(Extension(search_engine))
-        .layer(Extension(smtp_client))
         .layer(Extension(imap_client))
         .layer(Extension(store))
         .layer(Extension(config.clone()))
@@ -320,12 +297,6 @@ mod tests {
         Arc::new(crate::search::engine::SearchEngine::new(
             std::path::PathBuf::from(data_dir),
         ))
-    }
-
-    /// Helper: create a mock SMTP client for tests.
-    fn test_smtp_client() -> Arc<dyn crate::smtp::client::SmtpClient> {
-        use crate::smtp::client::mock::MockSmtpClient;
-        Arc::new(MockSmtpClient::new())
     }
 
     /// Helper: provision a user database so that route handlers can open it.
@@ -1451,7 +1422,7 @@ mod tests {
 
         let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
         let mock_imap: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
-        let app = create_router(config, store, mock_imap, mock_smtp);
+        let app = create_router(config, store, mock_imap, mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1494,7 +1465,7 @@ mod tests {
 
         provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
 
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1536,7 +1507,7 @@ mod tests {
 
         provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
 
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1575,7 +1546,7 @@ mod tests {
 
         provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
 
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1621,7 +1592,7 @@ mod tests {
             MockSmtpClient::new()
                 .with_error(SmtpError::SendFailed("relay denied".to_string())),
         );
-        let app = create_router(config, store, test_imap_client(), failing_smtp);
+        let app = create_router(config, store, test_imap_client(), failing_smtp, test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
