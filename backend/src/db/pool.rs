@@ -10,6 +10,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (3, include_str!("../../migrations/V003__add_date_epoch.sql")),
     (4, include_str!("../../migrations/V004__folder_messages_updated_at.sql")),
     (5, include_str!("../../migrations/V005__drafts_and_attachments.sql")),
+    (6, include_str!("../../migrations/V006__cache_attachments_and_headers.sql")),
 ];
 
 /// Run any pending migrations based on SQLite's `user_version` PRAGMA.
@@ -23,17 +24,19 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| format!("Failed to read user_version: {e}"))?;
 
-    // Sync with refinery's migration state if user_version hasn't been set yet.
-    if current == 0 {
-        let refinery_max: Option<u32> = conn
-            .query_row(
-                "SELECT MAX(version) FROM refinery_schema_history",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(None);
+    // Sync with refinery's migration state so we never re-apply migrations
+    // that refinery already applied (refinery updates its own history table
+    // but doesn't touch the user_version pragma).
+    let refinery_max: Option<u32> = conn
+        .query_row(
+            "SELECT MAX(version) FROM refinery_schema_history",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(None);
 
-        if let Some(v) = refinery_max {
+    if let Some(v) = refinery_max {
+        if v > current {
             current = v;
             conn.execute_batch(&format!("PRAGMA user_version = {current};"))
                 .map_err(|e| format!("Failed to sync user_version from refinery: {e}"))?;

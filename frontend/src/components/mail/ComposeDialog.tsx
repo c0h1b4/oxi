@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Dialog } from "radix-ui";
+import { AlertDialog, Dialog } from "radix-ui";
 import {
   Send,
   X,
@@ -9,13 +9,20 @@ import {
   AlertTriangle,
   Paperclip,
   Loader2,
+  Save,
+  Maximize2,
+  Minimize2,
+  Download,
+  Upload,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useComposeStore } from "@/stores/useComposeStore";
 import {
   useSendMessage,
   useSaveDraft,
   useUploadAttachment,
   useDeleteAttachment,
+  useDeleteDraft,
 } from "@/hooks/useCompose";
 import { RichTextEditor } from "@/components/mail/RichTextEditor";
 import { cn } from "@/lib/utils";
@@ -77,15 +84,21 @@ export function ComposeDialog() {
   const saveDraftMutation = useSaveDraft();
   const uploadMutation = useUploadAttachment();
   const deleteMutation = useDeleteAttachment();
-  const [undoTimer, setUndoTimer] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null);
+  const deleteDraftMutation = useDeleteDraft();
   const [sending, setSending] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [showDiscardAlert, setShowDiscardAlert] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [previewAttId, setPreviewAttId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const toInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastSavedHashRef = useRef<string>("");
+
+  const hasContent = useCallback(() => {
+    return !!(to.trim() || cc.trim() || bcc.trim() || subject.trim() || stripHtml(body).trim() || attachments.length > 0);
+  }, [to, cc, bcc, subject, body, attachments]);
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
@@ -96,23 +109,16 @@ export function ComposeDialog() {
     }
   }, [isOpen]);
 
-  // Clear toast after 5s
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 5000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
   // Compute a simple hash of compose fields for dirty tracking
   const computeHash = useCallback(() => {
     return `${to}|${cc}|${bcc}|${subject}|${body}`;
   }, [to, cc, bcc, subject, body]);
 
-  // Save draft function
-  const saveDraft = useCallback(() => {
+  // Save draft function. When force=true, skip the hash guard (used for explicit save/close).
+  const saveDraft = useCallback((force = false) => {
     const hash = computeHash();
-    // Don't save if nothing changed or compose is empty
-    if (hash === lastSavedHashRef.current) return;
+    // Don't save if nothing changed (unless forced) or compose is empty
+    if (!force && hash === lastSavedHashRef.current) return;
     if (!to.trim() && !cc.trim() && !bcc.trim() && !subject.trim() && !stripHtml(body).trim()) return;
 
     let currentDraftId = draftId;
@@ -138,6 +144,7 @@ export function ComposeDialog() {
           lastSavedHashRef.current = hash;
           setDraftSaved(true);
           setTimeout(() => setDraftSaved(false), 3000);
+          toast.success("Draft saved");
         },
       },
     );
@@ -161,15 +168,20 @@ export function ComposeDialog() {
 
   const doSend = useCallback(() => {
     const plainText = stripHtml(body);
+    // Convert preview URLs back to cid: references for the email MIME body
+    const sendHtml = body.replace(
+      /\/api\/drafts\/[^/]+\/attachments\/([^/]+)\/content/g,
+      (_match, attId) => `cid:${attId}`,
+    );
     sendMutation.mutate(
-      { to, cc, bcc, subject, body: plainText, htmlBody: body, inReplyTo, references, draftId },
+      { to, cc, bcc, subject, body: plainText, htmlBody: sendHtml, inReplyTo, references, draftId },
       {
         onSuccess: () => {
-          setToast("Message sent");
+          toast.success("Message sent");
           reset();
         },
         onError: (error) => {
-          setToast(`Failed to send: ${error.message}`);
+          toast.error(`Failed to send: ${error.message}`);
           setSending(false);
         },
       },
@@ -192,27 +204,49 @@ export function ComposeDialog() {
     setSending(true);
     closeCompose();
 
-    // 5-second undo window
+    // 5-second undo window via sonner
     const timer = setTimeout(() => {
-      setUndoTimer(null);
+      toast.dismiss("undo-send");
       doSend();
     }, 5000);
-    setUndoTimer(timer);
+
+    toast("Sending message...", {
+      id: "undo-send",
+      duration: 5500,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          clearTimeout(timer);
+          setSending(false);
+          useComposeStore.setState({ isOpen: true });
+        },
+      },
+    });
   }, [to, cc, bcc, closeCompose, doSend]);
 
-  const handleUndo = useCallback(() => {
-    if (undoTimer) {
-      clearTimeout(undoTimer);
-      setUndoTimer(null);
-      setSending(false);
-      // Re-open the compose dialog with the same content
-      useComposeStore.setState({ isOpen: true });
-    }
-  }, [undoTimer]);
-
   const handleDiscard = useCallback(() => {
+    if (hasContent()) {
+      setShowDiscardAlert(true);
+    } else {
+      reset();
+    }
+  }, [hasContent, reset]);
+
+  const confirmDiscard = useCallback(() => {
+    setShowDiscardAlert(false);
+    if (draftId) {
+      deleteDraftMutation.mutate(draftId);
+    }
     reset();
-  }, [reset]);
+  }, [draftId, deleteDraftMutation, reset]);
+
+  // Save draft and close the dialog without discarding.
+  const handleSaveAndClose = useCallback(() => {
+    if (hasContent()) {
+      saveDraft(true);
+    }
+    closeCompose();
+  }, [hasContent, saveDraft, closeCompose]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -222,7 +256,7 @@ export function ComposeDialog() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        saveDraft();
+        saveDraft(true);
       }
     },
     [handleSend, saveDraft],
@@ -258,7 +292,7 @@ export function ComposeDialog() {
             );
           },
           onError: (error) => {
-            setToast(`Upload failed: ${error.message}`);
+            toast.error(`Upload failed: ${error.message}`);
           },
         },
       );
@@ -293,14 +327,15 @@ export function ComposeDialog() {
                     size: att.size,
                   },
                 ]);
-                // Return a cid: URL so the backend can resolve it as an inline image
-                resolve(`cid:${att.id}`);
+                // Return a preview URL that the browser can render.
+                // The send flow converts these back to cid: references.
+                resolve(`/api/drafts/${currentDraftId}/attachments/${att.id}/content`);
               } else {
                 resolve(null);
               }
             },
             onError: (error) => {
-              setToast(`Image upload failed: ${error.message}`);
+              toast.error(`Image upload failed: ${error.message}`);
               resolve(null);
             },
           },
@@ -320,7 +355,7 @@ export function ComposeDialog() {
             removeAttachment(attachmentId);
           },
           onError: (error) => {
-            setToast(`Delete failed: ${error.message}`);
+            toast.error(`Delete failed: ${error.message}`);
           },
         },
       );
@@ -328,33 +363,132 @@ export function ComposeDialog() {
     [draftId, deleteMutation, removeAttachment],
   );
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length === 0) return;
+
+      let currentDraftId = draftId;
+      if (!currentDraftId) {
+        currentDraftId = generateId();
+        setDraftId(currentDraftId);
+      }
+
+      uploadMutation.mutate(
+        { draftId: currentDraftId, files },
+        {
+          onSuccess: (data) => {
+            addAttachments(
+              data.attachments.map((a) => ({
+                id: a.id,
+                filename: a.filename,
+                contentType: a.content_type,
+                size: a.size,
+              })),
+            );
+            toast.success(`${data.attachments.length} file(s) attached`);
+          },
+          onError: (error) => {
+            toast.error(`Upload failed: ${error.message}`);
+          },
+        },
+      );
+    },
+    [draftId, setDraftId, uploadMutation, addAttachments],
+  );
+
   return (
     <>
       <Dialog.Root
         open={isOpen}
         onOpenChange={(open) => {
-          if (!open) closeCompose();
+          if (!open) {
+            handleSaveAndClose();
+          }
         }}
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
           <Dialog.Content
-            className="fixed inset-x-4 bottom-4 top-auto z-50 mx-auto flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-background shadow-2xl sm:inset-x-auto sm:bottom-8"
+            className={cn(
+              "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+              expanded
+                ? "inset-4 sm:left-20"
+                : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20",
+            )}
             onKeyDown={handleKeyDown}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
           >
+            {/* Drop overlay */}
+            {isDragging && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-background/90 backdrop-blur-sm">
+                <Upload className="size-10 text-primary" />
+                <p className="mt-3 text-sm font-medium text-foreground">
+                  Drop files to attach
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Files will be uploaded as attachments
+                </p>
+              </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <Dialog.Title className="text-sm font-semibold">
                 New Message
               </Dialog.Title>
-              <Dialog.Close asChild>
+              <div className="flex items-center gap-1">
                 <button
+                  onClick={() => setExpanded((e) => !e)}
                   className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  title="Close"
+                  title={expanded ? "Minimize" : "Maximize"}
                 >
-                  <X className="size-4" />
+                  {expanded ? (
+                    <Minimize2 className="size-4" />
+                  ) : (
+                    <Maximize2 className="size-4" />
+                  )}
                 </button>
-              </Dialog.Close>
+                <Dialog.Close asChild>
+                  <button
+                    className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Close"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </Dialog.Close>
+              </div>
             </div>
 
             {/* Fields */}
@@ -449,13 +583,19 @@ export function ComposeDialog() {
                     key={att.id}
                     className="flex items-center gap-1.5 rounded-md border border-border bg-accent/50 px-2 py-1 text-xs"
                   >
-                    <Paperclip className="size-3 shrink-0 text-muted-foreground" />
-                    <span className="max-w-[150px] truncate" title={att.filename}>
-                      {att.filename}
-                    </span>
-                    <span className="text-muted-foreground">
-                      ({formatFileSize(att.size)})
-                    </span>
+                    <button
+                      onClick={() => setPreviewAttId(att.id)}
+                      className="flex items-center gap-1.5 hover:text-foreground"
+                      title="Preview"
+                    >
+                      <Paperclip className="size-3 shrink-0 text-muted-foreground" />
+                      <span className="max-w-[150px] truncate" title={att.filename}>
+                        {att.filename}
+                      </span>
+                      <span className="text-muted-foreground">
+                        ({formatFileSize(att.size)})
+                      </span>
+                    </button>
                     <button
                       onClick={() => handleRemoveAttachment(att.id)}
                       className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -507,6 +647,18 @@ export function ComposeDialog() {
                     <Paperclip className="size-4" />
                   )}
                 </button>
+                <button
+                  onClick={() => saveDraft(true)}
+                  disabled={saveDraftMutation.isPending}
+                  className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  title="Save draft (Ctrl+S)"
+                >
+                  {saveDraftMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Save className="size-4" />
+                  )}
+                </button>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -533,25 +685,107 @@ export function ComposeDialog() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      {/* Undo-send toast */}
-      {undoTimer && (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-4 py-2.5 text-sm text-background shadow-lg">
-          <span>Sending message...</span>
-          <button
-            onClick={handleUndo}
-            className="font-semibold text-primary underline underline-offset-2"
-          >
-            Undo
-          </button>
-        </div>
-      )}
+      <AlertDialog.Root open={showDiscardAlert} onOpenChange={setShowDiscardAlert}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl">
+            <AlertDialog.Title className="text-base font-semibold">
+              Are you sure?
+            </AlertDialog.Title>
+            <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
+              The message has not been sent and has unsaved changes. Do you want to discard your changes?
+            </AlertDialog.Description>
+            <div className="mt-6 flex justify-end gap-3">
+              <AlertDialog.Cancel asChild>
+                <button className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+                  Cancel
+                </button>
+              </AlertDialog.Cancel>
+              <AlertDialog.Action asChild>
+                <button
+                  onClick={confirmDiscard}
+                  className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Discard
+                </button>
+              </AlertDialog.Action>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
 
-      {/* Status toast */}
-      {toast && !undoTimer && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-foreground px-4 py-2.5 text-sm text-background shadow-lg">
-          {toast}
-        </div>
-      )}
+      {/* Attachment preview dialog */}
+      {previewAttId && draftId && (() => {
+        const att = attachments.find((a) => a.id === previewAttId);
+        if (!att) return null;
+        const previewUrl = `/api/drafts/${draftId}/attachments/${att.id}/content`;
+        return (
+          <Dialog.Root open onOpenChange={(open) => !open && setPreviewAttId(null)}>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/70" />
+              <Dialog.Content className="fixed inset-4 z-[60] flex flex-col rounded-xl border border-border bg-background shadow-2xl">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <Dialog.Title className="flex items-center gap-2 text-sm font-semibold">
+                    <Paperclip className="size-4 text-muted-foreground" />
+                    <span className="max-w-[400px] truncate">{att.filename}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      ({formatFileSize(att.size)})
+                    </span>
+                  </Dialog.Title>
+                  <div className="flex items-center gap-1">
+                    <a
+                      href={previewUrl}
+                      download={att.filename}
+                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="Download"
+                    >
+                      <Download className="size-4" />
+                    </a>
+                    <Dialog.Close asChild>
+                      <button
+                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title="Close"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </Dialog.Close>
+                  </div>
+                </div>
+                <div className="flex flex-1 items-center justify-center overflow-auto p-4">
+                  {att.contentType.startsWith("image/") ? (
+                    <img
+                      src={previewUrl}
+                      alt={att.filename}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  ) : att.contentType === "application/pdf" ? (
+                    <iframe
+                      src={previewUrl}
+                      className="h-full w-full border-none"
+                      title={att.filename}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <Paperclip className="size-12 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">
+                        Preview not available for this file type
+                      </p>
+                      <a
+                        href={previewUrl}
+                        download={att.filename}
+                        className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                      >
+                        <Download className="size-4" />
+                        Download
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+        );
+      })()}
     </>
   );
 }

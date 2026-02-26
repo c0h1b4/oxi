@@ -124,6 +124,36 @@ pub async fn upload_attachment(
     .into_response())
 }
 
+/// Handler for `GET /api/drafts/{draft_id}/attachments/{attachment_id}/content`.
+///
+/// Serves the raw file content of a draft attachment for inline preview.
+pub async fn get_attachment_content(
+    Extension(session): Extension<SessionState>,
+    Extension(config): Extension<Arc<AppConfig>>,
+    AxumPath((draft_id, attachment_id)): AxumPath<(String, String)>,
+) -> Result<Response, AppError> {
+    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+        .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
+
+    let attachments = db::drafts::get_draft_attachments(&conn, &draft_id)
+        .map_err(|e| AppError::InternalError(e))?;
+
+    let attachment = attachments
+        .iter()
+        .find(|a| a.id == attachment_id)
+        .ok_or_else(|| AppError::NotFound("Attachment not found".to_string()))?;
+
+    let data = tokio::fs::read(&attachment.file_path)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Failed to read attachment file: {e}")))?;
+
+    Ok(Response::builder()
+        .header("content-type", &attachment.content_type)
+        .header("cache-control", "private, max-age=3600")
+        .body(axum::body::Body::from(data))
+        .unwrap())
+}
+
 /// Handler for `DELETE /api/drafts/{draft_id}/attachments/{attachment_id}`.
 ///
 /// Removes an attachment from the database and deletes the file from disk.
