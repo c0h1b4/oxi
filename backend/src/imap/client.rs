@@ -1220,6 +1220,7 @@ pub mod mock {
         }
 
         /// Pre-load a folder status that `folder_status` will return.
+        #[allow(dead_code)]
         pub fn with_folder_status(self, status: FolderStatus) -> Self {
             *self.folder_status.lock().unwrap() = Some(status);
             self

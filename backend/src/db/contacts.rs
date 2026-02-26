@@ -81,7 +81,7 @@ pub fn get_contact(conn: &Connection, id: &str) -> Result<Option<Contact>, Strin
     let sql = format!(
         "SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE id = ?1"
     );
-    let result = conn.query_row(&sql, params![id], |row| row_to_contact(row));
+    let result = conn.query_row(&sql, params![id], row_to_contact);
 
     match result {
         Ok(c) => Ok(Some(c)),
@@ -91,11 +91,12 @@ pub fn get_contact(conn: &Connection, id: &str) -> Result<Option<Contact>, Strin
 }
 
 /// Get a contact by email address. Returns `None` if not found.
+#[allow(dead_code)]
 pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<Contact>, String> {
     let sql = format!(
         "SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE email = ?1"
     );
-    let result = conn.query_row(&sql, params![email], |row| row_to_contact(row));
+    let result = conn.query_row(&sql, params![email], row_to_contact);
 
     match result {
         Ok(c) => Ok(Some(c)),
@@ -144,7 +145,7 @@ pub fn list_contacts(
                 .prepare(&sql)
                 .map_err(|e| format!("Failed to prepare list_contacts: {e}"))?;
             let rows = stmt
-                .query_map(params![pattern, limit, offset], |row| row_to_contact(row))
+                .query_map(params![pattern, limit, offset], row_to_contact)
                 .map_err(|e| format!("Failed to query contacts: {e}"))?;
             let mut contacts = Vec::new();
             for row in rows {
@@ -157,7 +158,7 @@ pub fn list_contacts(
                 .prepare(&sql)
                 .map_err(|e| format!("Failed to prepare list_contacts: {e}"))?;
             let rows = stmt
-                .query_map(params![limit, offset], |row| row_to_contact(row))
+                .query_map(params![limit, offset], row_to_contact)
                 .map_err(|e| format!("Failed to query contacts: {e}"))?;
             let mut contacts = Vec::new();
             for row in rows {
@@ -197,7 +198,7 @@ pub fn search_contacts(
         .prepare(&sql)
         .map_err(|e| format!("Failed to prepare search_contacts: {e}"))?;
     let rows = stmt
-        .query_map(params![pattern, limit], |row| row_to_contact(row))
+        .query_map(params![pattern, limit], row_to_contact)
         .map_err(|e| format!("Failed to query search contacts: {e}"))?;
 
     let mut contacts = Vec::new();
@@ -209,6 +210,7 @@ pub fn search_contacts(
 
 /// Increment the contact_count by 1 and set last_contacted to now for the
 /// contact with the given email address.
+#[allow(dead_code)]
 pub fn increment_contact_count(conn: &Connection, email: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE contacts
@@ -225,6 +227,7 @@ pub fn increment_contact_count(conn: &Connection, email: &str) -> Result<(), Str
 /// Auto-add a contact if one with the same email does not already exist.
 /// Uses INSERT OR IGNORE so existing contacts are not overwritten.
 /// Source is set to 'auto'.
+#[allow(dead_code)]
 pub fn auto_add_contact(conn: &Connection, email: &str, name: &str) -> Result<(), String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
