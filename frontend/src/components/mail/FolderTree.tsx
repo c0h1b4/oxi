@@ -194,6 +194,7 @@ function FolderItem({
   const isFetching = useIsFetching({ queryKey: ["messages", folder.name] });
   const moveMessage = useMoveMessage();
   const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -202,18 +203,22 @@ function FolderItem({
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    dragCounter.current += 1;
     setIsDragOver(true);
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    // Only clear when leaving the button itself, not its children
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    setIsDragOver(false);
+  const handleDragLeave = useCallback(() => {
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setIsDragOver(false);
+    }
   }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      dragCounter.current = 0;
       setIsDragOver(false);
       try {
         const raw = e.dataTransfer.getData("application/json");
@@ -251,20 +256,24 @@ function FolderItem({
   }
 
   return (
-    <FolderContextMenu folderName={folder.name} onRename={onStartRename}>
+    <FolderContextMenu
+      folderName={folder.name}
+      onRename={onStartRename}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <button
         onClick={() => setActiveFolder(folder.name)}
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
         aria-current={isActive ? "page" : undefined}
         className={cn(
           "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-          isActive
+          isDragOver
             ? "bg-primary/10 font-semibold text-primary"
-            : "font-medium text-sidebar-foreground hover:bg-sidebar-accent",
-          isDragOver && "ring-2 ring-primary",
+            : isActive
+              ? "bg-primary/10 font-semibold text-primary"
+              : "font-medium text-sidebar-foreground hover:bg-sidebar-accent",
         )}
       >
         {getFolderIcon(folder.name)}

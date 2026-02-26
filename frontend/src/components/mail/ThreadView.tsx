@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronUp, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
@@ -64,6 +64,8 @@ function formatThreadDate(dateStr: string): string {
 
 export function ThreadView({ thread, currentUid }: ThreadViewProps) {
   const selectMessage = useUiStore((s) => s.selectMessage);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const currentRef = useRef<HTMLButtonElement>(null);
 
   // Track which UIDs are expanded — current message is expanded by default.
   const [expandedUids, setExpandedUids] = useState<Set<number>>(
@@ -76,6 +78,13 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
   if (!expandedUids.has(currentUid)) {
     setExpandedUids(new Set([currentUid]));
   }
+
+  // Auto-scroll to the current message when the thread loads.
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      currentRef.current?.scrollIntoView({ block: "nearest" });
+    });
+  }, [currentUid]);
 
   function toggleExpand(uid: number) {
     setExpandedUids((prev) => {
@@ -104,8 +113,8 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
         </span>
       </div>
 
-      {/* Message cards */}
-      <div className="flex flex-col gap-px bg-border">
+      {/* Message cards — scrollable with a max height */}
+      <div ref={scrollRef} className="flex max-h-60 flex-col gap-px overflow-y-auto bg-border">
         {thread.map((msg) => {
           const isExpanded = expandedUids.has(msg.uid);
           const isCurrent = msg.uid === currentUid;
@@ -121,6 +130,7 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
           return (
             <button
               key={`${msg.folder}-${msg.uid}`}
+              ref={isCurrent ? currentRef : undefined}
               type="button"
               onClick={() => {
                 if (!isExpanded) {

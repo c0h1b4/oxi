@@ -365,7 +365,7 @@ export function ReadingPane() {
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(new Set());
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
-  const { data, isLoading, isError, refetch } = useMessage(
+  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0,
   );
@@ -424,7 +424,7 @@ export function ReadingPane() {
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div className={cn("flex h-full w-full flex-col overflow-hidden transition-opacity", isPlaceholderData && "opacity-40 pointer-events-none")}>
       {/* Header area */}
       <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
         <h2 className="text-lg font-bold leading-tight">{data.subject}</h2>

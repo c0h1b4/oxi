@@ -46,6 +46,14 @@ pub struct ImapMessageHeader {
     pub has_attachments: bool,
     /// RFC 2822 size of the message in bytes.
     pub size: u32,
+    /// Message-ID header value for threading.
+    pub message_id: Option<String>,
+    /// In-Reply-To header value for threading.
+    pub in_reply_to: Option<String>,
+    /// References header value for threading.
+    pub references: Option<String>,
+    /// CC addresses.
+    pub cc: Vec<EmailAddress>,
 }
 
 /// The full body of an email message, including attachments.
@@ -681,8 +689,14 @@ impl ImapClient for RealImapClient {
             })?;
 
         let headers = {
+            // Fetch ENVELOPE, FLAGS, BODYSTRUCTURE, RFC822.SIZE, and threading headers.
+            // We only fetch Message-ID, In-Reply-To, and References (a few bytes per message)
+            // rather than full raw headers, to keep bulk syncs lightweight.
             let mut fetch_stream = session
-                .uid_fetch(uid_range, "(UID ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE)")
+                .uid_fetch(
+                    uid_range,
+                    "(UID ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (Message-ID In-Reply-To References)])",
+                )
                 .await
                 .map_err(map_imap_error)?;
 
@@ -698,7 +712,13 @@ impl ImapClient for RealImapClient {
                     None => continue,
                 };
 
-                let (subject, from, to, date) = if let Some(env) = fetch.envelope() {
+                // Parse threading headers from the small HEADER.FIELDS response.
+                let raw_header_bytes = fetch.header();
+                let parsed_threading = raw_header_bytes.and_then(|raw| {
+                    mail_parser::MessageParser::default().parse(raw)
+                });
+
+                let (subject, from, to, cc, date) = if let Some(env) = fetch.envelope() {
                     let subject = env
                         .subject
                         .as_ref()
@@ -717,16 +737,45 @@ impl ImapClient for RealImapClient {
                         .map(|addrs| addrs.iter().map(imap_address_to_email).collect())
                         .unwrap_or_default();
 
+                    let cc: Vec<EmailAddress> = env
+                        .cc
+                        .as_ref()
+                        .map(|addrs| addrs.iter().map(imap_address_to_email).collect())
+                        .unwrap_or_default();
+
                     let date = env
                         .date
                         .as_ref()
                         .and_then(|b| std::str::from_utf8(b).ok())
                         .map(|s| s.to_string());
 
-                    (subject, from, to, date)
+                    (subject, from, to, cc, date)
                 } else {
-                    (None, vec![], vec![], None)
+                    // No envelope — we can't fill subject/from/to/date from the
+                    // small threading-only header fetch, so leave them empty.
+                    // They'll be populated when the user opens the message body.
+                    tracing::warn!(
+                        uid = uid,
+                        folder = %folder,
+                        "ENVELOPE missing for message, headers will be empty until body is fetched"
+                    );
+                    (None, vec![], vec![], vec![], None)
                 };
+
+                // Extract threading headers from the small HEADER.FIELDS response.
+                let message_id = parsed_threading.as_ref().and_then(|p| {
+                    p.message_id().map(|s| format!("<{s}>"))
+                });
+                let in_reply_to = parsed_threading.as_ref().and_then(|p| {
+                    let val = p.in_reply_to();
+                    val.as_text().map(|s| format!("<{s}>"))
+                });
+                let references = parsed_threading.as_ref().and_then(|p| {
+                    let val = p.references();
+                    val.as_text_list()
+                        .map(|list| list.iter().map(|s| format!("<{s}>")).collect::<Vec<_>>().join(" "))
+                        .or_else(|| val.as_text().map(|s| format!("<{s}>")))
+                });
 
                 let flags: Vec<String> = fetch.flags().map(|f| flag_to_string(&f)).collect();
 
@@ -746,6 +795,10 @@ impl ImapClient for RealImapClient {
                     flags,
                     has_attachments: has_attach,
                     size,
+                    message_id,
+                    in_reply_to,
+                    references,
+                    cc,
                 });
             }
             headers
@@ -810,6 +863,16 @@ impl ImapClient for RealImapClient {
             let text_plain: Option<String> = parsed.body_text(0).map(|s| s.to_string());
 
             let text_html: Option<String> = parsed.body_html(0).map(|s| s.to_string());
+
+            tracing::debug!(
+                uid = uid,
+                folder = %folder,
+                total_parts = parsed.parts.len(),
+                attachment_count = parsed.attachments().count(),
+                has_text = text_plain.is_some(),
+                has_html = text_html.is_some(),
+                "fetch_body: parsed message structure"
+            );
 
             let mut attachments = Vec::new();
 
@@ -1516,6 +1579,10 @@ pub mod mock {
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
                 size: 1024,
+                message_id: None,
+                in_reply_to: None,
+                references: None,
+                cc: vec![],
             }]);
 
             let headers = mock

@@ -290,6 +290,8 @@ pub async fn list_messages(
                     .unwrap_or("");
                 let to_json =
                     serde_json::to_string(&header.to).unwrap_or_else(|_| "[]".to_string());
+                let cc_json =
+                    serde_json::to_string(&header.cc).unwrap_or_else(|_| "[]".to_string());
                 let subject = header.subject.as_deref().unwrap_or("");
                 let date = header.date.as_deref().unwrap_or("");
                 let flags_csv = header.flags.join(",");
@@ -298,14 +300,14 @@ pub async fn list_messages(
                     &conn,
                     &folder,
                     header.uid,
-                    None,
-                    None,
-                    None,
+                    header.message_id.as_deref(),
+                    header.in_reply_to.as_deref(),
+                    header.references.as_deref(),
                     subject,
                     from_address,
                     from_name,
                     &to_json,
-                    "[]",
+                    &cc_json,
                     date,
                     &flags_csv,
                     header.size,
@@ -506,9 +508,60 @@ pub async fn get_message(
     };
 
     // Get the message header from cache (use efficient single-message lookup).
+    // If the header hasn't been synced yet (e.g. DB was cleared and sync is
+    // still running), fall back to parsing the raw headers we already fetched.
     let msg = db::messages::get_single_message(&conn, &folder, uid)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
-        .ok_or_else(|| AppError::NotFound(format!("Message UID {uid} not found in cache")))?;
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    let msg = match msg {
+        Some(m) => m,
+        None => {
+            // Parse header fields from raw_headers so we can still return a
+            // useful response even when the message list hasn't been synced.
+            let parsed = mail_parser::MessageParser::default().parse(raw_headers.as_bytes());
+            let subject = parsed.as_ref().and_then(|p| p.subject().map(|s| s.to_string())).unwrap_or_default();
+            let (from_address, from_name) = parsed.as_ref()
+                .and_then(|p| p.from())
+                .and_then(|addr| match addr {
+                    mail_parser::Address::List(addrs) => addrs.first().map(|a| {
+                        (
+                            a.address.as_ref().map(|s| s.to_string()).unwrap_or_default(),
+                            a.name.as_ref().map(|s| s.to_string()).unwrap_or_default(),
+                        )
+                    }),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let date = parsed.as_ref().and_then(|p| p.date()).map(|d| {
+                let sign = if d.tz_before_gmt { '-' } else { '+' };
+                format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
+                    d.year, d.month, d.day, d.hour, d.minute, d.second, sign, d.tz_hour, d.tz_minute)
+            }).unwrap_or_default();
+
+            db::messages::CachedMessage {
+                uid,
+                folder: folder.clone(),
+                message_id: parsed.as_ref().and_then(|p| p.message_id().map(|s| format!("<{s}>"))),
+                in_reply_to: parsed.as_ref().and_then(|p| p.in_reply_to().as_text().map(|s| format!("<{s}>"))),
+                references_header: parsed.as_ref().and_then(|p| {
+                    let val = p.references();
+                    val.as_text_list()
+                        .map(|list| list.iter().map(|s| format!("<{s}>")).collect::<Vec<_>>().join(" "))
+                        .or_else(|| val.as_text().map(|s| format!("<{s}>")))
+                }),
+                subject,
+                from_address,
+                from_name,
+                to_addresses: String::from("[]"),
+                cc_addresses: String::from("[]"),
+                date,
+                flags: String::new(),
+                size: 0,
+                has_attachments: !attachments.is_empty(),
+                snippet: String::new(),
+            }
+        }
+    };
 
     // Re-index message with full body text for search.
     // Skip indexing for Spam/Junk/Trash folders.
