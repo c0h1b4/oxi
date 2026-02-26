@@ -92,12 +92,19 @@ pub async fn list_folders(
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     }
 
-    // Refresh unread counts from cached messages so they are always accurate.
+    // Refresh unread counts from cached messages — but skip folders whose
+    // messages cache has been invalidated (messages_updated_at IS NULL).
+    // Those folders have a manually adjusted unread_count (via adjust_unread_count)
+    // that should be preserved until the folder's messages are resynced from IMAP.
     let all_folders = db::folders::get_all_folders(&conn)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     for f in &all_folders {
-        db::folders::refresh_unread_count(&conn, &f.name)
+        let invalidated = db::folders::is_folder_messages_invalidated(&conn, &f.name)
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        if !invalidated {
+            db::folders::refresh_unread_count(&conn, &f.name)
+                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+        }
     }
 
     // Read back from cache to get the refreshed counts.

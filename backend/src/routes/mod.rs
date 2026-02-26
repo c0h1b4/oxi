@@ -84,6 +84,7 @@ pub fn create_router(
     imap_client: Arc<dyn ImapClient>,
     smtp_client: Arc<dyn SmtpClient>,
     search_engine: Arc<crate::search::engine::SearchEngine>,
+    smtp_client: Arc<dyn crate::smtp::client::SmtpClient>,
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
@@ -169,6 +170,27 @@ pub fn create_router(
             "/contacts/{id}",
             get(contacts::get_contact_handler).delete(contacts::delete_contact_handler),
         )
+        .route("/messages/send", post(send::send_message_handler))
+        .route(
+            "/drafts",
+            get(drafts::list_drafts_handler).post(drafts::upsert_draft_handler),
+        )
+        .route(
+            "/drafts/{id}",
+            get(drafts::get_draft_handler).delete(drafts::delete_draft_handler),
+        )
+        .route(
+            "/drafts/{draft_id}/attachments",
+            post(attachments::upload_attachment),
+        )
+        .route(
+            "/drafts/{draft_id}/attachments/{attachment_id}",
+            delete(attachments::delete_attachment),
+        )
+        .route(
+            "/drafts/{draft_id}/attachments/{attachment_id}/content",
+            get(attachments::get_attachment_content),
+        )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 
@@ -185,6 +207,7 @@ pub fn create_router(
         .fallback_service(static_service)
         .layer(Extension(smtp_client))
         .layer(Extension(search_engine))
+        .layer(Extension(smtp_client))
         .layer(Extension(imap_client))
         .layer(Extension(store))
         .layer(Extension(config.clone()))
@@ -219,7 +242,7 @@ mod tests {
     fn test_config(static_dir: &str) -> Arc<AppConfig> {
         Arc::new(AppConfig {
             host: "127.0.0.1".to_string(),
-            port: 3001,
+            port: 3100,
             imap_host: None,
             imap_port: 993,
             smtp_host: None,
@@ -236,7 +259,7 @@ mod tests {
     fn test_config_with_imap(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
         Arc::new(AppConfig {
             host: "127.0.0.1".to_string(),
-            port: 3001,
+            port: 3100,
             imap_host: Some("imap.example.com".to_string()),
             imap_port: 993,
             smtp_host: None,
@@ -297,6 +320,12 @@ mod tests {
         Arc::new(crate::search::engine::SearchEngine::new(
             std::path::PathBuf::from(data_dir),
         ))
+    }
+
+    /// Helper: create a mock SMTP client for tests.
+    fn test_smtp_client() -> Arc<dyn crate::smtp::client::SmtpClient> {
+        use crate::smtp::client::mock::MockSmtpClient;
+        Arc::new(MockSmtpClient::new())
     }
 
     /// Helper: provision a user database so that route handlers can open it.
@@ -919,6 +948,7 @@ mod tests {
                 date: Some("2024-01-01T10:00:00Z".to_string()),
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
+                size: 2048,
             },
             ImapMessageHeader {
                 uid: 2,
@@ -934,6 +964,7 @@ mod tests {
                 date: Some("2024-01-02T10:00:00Z".to_string()),
                 flags: vec![],
                 has_attachments: false,
+                size: 4096,
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
@@ -997,6 +1028,7 @@ mod tests {
                 date: Some("2024-01-01T10:00:00Z".to_string()),
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
+                size: 1024,
             }])
             .with_bodies(vec![ImapMessageBody {
                 uid: 42,

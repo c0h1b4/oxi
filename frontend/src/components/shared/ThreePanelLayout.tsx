@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 import { SearchBar } from "@/components/mail/SearchBar";
 import { SearchResults } from "@/components/mail/SearchResults";
+import { MessageActionBar } from "@/components/mail/MessageActionBar";
 
 interface ThreePanelLayoutProps {
   navRail: React.ReactNode;
@@ -107,12 +108,8 @@ export function ThreePanelLayout({
 
       {/* Center panel — search bar + message list or search results */}
       <main
-        className={
-          searchActive
-            ? "flex min-w-0 flex-1 flex-col overflow-hidden border-x border-border"
-            : "flex shrink-0 flex-col overflow-hidden border-x border-border"
-        }
-        style={searchActive ? undefined : { width: messageListWidth }}
+        className="flex shrink-0 flex-col overflow-hidden border-x border-border"
+        style={{ width: messageListWidth }}
       >
         <SearchBar />
         {searchActive ? (
@@ -122,25 +119,22 @@ export function ThreePanelLayout({
         )}
       </main>
 
-      {/* Resize handle + reading pane only shown when not searching */}
-      {!searchActive && (
-        <>
-          <ResizeHandle onDrag={handleMessageListDrag} />
+      {/* Resize handle: message list | reading pane */}
+      <ResizeHandle onDrag={handleMessageListDrag} />
 
-          {/* Right panel — reading pane (fills remaining space) */}
-          <section className="flex min-h-0 min-w-0 flex-1">
-            {selectedMessageUid !== null ? (
-              readingPane
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
-                  oxi<span className="text-primary/40">.email</span>
-                </span>
-              </div>
-            )}
-          </section>
-        </>
-      )}
+      {/* Right panel — action bar + reading pane (fills remaining space) */}
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <MessageActionBar />
+        {selectedMessageUid !== null ? (
+          <div className="flex min-h-0 flex-1">{readingPane}</div>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
+              oxi<span className="text-primary/40">.email</span>
+            </span>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
