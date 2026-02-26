@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(config.imap_port, 993);
         assert!(config.smtp_host.is_none());
         assert_eq!(config.smtp_port, 587);
-        assert_eq!(config.tls_enabled, true);
+        assert!(config.tls_enabled);
         assert_eq!(config.data_dir, "/data");
         assert_eq!(config.session_timeout_hours, 24);
         assert_eq!(config.static_dir, "./static");
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(config.imap_port, 143);
         assert_eq!(config.smtp_host.as_deref(), Some("smtp.example.com"));
         assert_eq!(config.smtp_port, 465);
-        assert_eq!(config.tls_enabled, false);
+        assert!(!config.tls_enabled);
         assert_eq!(config.data_dir, "/var/oxi");
         assert_eq!(config.session_timeout_hours, 48);
         assert_eq!(config.static_dir, "/srv/static");

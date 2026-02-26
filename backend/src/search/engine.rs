@@ -39,6 +39,7 @@ pub struct SearchQuery {
     pub text: String,
     pub folder: Option<String>,
     pub from: Option<String>,
+    #[allow(dead_code)]
     pub to: Option<String>,
     pub date_from: Option<i64>,
     pub date_to: Option<i64>,
@@ -69,6 +70,7 @@ struct SchemaFields {
 pub struct UserIndex {
     index: Index,
     reader: IndexReader,
+    #[allow(dead_code)]
     schema: Schema,
     fields: SchemaFields,
 }
@@ -201,6 +203,7 @@ impl UserIndex {
     }
 
     /// Delete a message from the index by uid and folder.
+    #[allow(dead_code)]
     pub fn delete_message(&self, uid: u32, folder: &str) -> Result<(), String> {
         let mut writer: IndexWriter = self
             .index

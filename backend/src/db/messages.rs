@@ -456,15 +456,15 @@ pub fn get_full_thread(
             let found = get_thread_messages(conn, id)?;
             for msg in found {
                 // Extract IDs from each found message and add to known set.
-                if let Some(ref mid) = msg.message_id {
-                    if !mid.is_empty() {
-                        known_ids.insert(mid.clone());
-                    }
+                if let Some(ref mid) = msg.message_id
+                    && !mid.is_empty()
+                {
+                    known_ids.insert(mid.clone());
                 }
-                if let Some(ref irt) = msg.in_reply_to {
-                    if !irt.is_empty() {
-                        known_ids.insert(irt.clone());
-                    }
+                if let Some(ref irt) = msg.in_reply_to
+                    && !irt.is_empty()
+                {
+                    known_ids.insert(irt.clone());
                 }
                 if let Some(ref refs) = msg.references_header {
                     for r in refs.split_whitespace() {
