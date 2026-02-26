@@ -221,6 +221,15 @@ pub trait ImapClient: Send + Sync {
         folder: &str,
         uid: u32,
     ) -> Result<(), ImapError>;
+
+    /// Append a raw RFC822 message to a folder (e.g. saving sent mail to "Sent").
+    async fn append_message(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        message_bytes: &[u8],
+        flags: &[&str],
+    ) -> Result<(), ImapError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,6 +1050,35 @@ impl ImapClient for RealImapClient {
         let _ = session.logout().await;
         Ok(())
     }
+
+    async fn append_message(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        message_bytes: &[u8],
+        flags: &[&str],
+    ) -> Result<(), ImapError> {
+        let mut session = connect(creds).await?;
+
+        let flags_str: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
+        let flags_joined = if flags_str.is_empty() {
+            None
+        } else {
+            Some(format!("({})", flags_str.join(" ")))
+        };
+        session
+            .append(
+                folder,
+                flags_joined.as_deref(),
+                None,
+                message_bytes,
+            )
+            .await
+            .map_err(map_imap_error)?;
+
+        let _ = session.logout().await;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1101,7 @@ pub mod mock {
         bodies: Mutex<Vec<ImapMessageBody>>,
         folder_status: Mutex<Option<FolderStatus>>,
         should_fail: Mutex<Option<ImapError>>,
+        pub appended: Mutex<Vec<(String, Vec<u8>)>>,
     }
 
     impl MockImapClient {
@@ -1074,6 +1113,7 @@ pub mod mock {
                 bodies: Mutex::new(Vec::new()),
                 folder_status: Mutex::new(None),
                 should_fail: Mutex::new(None),
+                appended: Mutex::new(Vec::new()),
             }
         }
 
@@ -1256,6 +1296,23 @@ pub mod mock {
             if let Some(ref err) = *self.should_fail.lock().unwrap() {
                 return Err(clone_error(err));
             }
+            Ok(())
+        }
+
+        async fn append_message(
+            &self,
+            _creds: &ImapCredentials,
+            folder: &str,
+            message_bytes: &[u8],
+            _flags: &[&str],
+        ) -> Result<(), ImapError> {
+            if let Some(ref err) = *self.should_fail.lock().unwrap() {
+                return Err(clone_error(err));
+            }
+            self.appended
+                .lock()
+                .unwrap()
+                .push((folder.to_string(), message_bytes.to_vec()));
             Ok(())
         }
     }
@@ -1498,6 +1555,27 @@ pub mod mock {
             let json = serde_json::to_string(&addr).unwrap();
             let deserialized: EmailAddress = serde_json::from_str(&json).unwrap();
             assert_eq!(addr, deserialized);
+        }
+
+        #[tokio::test]
+        async fn mock_append_message_succeeds() {
+            let mock = MockImapClient::new();
+            let result = mock
+                .append_message(&test_creds(), "Sent", b"From: test\r\n\r\nBody", &["\\Seen"])
+                .await;
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn mock_append_captures_data() {
+            let mock = MockImapClient::new();
+            mock.append_message(&test_creds(), "Sent", b"test message", &["\\Seen"])
+                .await
+                .unwrap();
+            let appended = mock.appended.lock().unwrap();
+            assert_eq!(appended.len(), 1);
+            assert_eq!(appended[0].0, "Sent");
+            assert_eq!(appended[0].1, b"test message");
         }
 
         #[tokio::test]

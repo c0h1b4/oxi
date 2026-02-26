@@ -272,42 +272,56 @@ pub fn update_message_flags(
     Ok(())
 }
 
-/// Cache a message body (HTML and/or plain text).
+/// Cache a message body (HTML and/or plain text) along with attachment
+/// metadata (as a JSON string) and the raw RFC-822 headers.
 pub fn cache_message_body(
     conn: &Connection,
     folder: &str,
     uid: u32,
     html: Option<&str>,
     text: Option<&str>,
+    attachments_json: Option<&str>,
+    raw_headers: Option<&str>,
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE messages
-         SET body_html = ?1, body_text = ?2, body_cached = 1
-         WHERE folder = ?3 AND uid = ?4",
-        params![html, text, folder, uid],
+         SET body_html = ?1, body_text = ?2, body_cached = 1,
+             attachments_json = ?3, raw_headers = ?4
+         WHERE folder = ?5 AND uid = ?6",
+        params![html, text, attachments_json, raw_headers, folder, uid],
     )
     .map_err(|e| format!("Failed to cache message body: {e}"))?;
     Ok(())
 }
 
+/// Cached body data including attachment metadata and raw headers.
+pub struct CachedBody {
+    pub html: Option<String>,
+    pub text: Option<String>,
+    pub attachments_json: Option<String>,
+    pub raw_headers: Option<String>,
+}
+
 /// Return the cached body if `body_cached = 1`, otherwise `None`.
-#[allow(clippy::type_complexity)]
 pub fn get_cached_body(
     conn: &Connection,
     folder: &str,
     uid: u32,
-) -> Result<Option<(Option<String>, Option<String>)>, String> {
+) -> Result<Option<CachedBody>, String> {
     let result = conn.query_row(
-        "SELECT body_cached, body_html, body_text
+        "SELECT body_cached, body_html, body_text, attachments_json, raw_headers
          FROM messages
          WHERE folder = ?1 AND uid = ?2",
         params![folder, uid],
         |row| {
             let cached: i32 = row.get(0)?;
             if cached == 1 {
-                let html: Option<String> = row.get(1)?;
-                let text: Option<String> = row.get(2)?;
-                Ok(Some((html, text)))
+                Ok(Some(CachedBody {
+                    html: row.get(1)?,
+                    text: row.get(2)?,
+                    attachments_json: row.get(3)?,
+                    raw_headers: row.get(4)?,
+                }))
             } else {
                 Ok(None)
             }
@@ -513,14 +527,21 @@ mod tests {
         ensure_folder(&conn, "INBOX");
         insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
 
-        cache_message_body(&conn, "INBOX", 1, Some("<h1>Hello</h1>"), Some("Hello"))
+        cache_message_body(
+            &conn, "INBOX", 1,
+            Some("<h1>Hello</h1>"), Some("Hello"),
+            Some(r#"[{"id":"0","filename":"test.pdf","content_type":"application/pdf","size":1024,"content_id":null}]"#),
+            Some("From: alice@example.com"),
+        )
             .unwrap();
 
         let body = get_cached_body(&conn, "INBOX", 1).unwrap();
         assert!(body.is_some());
-        let (html, text) = body.unwrap();
-        assert_eq!(html.unwrap(), "<h1>Hello</h1>");
-        assert_eq!(text.unwrap(), "Hello");
+        let cached = body.unwrap();
+        assert_eq!(cached.html.unwrap(), "<h1>Hello</h1>");
+        assert_eq!(cached.text.unwrap(), "Hello");
+        assert!(cached.attachments_json.unwrap().contains("test.pdf"));
+        assert_eq!(cached.raw_headers.unwrap(), "From: alice@example.com");
     }
 
     #[test]

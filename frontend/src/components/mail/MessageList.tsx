@@ -1,11 +1,16 @@
 "use client";
 
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { PenLine, X } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
+import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
 import { useUiStore } from "@/stores/useUiStore";
+import { useComposeStore } from "@/stores/useComposeStore";
 import { MessageListItem } from "./MessageListItem";
+import { formatFolderName, isDraftsFolder } from "./FolderTree";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 function SkeletonRows({ count, height }: { count: number; height: number }) {
   return (
@@ -26,11 +31,136 @@ function SkeletonRows({ count, height }: { count: number; height: number }) {
   );
 }
 
+function humanizeDate(iso: string): string {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) return iso;
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) {
+    return diffMinutes === 1 ? "1 minute ago" : `${diffMinutes} minutes ago`;
+  }
+  if (diffHours < 24) {
+    return diffHours === 1 ? "1 hour ago" : `${diffHours} hours ago`;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  ) {
+    return "yesterday";
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function DraftItems() {
+  const { data } = useListDrafts(true);
+  const deleteDraft = useDeleteDraft();
+  const openDraft = useComposeStore((s) => s.openDraft);
+  const isComposeOpen = useComposeStore((s) => s.isOpen);
+  const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null);
+  const getDraft = useGetDraft(loadingDraftId);
+
+  // When draft data arrives, open it in the compose dialog.
+  useEffect(() => {
+    if (!getDraft.data || !loadingDraftId) return;
+    const d = getDraft.data;
+    openDraft({
+      id: d.id,
+      to: d.to,
+      cc: d.cc,
+      bcc: d.bcc,
+      subject: d.subject,
+      body: d.html_body ?? d.text_body,
+      inReplyTo: d.in_reply_to,
+      references: d.references,
+      attachments: d.attachments.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        contentType: a.content_type,
+        size: a.size,
+      })),
+    });
+    setLoadingDraftId(null); // eslint-disable-line react-hooks/set-state-in-effect -- clearing after zustand store update
+  }, [getDraft.data, loadingDraftId, openDraft]);
+
+  const drafts = data?.drafts ?? [];
+  if (drafts.length === 0) return null;
+
+  return (
+    <>
+      {drafts.map((draft) => (
+        <div
+          key={draft.id}
+          role="row"
+          tabIndex={0}
+          onClick={() => {
+            if (!isComposeOpen) setLoadingDraftId(draft.id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              if (!isComposeOpen) setLoadingDraftId(draft.id);
+            }
+          }}
+          className={cn(
+            "group flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 transition-colors",
+            "hover:bg-muted bg-transparent",
+          )}
+        >
+          {/* Top row: "Draft" label + date + delete */}
+          <div className="flex items-center gap-2">
+            <PenLine className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
+              {draft.to || "No recipient"}
+            </span>
+            <span className="shrink-0 text-xs font-normal text-muted-foreground">
+              {humanizeDate(draft.updated_at)}
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteDraft.mutate(draft.id);
+              }}
+              className="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex items-center justify-center"
+              title="Delete draft"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+
+          {/* Bottom row: subject */}
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
+              {draft.subject || "(no subject)"}
+            </span>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function MessageList() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const density = useUiStore((s) => s.density);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
+  const showDrafts = isDraftsFolder(activeFolder);
 
   const {
     data,
@@ -49,6 +179,7 @@ export function MessageList() {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- useVirtualizer is designed for this usage
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
@@ -79,7 +210,7 @@ export function MessageList() {
     <div className="flex h-full flex-col">
       {/* Header bar */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <h2 className="text-sm font-semibold">{activeFolder}</h2>
+        <h2 className="text-sm font-semibold">{formatFolderName(activeFolder)}</h2>
         <span className="text-xs text-muted-foreground">
           {isLoading ? "\u2026" : `${totalCount} messages`}
         </span>
@@ -102,47 +233,53 @@ export function MessageList() {
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && !isError && messages.length === 0 && (
+      {/* Empty state (only when not a drafts folder or no drafts either) */}
+      {!isLoading && !isError && messages.length === 0 && !showDrafts && (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
           No messages in this folder
         </div>
       )}
 
-      {/* Virtualized message list */}
-      {!isLoading && !isError && messages.length > 0 && (
+      {/* Scrollable content: drafts + virtualized message list */}
+      {!isLoading && !isError && (showDrafts || messages.length > 0) && (
         <div ref={parentRef} className="flex-1 overflow-y-auto">
-          <div
-            style={{
-              height: virtualizer.getTotalSize(),
-              width: "100%",
-              position: "relative",
-            }}
-          >
-            {virtualItems.map((virtualRow) => {
-              const message = messages[virtualRow.index];
-              return (
-                <div
-                  key={message.uid}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    height: virtualRow.size,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <MessageListItem
-                    message={message}
-                    isSelected={selectedMessageUid === message.uid}
-                    density={density}
-                    onClick={() => handleClick(message.uid)}
-                  />
-                </div>
-              );
-            })}
-          </div>
+          {/* Local drafts at top of the Drafts folder */}
+          {showDrafts && <DraftItems />}
+
+          {/* Virtualized IMAP messages */}
+          {messages.length > 0 && (
+            <div
+              style={{
+                height: virtualizer.getTotalSize(),
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {virtualItems.map((virtualRow) => {
+                const message = messages[virtualRow.index];
+                return (
+                  <div
+                    key={message.uid}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: virtualRow.size,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <MessageListItem
+                      message={message}
+                      isSelected={selectedMessageUid === message.uid}
+                      density={density}
+                      onClick={() => handleClick(message.uid)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {isFetchingNextPage && (
             <div className="flex items-center justify-center py-2">
               <span className="text-xs text-muted-foreground">Loading more...</span>

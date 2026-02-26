@@ -148,13 +148,13 @@ export const MessageListItem = memo(function MessageListItem({
         </button>
 
         {/* Sender */}
-        <span className="w-32 shrink-0 truncate">{sender}</span>
+        <span className="w-32 shrink-0 truncate font-normal text-muted-foreground">{sender}</span>
 
         {/* Dash separator */}
         <span className="shrink-0 text-muted-foreground">&mdash;</span>
 
         {/* Subject */}
-        <span className="min-w-0 flex-1 truncate">{message.subject}</span>
+        <span className="min-w-0 flex-1 truncate">{message.subject || "(no subject)"}</span>
 
         {/* Attachment icon */}
         {message.has_attachments && (
@@ -185,11 +185,36 @@ export const MessageListItem = memo(function MessageListItem({
       className={cn(
         "flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 transition-colors",
         "hover:bg-muted",
-        isUnread ? "bg-background font-semibold" : "bg-transparent font-normal",
+        isUnread ? "bg-background" : "bg-transparent",
         isSelected && "bg-accent hover:bg-accent",
       )}
     >
-      {/* Top row: sender + date */}
+      {/* Top row: sender + date + star */}
+      <div className="flex items-center gap-2 pl-6">
+        {/* Sender name */}
+        <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">{sender}</span>
+
+        {/* Date */}
+        <span className="shrink-0 text-xs font-normal text-muted-foreground">
+          {formattedDate}
+        </span>
+
+        {/* Star */}
+        <button
+          type="button"
+          aria-label={isFlagged ? "Unstar" : "Star"}
+          onClick={toggleStar}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
+        >
+          {isFlagged ? (
+            <Star className="size-3.5 fill-primary text-primary" />
+          ) : (
+            <Star className="size-3.5 text-muted-foreground/40" />
+          )}
+        </button>
+      </div>
+
+      {/* Bottom row: dot + subject + snippet */}
       <div className="flex items-center gap-2">
         {/* Unread indicator dot */}
         <button
@@ -206,37 +231,12 @@ export const MessageListItem = memo(function MessageListItem({
           />
         </button>
 
-        {/* Star */}
-        <button
-          type="button"
-          aria-label={isFlagged ? "Unstar" : "Star"}
-          onClick={toggleStar}
-          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/20"
-        >
-          {isFlagged ? (
-            <Star className="size-3.5 fill-primary text-primary" />
-          ) : (
-            <Star className="size-3.5 text-muted-foreground/40" />
-          )}
-        </button>
-
-        {/* Sender name */}
-        <span className="min-w-0 flex-1 truncate text-sm">{sender}</span>
-
-        {/* Date */}
-        <span className="shrink-0 text-xs font-normal text-muted-foreground">
-          {formattedDate}
-        </span>
-      </div>
-
-      {/* Bottom row: subject + snippet + attachments */}
-      <div className="flex items-center gap-2 pl-[calc(0.375rem+0.375rem)]">
-        <span className="min-w-0 flex-1 truncate text-sm font-normal text-muted-foreground">
-          <span className={cn(isUnread && "font-medium text-foreground")}>
-            {message.subject}
+        <span className="min-w-0 flex-1 truncate text-sm">
+          <span className={cn(isUnread ? "font-medium" : "font-normal", "text-foreground")}>
+            {message.subject || "(no subject)"}
           </span>
           {message.snippet && (
-            <span className="text-muted-foreground">
+            <span className="font-normal text-muted-foreground">
               {" "}
               &mdash; {message.snippet}
             </span>

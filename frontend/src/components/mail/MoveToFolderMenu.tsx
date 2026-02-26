@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { FolderInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFolders } from "@/hooks/useFolders";
+import { formatFolderName } from "./FolderTree";
 
 interface MoveToFolderMenuProps {
   currentFolder: string;
@@ -65,7 +66,7 @@ export function MoveToFolderMenu({
                 }}
                 className="flex w-full items-center px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
               >
-                {folder.name}
+                {formatFolderName(folder.name)}
               </button>
             ))
           )}
