@@ -6,6 +6,7 @@ import {
   useInfiniteQuery,
   useMutation,
   useQueryClient,
+  keepPreviousData,
 } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost, apiDelete } from "@/lib/api";
 import type { MessagesResponse, MessageDetail } from "@/types/message";
@@ -37,6 +38,7 @@ export function useMessage(folder: string, uid: number) {
         `/messages/${encodeURIComponent(folder)}/${uid}`,
       ),
     enabled: !!folder && uid > 0,
+    placeholderData: keepPreviousData,
   });
 }
 

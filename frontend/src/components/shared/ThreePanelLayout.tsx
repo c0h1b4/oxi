@@ -2,6 +2,9 @@
 
 import { useCallback, useRef } from "react";
 import { useUiStore } from "@/stores/useUiStore";
+import { SearchBar } from "@/components/mail/SearchBar";
+import { SearchResults } from "@/components/mail/SearchResults";
+import { MessageActionBar } from "@/components/mail/MessageActionBar";
 
 interface ThreePanelLayoutProps {
   navRail: React.ReactNode;
@@ -69,6 +72,7 @@ export function ThreePanelLayout({
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
   const setMessageListWidth = useUiStore((s) => s.setMessageListWidth);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
+  const searchActive = useUiStore((s) => s.searchActive);
 
   const handleSidebarDrag = useCallback(
     (delta: number) => {
@@ -102,21 +106,27 @@ export function ThreePanelLayout({
       {/* Resize handle: sidebar | message list */}
       <ResizeHandle onDrag={handleSidebarDrag} />
 
-      {/* Center panel — message list */}
+      {/* Center panel — search bar + message list or search results */}
       <main
-        className="shrink-0 overflow-y-auto border-x border-border"
+        className="flex shrink-0 flex-col overflow-hidden border-x border-border"
         style={{ width: messageListWidth }}
       >
-        {messageList}
+        <SearchBar />
+        {searchActive ? (
+          <SearchResults />
+        ) : (
+          <div className="flex-1 overflow-y-auto">{messageList}</div>
+        )}
       </main>
 
       {/* Resize handle: message list | reading pane */}
       <ResizeHandle onDrag={handleMessageListDrag} />
 
-      {/* Right panel — reading pane (fills remaining space) */}
-      <section className="flex min-h-0 min-w-0 flex-1">
+      {/* Right panel — action bar + reading pane (fills remaining space) */}
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <MessageActionBar />
         {selectedMessageUid !== null ? (
-          readingPane
+          <div className="flex min-h-0 flex-1">{readingPane}</div>
         ) : (
           <div className="flex h-full w-full items-center justify-center">
             <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">

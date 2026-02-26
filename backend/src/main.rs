@@ -5,6 +5,7 @@ mod imap;
 mod smtp;
 mod auth;
 mod routes;
+mod search;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,8 +51,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient);
     let smtp_client: Arc<dyn smtp::client::SmtpClient> = Arc::new(RealSmtpClient);
 
+    // Create the Tantivy search engine for full-text indexing.
+    let search_engine = Arc::new(search::engine::SearchEngine::new(
+        std::path::PathBuf::from(&config.data_dir),
+    ));
+
     // Build the application router with auth, session, and static file serving.
-    let app = routes::create_router(config.clone(), store, imap_client, smtp_client);
+    let app = routes::create_router(config.clone(), store, imap_client, smtp_client, search_engine);
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);

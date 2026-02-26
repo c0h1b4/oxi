@@ -4,19 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { Dialog, Popover } from "radix-ui";
 import {
   Paperclip,
-  Star,
-  Mail,
-  MailOpen,
-  Trash2,
   ChevronDown,
   ChevronUp,
   Code,
   Type,
   FileCode,
   ShieldAlert,
-  Reply,
-  ReplyAll,
-  Forward,
   X,
   Download,
   ChevronLeft,
@@ -25,29 +18,20 @@ import {
   Send,
   FileText,
   File,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import {
   useMessage,
   useUpdateFlags,
-  useMoveMessage,
-  useDeleteMessage,
 } from "@/hooks/useMessages";
 import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
-import { MoveToFolderMenu } from "./MoveToFolderMenu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
-import { useAuthStore } from "@/stores/useAuthStore";
-import {
-  extractHeader,
-  buildReplySubject,
-  buildForwardSubject,
-  buildReplyBody,
-  buildForwardBody,
-  buildReferences,
-} from "@/lib/email-utils";
+import { useCreateContact } from "@/hooks/useContacts";
 import type { EmailAddress, Attachment } from "@/types/message";
 
 type HeaderMode = "summary" | "details";
@@ -100,16 +84,14 @@ function humanizeDate(iso: string): string {
   });
 }
 
-function formatAddressList(addresses: EmailAddress[]): string {
-  return addresses
-    .map((a) => (a.name ? `${a.name} <${a.address}>` : a.address))
-    .join(", ");
-}
 
 function AddressChip({ address, name }: { address: string; name?: string | null }) {
   const displayName = name || address;
+  const createContact = useCreateContact();
+  const [contactAdded, setContactAdded] = useState(false);
+
   return (
-    <Popover.Root>
+    <Popover.Root onOpenChange={(open) => { if (!open) setContactAdded(false); }}>
       <Popover.Trigger asChild>
         <button className="inline rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground">
           {displayName}
@@ -137,15 +119,36 @@ function AddressChip({ address, name }: { address: string; name?: string | null 
           </button>
           <button
             onClick={() => {
-              // Copy to clipboard as a lightweight "add to address book" action
               navigator.clipboard.writeText(
                 name ? `${name} <${address}>` : address,
               );
             }}
             className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
           >
-            <UserPlus className="size-3.5 text-muted-foreground" />
+            <Copy className="size-3.5 text-muted-foreground" />
             Copy address
+          </button>
+          <button
+            disabled={contactAdded || createContact.isPending}
+            onClick={() => {
+              createContact.mutate(
+                { email: address, name: name ?? "" },
+                { onSuccess: () => setContactAdded(true) },
+              );
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
+          >
+            {contactAdded ? (
+              <>
+                <Check className="size-3.5 text-green-500" />
+                Contact added
+              </>
+            ) : (
+              <>
+                <UserPlus className="size-3.5 text-muted-foreground" />
+                Add to contacts
+              </>
+            )}
           </button>
         </Popover.Content>
       </Popover.Portal>
@@ -356,21 +359,18 @@ function AttachmentPreviewer({
 export function ReadingPane() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
-  const selectMessage = useUiStore((s) => s.selectMessage);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
   const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(new Set());
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
-  const { data, isLoading, isError, refetch } = useMessage(
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0,
   );
 
   const updateFlags = useUpdateFlags();
-  const moveMessage = useMoveMessage();
-  const deleteMessage = useDeleteMessage();
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
@@ -424,7 +424,7 @@ export function ReadingPane() {
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div className={cn("flex h-full w-full flex-col overflow-hidden transition-opacity", isPlaceholderData && "opacity-40 pointer-events-none")}>
       {/* Header area */}
       <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
         <h2 className="text-lg font-bold leading-tight">{data.subject}</h2>
@@ -504,194 +504,6 @@ export function ReadingPane() {
             Headers
           </button>
         </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-4 py-1.5">
-        {/* Read/Unread toggle */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            const isSeen = data.flags.includes("\\Seen");
-            updateFlags.mutate({
-              folder: activeFolder,
-              uid: data.uid,
-              flags: ["\\Seen"],
-              add: !isSeen,
-            });
-          }}
-        >
-          {data.flags.includes("\\Seen") ? (
-            <>
-              <Mail className="size-4" />
-              Mark unread
-            </>
-          ) : (
-            <>
-              <MailOpen className="size-4" />
-              Mark read
-            </>
-          )}
-        </Button>
-
-        {/* Star/Unstar toggle */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            const isFlagged = data.flags.includes("\\Flagged");
-            updateFlags.mutate({
-              folder: activeFolder,
-              uid: data.uid,
-              flags: ["\\Flagged"],
-              add: !isFlagged,
-            });
-          }}
-        >
-          {data.flags.includes("\\Flagged") ? (
-            <>
-              <Star className="size-4 fill-primary text-primary" />
-              Unstar
-            </>
-          ) : (
-            <>
-              <Star className="size-4" />
-              Star
-            </>
-          )}
-        </Button>
-
-        <div className="mx-1 h-5 w-px bg-border" />
-
-        {/* Delete button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            if (activeFolder === "Trash") {
-              deleteMessage.mutate(
-                { folder: activeFolder, uid: data.uid },
-                { onSuccess: () => selectMessage(null) },
-              );
-            } else {
-              moveMessage.mutate(
-                {
-                  fromFolder: activeFolder,
-                  toFolder: "Trash",
-                  uid: data.uid,
-                },
-                { onSuccess: () => selectMessage(null) },
-              );
-            }
-          }}
-        >
-          <Trash2 className="size-4" />
-          {activeFolder === "Trash" ? "Delete forever" : "Delete"}
-        </Button>
-
-        {/* Move to folder */}
-        <MoveToFolderMenu
-          currentFolder={activeFolder}
-          onMove={(toFolder) => {
-            moveMessage.mutate(
-              {
-                fromFolder: activeFolder,
-                toFolder,
-                uid: data.uid,
-              },
-              { onSuccess: () => selectMessage(null) },
-            );
-          }}
-        />
-
-        <div className="mx-1 h-5 w-px bg-border" />
-
-        {/* Reply */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            const messageId = extractHeader(data.raw_headers, "Message-ID");
-            const refs = extractHeader(data.raw_headers, "References");
-            useComposeStore.getState().openReply({
-              to: data.from_address,
-              cc: "",
-              subject: buildReplySubject(data.subject),
-              body: buildReplyBody(data.text, data.from_address, data.date),
-              inReplyTo: messageId,
-              references: buildReferences(refs, messageId),
-            });
-          }}
-        >
-          <Reply className="size-4" />
-          Reply
-        </Button>
-
-        {/* Reply All */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            const myEmail = useAuthStore.getState().email ?? "";
-            const messageId = extractHeader(data.raw_headers, "Message-ID");
-            const refs = extractHeader(data.raw_headers, "References");
-
-            // To: original sender
-            const replyTo = data.from_address;
-
-            // CC: all original To + CC, excluding ourselves and the sender
-            const allRecipients = [
-              ...data.to_addresses,
-              ...data.cc_addresses,
-            ].filter(
-              (a) =>
-                a.address.toLowerCase() !== myEmail.toLowerCase() &&
-                a.address.toLowerCase() !== data.from_address.toLowerCase(),
-            );
-            const ccList = allRecipients.map((a) => a.address).join(", ");
-
-            useComposeStore.getState().openReply({
-              to: replyTo,
-              cc: ccList,
-              subject: buildReplySubject(data.subject),
-              body: buildReplyBody(data.text, data.from_address, data.date),
-              inReplyTo: messageId,
-              references: buildReferences(refs, messageId),
-            });
-          }}
-        >
-          <ReplyAll className="size-4" />
-          Reply all
-        </Button>
-
-        {/* Forward */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            const toList = formatAddressList(data.to_addresses);
-            useComposeStore.getState().openForward({
-              subject: buildForwardSubject(data.subject),
-              body: buildForwardBody(
-                data.text,
-                data.from_address,
-                data.date,
-                data.subject,
-                toList,
-              ),
-            });
-          }}
-        >
-          <Forward className="size-4" />
-          Forward
-        </Button>
       </div>
 
       {/* Attachment bar */}
