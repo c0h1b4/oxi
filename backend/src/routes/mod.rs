@@ -1,6 +1,8 @@
 pub mod attachments;
 pub mod auth;
+pub mod contacts;
 pub mod drafts;
+pub mod folder_mgmt;
 pub mod folders;
 pub mod health;
 pub mod messages;
@@ -110,7 +112,18 @@ pub fn create_router(
 
     // Protected data routes (auth_guard + CSRF).
     let protected_data = Router::new()
-        .route("/folders", get(folders::list_folders))
+        .route(
+            "/folders",
+            get(folders::list_folders).post(folder_mgmt::create_folder),
+        )
+        .route(
+            "/folders/{name}",
+            patch(folder_mgmt::rename_folder).delete(folder_mgmt::delete_folder),
+        )
+        .route(
+            "/folders/{name}/subscribe",
+            patch(folder_mgmt::subscribe_folder),
+        )
         .route("/folders/{folder}/messages", get(messages::list_messages))
         .route("/messages/{folder}/{uid}", get(messages::get_message))
         .route(
@@ -144,6 +157,18 @@ pub fn create_router(
             get(attachments::get_attachment_content),
         )
         .route("/search", get(search::search_messages))
+        .route(
+            "/contacts",
+            get(contacts::list_contacts_handler).post(contacts::create_contact_handler),
+        )
+        .route(
+            "/contacts/autocomplete",
+            get(contacts::autocomplete_handler),
+        )
+        .route(
+            "/contacts/{id}",
+            get(contacts::get_contact_handler).delete(contacts::delete_contact_handler),
+        )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 
