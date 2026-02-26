@@ -189,10 +189,6 @@ function BodySkeleton() {
   );
 }
 
-function isPreviewable(contentType: string): boolean {
-  return contentType.startsWith("image/") || contentType === "application/pdf";
-}
-
 function AttachmentPreviewer({
   attachments,
   baseUrl,

@@ -75,27 +75,27 @@ function DraftItems() {
   const [loadingDraftId, setLoadingDraftId] = useState<string | null>(null);
   const getDraft = useGetDraft(loadingDraftId);
 
+  // When draft data arrives, open it in the compose dialog.
   useEffect(() => {
-    if (getDraft.data && loadingDraftId) {
-      const d = getDraft.data;
-      openDraft({
-        id: d.id,
-        to: d.to,
-        cc: d.cc,
-        bcc: d.bcc,
-        subject: d.subject,
-        body: d.html_body ?? d.text_body,
-        inReplyTo: d.in_reply_to,
-        references: d.references,
-        attachments: d.attachments.map((a) => ({
-          id: a.id,
-          filename: a.filename,
-          contentType: a.content_type,
-          size: a.size,
-        })),
-      });
-      setLoadingDraftId(null);
-    }
+    if (!getDraft.data || !loadingDraftId) return;
+    const d = getDraft.data;
+    openDraft({
+      id: d.id,
+      to: d.to,
+      cc: d.cc,
+      bcc: d.bcc,
+      subject: d.subject,
+      body: d.html_body ?? d.text_body,
+      inReplyTo: d.in_reply_to,
+      references: d.references,
+      attachments: d.attachments.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        contentType: a.content_type,
+        size: a.size,
+      })),
+    });
+    setLoadingDraftId(null); // eslint-disable-line react-hooks/set-state-in-effect -- clearing after zustand store update
   }, [getDraft.data, loadingDraftId, openDraft]);
 
   const drafts = data?.drafts ?? [];
@@ -179,6 +179,7 @@ export function MessageList() {
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- useVirtualizer is designed for this usage
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,

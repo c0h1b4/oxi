@@ -43,10 +43,10 @@ pub async fn upload_attachment(
 
     // Ensure draft exists (create it if not — auto-creates on first attachment upload).
     let existing = db::drafts::get_draft(&conn, &draft_id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
     if existing.is_none() {
         db::drafts::upsert_draft(&conn, &draft_id, "", "", "", "", "", None, None, None)
-            .map_err(|e| AppError::InternalError(e))?;
+            .map_err(AppError::InternalError)?;
     }
 
     // Build the attachment storage directory.
@@ -104,7 +104,7 @@ pub async fn upload_attachment(
             size,
             file_path.to_str().unwrap_or(""),
         )
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
         uploaded.push(UploadResponse {
             id: att_id,
@@ -136,7 +136,7 @@ pub async fn get_attachment_content(
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let attachments = db::drafts::get_draft_attachments(&conn, &draft_id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
     let attachment = attachments
         .iter()
@@ -167,7 +167,7 @@ pub async fn delete_attachment(
 
     // Get the attachment record so we can find the file path.
     let attachments = db::drafts::get_draft_attachments(&conn, &draft_id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
     let attachment = attachments
         .iter()
@@ -182,7 +182,7 @@ pub async fn delete_attachment(
 
     // Delete from DB.
     db::drafts::delete_draft_attachment(&conn, &attachment_id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
     Ok(Json(DeleteResponse {
         status: "deleted".to_string(),
