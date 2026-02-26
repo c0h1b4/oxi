@@ -151,6 +151,18 @@ impl SearchEngine {
 }
 
 impl UserIndex {
+    /// Returns `true` if the given folder should be excluded from search indexing
+    /// (e.g. Spam, Junk, Trash).
+    pub fn is_excluded_folder(folder: &str) -> bool {
+        let lower = folder.to_lowercase();
+        lower == "trash"
+            || lower == "junk"
+            || lower == "spam"
+            || lower.ends_with("/trash")
+            || lower.ends_with("/junk")
+            || lower.ends_with("/spam")
+    }
+
     /// Index a single message. Uses delete-before-insert for upsert semantics.
     pub fn index_message(&self, msg: &IndexableMessage) -> Result<(), String> {
         let mut writer: IndexWriter = self

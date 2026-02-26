@@ -11,6 +11,9 @@ interface MessageListItemProps {
   isSelected: boolean;
   density: "compact" | "comfortable";
   onClick: () => void;
+  bulkSelectMode: boolean;
+  isBulkSelected: boolean;
+  onBulkToggle: (uid: number) => void;
 }
 
 function formatDate(dateStr: string): string {
@@ -79,6 +82,9 @@ export const MessageListItem = memo(function MessageListItem({
   isSelected,
   density,
   onClick,
+  bulkSelectMode,
+  isBulkSelected,
+  onBulkToggle,
 }: MessageListItemProps) {
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
@@ -156,20 +162,40 @@ export const MessageListItem = memo(function MessageListItem({
           isDragging && "opacity-50",
         )}
       >
-        {/* Unread indicator dot */}
-        <button
-          type="button"
-          aria-label={isUnread ? "Mark as read" : "Mark as unread"}
-          onClick={toggleRead}
-          className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
-        >
-          <span
+        {/* Bulk checkbox or unread indicator dot */}
+        {bulkSelectMode ? (
+          <button
+            type="button"
+            aria-label={isBulkSelected ? "Deselect" : "Select"}
+            onClick={(e) => { e.stopPropagation(); onBulkToggle(message.uid); }}
             className={cn(
-              "size-1.5 rounded-full",
-              isUnread ? "bg-primary" : "bg-border",
+              "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+              isBulkSelected
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-muted-foreground/40 bg-transparent hover:border-primary",
             )}
-          />
-        </button>
+          >
+            {isBulkSelected && (
+              <svg className="size-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.5 6l2.5 2.5 4.5-5" />
+              </svg>
+            )}
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+            onClick={toggleRead}
+            className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
+          >
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                isUnread ? "bg-primary" : "bg-border",
+              )}
+            />
+          </button>
+        )}
 
         {/* Star */}
         <button
@@ -258,22 +284,42 @@ export const MessageListItem = memo(function MessageListItem({
         </button>
       </div>
 
-      {/* Bottom row: dot + subject + snippet */}
+      {/* Bottom row: checkbox/dot + subject + snippet */}
       <div className="flex items-center gap-2">
-        {/* Unread indicator dot */}
-        <button
-          type="button"
-          aria-label={isUnread ? "Mark as read" : "Mark as unread"}
-          onClick={toggleRead}
-          className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
-        >
-          <span
+        {/* Bulk checkbox or unread indicator dot */}
+        {bulkSelectMode ? (
+          <button
+            type="button"
+            aria-label={isBulkSelected ? "Deselect" : "Select"}
+            onClick={(e) => { e.stopPropagation(); onBulkToggle(message.uid); }}
             className={cn(
-              "size-1.5 rounded-full",
-              isUnread ? "bg-primary" : "bg-border",
+              "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+              isBulkSelected
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-muted-foreground/40 bg-transparent hover:border-primary",
             )}
-          />
-        </button>
+          >
+            {isBulkSelected && (
+              <svg className="size-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.5 6l2.5 2.5 4.5-5" />
+              </svg>
+            )}
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+            onClick={toggleRead}
+            className="flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/20"
+          >
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                isUnread ? "bg-primary" : "bg-border",
+              )}
+            />
+          </button>
+        )}
 
         <span className="min-w-0 flex-1 truncate text-sm">
           <span className={cn(isUnread ? "font-medium" : "font-normal", isFlagged ? "text-primary" : "text-foreground")}>

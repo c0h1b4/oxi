@@ -740,11 +740,6 @@ pub async fn download_attachment(
         .unwrap_or_else(|| format!("attachment_{index}"));
     let content_type = attachment.content_type;
 
-<<<<<<< ours
-    let is_inline = content_type.starts_with("image/") || content_type == "application/pdf";
-    let disp_type = if is_inline { "inline" } else { "attachment" };
-    let disposition = format!("{disp_type}; filename=\"{}\"", filename.replace('"', "\\\""));
-=======
     // Use inline disposition for types the browser can display natively
     // (PDF, images) so the preview works; use attachment for everything else.
     let is_inline = content_type == "application/pdf"
@@ -755,7 +750,6 @@ pub async fn download_attachment(
     } else {
         format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""))
     };
->>>>>>> theirs
 
     Ok(Response::builder()
         .header("content-type", &content_type)
