@@ -524,31 +524,33 @@ pub async fn get_message(
         }
     }
 
-    // Look up thread messages if this message has a message_id.
-    let thread = if let Some(ref message_id) = msg.message_id {
-        db::messages::get_thread_messages(&conn, message_id)
-            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
-            .into_iter()
-            .map(|m| ThreadMessage {
-                uid: m.uid,
-                folder: m.folder,
-                message_id: m.message_id,
-                in_reply_to: m.in_reply_to,
-                subject: m.subject,
-                from_address: m.from_address,
-                from_name: m.from_name,
-                to_addresses: m.to_addresses,
-                cc_addresses: m.cc_addresses,
-                date: m.date,
-                flags: m.flags,
-                size: m.size,
-                has_attachments: m.has_attachments,
-                snippet: m.snippet,
-            })
-            .collect()
+    // Build thread using full References chain.
+    let thread_messages = if let Some(ref message_id) = msg.message_id {
+        db::messages::get_full_thread(&conn, message_id, msg.references_header.as_deref())
+            .unwrap_or_default()
     } else {
         vec![]
     };
+
+    let thread: Vec<ThreadMessage> = thread_messages
+        .into_iter()
+        .map(|m| ThreadMessage {
+            uid: m.uid,
+            folder: m.folder,
+            message_id: m.message_id,
+            in_reply_to: m.in_reply_to,
+            subject: m.subject,
+            from_address: m.from_address,
+            from_name: m.from_name,
+            to_addresses: m.to_addresses,
+            cc_addresses: m.cc_addresses,
+            date: m.date,
+            flags: m.flags,
+            size: m.size,
+            has_attachments: m.has_attachments,
+            snippet: m.snippet,
+        })
+        .collect();
 
     Ok(Json(MessageDetailResponse {
         uid: msg.uid,
