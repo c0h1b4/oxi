@@ -137,6 +137,10 @@ pub fn create_router(
             "/drafts/{draft_id}/attachments/{attachment_id}",
             delete(attachments::delete_attachment),
         )
+        .route(
+            "/drafts/{draft_id}/attachments/{attachment_id}/content",
+            get(attachments::get_attachment_content),
+        )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 
@@ -1252,7 +1256,7 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(cd.contains("attachment"));
+        assert!(cd.contains("inline"));
         assert!(cd.contains("document.pdf"));
 
         // Verify body bytes match the attachment data.
