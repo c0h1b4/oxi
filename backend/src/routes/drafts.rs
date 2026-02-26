@@ -101,7 +101,7 @@ pub async fn upsert_draft_handler(
         req.in_reply_to.as_deref(),
         req.references.as_deref(),
     )
-    .map_err(|e| AppError::InternalError(e))?;
+    .map_err(AppError::InternalError)?;
 
     Ok(Json(DraftResponse {
         id: req.id,
@@ -118,7 +118,7 @@ pub async fn list_drafts_handler(
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
-    let drafts = db::drafts::list_drafts(&conn).map_err(|e| AppError::InternalError(e))?;
+    let drafts = db::drafts::list_drafts(&conn).map_err(AppError::InternalError)?;
 
     let items: Vec<DraftListItem> = drafts
         .into_iter()
@@ -143,11 +143,11 @@ pub async fn get_draft_handler(
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let draft = db::drafts::get_draft(&conn, &id)
-        .map_err(|e| AppError::InternalError(e))?
+        .map_err(AppError::InternalError)?
         .ok_or_else(|| AppError::NotFound("Draft not found".to_string()))?;
 
     let attachments = db::drafts::get_draft_attachments(&conn, &id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
     let att_infos: Vec<AttachmentInfo> = attachments
         .into_iter()
@@ -186,7 +186,7 @@ pub async fn delete_draft_handler(
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let deleted =
-        db::drafts::delete_draft(&conn, &id).map_err(|e| AppError::InternalError(e))?;
+        db::drafts::delete_draft(&conn, &id).map_err(AppError::InternalError)?;
 
     if !deleted {
         return Err(AppError::NotFound("Draft not found".to_string()));
@@ -197,10 +197,10 @@ pub async fn delete_draft_handler(
         .join(&session.user_hash)
         .join("attachments")
         .join(&id);
-    if att_dir.exists() {
-        if let Err(e) = tokio::fs::remove_dir_all(&att_dir).await {
-            tracing::warn!(error = %e, path = %att_dir.display(), "Failed to clean up attachment directory");
-        }
+    if att_dir.exists()
+        && let Err(e) = tokio::fs::remove_dir_all(&att_dir).await
+    {
+        tracing::warn!(error = %e, path = %att_dir.display(), "Failed to clean up attachment directory");
     }
 
     Ok(Json(DeleteResponse {

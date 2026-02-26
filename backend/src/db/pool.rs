@@ -35,12 +35,12 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         )
         .unwrap_or(None);
 
-    if let Some(v) = refinery_max {
-        if v > current {
-            current = v;
-            conn.execute_batch(&format!("PRAGMA user_version = {current};"))
-                .map_err(|e| format!("Failed to sync user_version from refinery: {e}"))?;
-        }
+    if let Some(v) = refinery_max
+        && v > current
+    {
+        current = v;
+        conn.execute_batch(&format!("PRAGMA user_version = {current};"))
+            .map_err(|e| format!("Failed to sync user_version from refinery: {e}"))?;
     }
 
     for &(version, sql) in MIGRATIONS {

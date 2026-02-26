@@ -188,7 +188,7 @@ impl SmtpClient for RealSmtpClient {
             message.attachments.iter().partition(|att| {
                 att.content_id
                     .as_ref()
-                    .map_or(false, |cid| html_body.contains(&format!("cid:{cid}")))
+                    .is_some_and(|cid| html_body.contains(&format!("cid:{cid}")))
             });
 
         // Build the body part(s).

@@ -56,8 +56,8 @@ pub async fn send_message_handler(
 
     // Validate: subject or body must be non-empty.
     let has_subject = !req.subject.trim().is_empty();
-    let has_text = req.text_body.as_deref().map_or(false, |t| !t.trim().is_empty());
-    let has_html = req.html_body.as_deref().map_or(false, |h| !h.trim().is_empty());
+    let has_text = req.text_body.as_deref().is_some_and(|t| !t.trim().is_empty());
+    let has_html = req.html_body.as_deref().is_some_and(|h| !h.trim().is_empty());
     if !has_subject && !has_text && !has_html {
         return Err(AppError::BadRequest(
             "Subject or body is required".to_string(),
@@ -118,13 +118,12 @@ pub async fn send_message_handler(
         };
 
         // Build RFC822 bytes for IMAP APPEND using lettre's Message builder.
-        if let Ok(rfc822_bytes) = build_rfc822_bytes(&message, &message_id) {
-            if let Err(e) = imap_client
+        if let Ok(rfc822_bytes) = build_rfc822_bytes(&message, &message_id)
+            && let Err(e) = imap_client
                 .append_message(&imap_creds, "Sent", &rfc822_bytes, &["\\Seen"])
                 .await
-            {
-                tracing::warn!(error = %e, "Failed to append sent message to IMAP Sent folder");
-            }
+        {
+            tracing::warn!(error = %e, "Failed to append sent message to IMAP Sent folder");
         }
     }
 
@@ -150,7 +149,7 @@ fn load_draft_attachments(
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let db_attachments = db::drafts::get_draft_attachments(&conn, draft_id)
-        .map_err(|e| AppError::InternalError(e))?;
+        .map_err(AppError::InternalError)?;
 
     let mut attachments = Vec::new();
     for att in db_attachments {
@@ -173,10 +172,10 @@ fn load_draft_attachments(
 /// Clean up draft record and attachment files from disk after successful send.
 async fn cleanup_draft(data_dir: &str, user_hash: &str, draft_id: &str) {
     // Delete draft from DB (cascade deletes attachment records).
-    if let Ok(conn) = db::pool::open_user_db(data_dir, user_hash) {
-        if let Err(e) = db::drafts::delete_draft(&conn, draft_id) {
-            tracing::warn!(error = %e, "Failed to delete draft after send");
-        }
+    if let Ok(conn) = db::pool::open_user_db(data_dir, user_hash)
+        && let Err(e) = db::drafts::delete_draft(&conn, draft_id)
+    {
+        tracing::warn!(error = %e, "Failed to delete draft after send");
     }
 
     // Remove the attachment directory from disk.
@@ -184,10 +183,10 @@ async fn cleanup_draft(data_dir: &str, user_hash: &str, draft_id: &str) {
         .join(user_hash)
         .join("attachments")
         .join(draft_id);
-    if att_dir.exists() {
-        if let Err(e) = tokio::fs::remove_dir_all(&att_dir).await {
-            tracing::warn!(error = %e, path = %att_dir.display(), "Failed to clean up attachment directory");
-        }
+    if att_dir.exists()
+        && let Err(e) = tokio::fs::remove_dir_all(&att_dir).await
+    {
+        tracing::warn!(error = %e, path = %att_dir.display(), "Failed to clean up attachment directory");
     }
 }
 
@@ -226,7 +225,7 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
         message.attachments.iter().partition(|att| {
             att.content_id
                 .as_ref()
-                .map_or(false, |cid| html_body.contains(&format!("cid:{cid}")))
+                .is_some_and(|cid| html_body.contains(&format!("cid:{cid}")))
         });
 
     let body_part = if let Some(ref html) = message.html_body {

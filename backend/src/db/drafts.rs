@@ -30,6 +30,7 @@ pub struct DraftAttachment {
 }
 
 /// Insert or update a draft. Uses INSERT OR REPLACE to upsert.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_draft(
     conn: &Connection,
     id: &str,
