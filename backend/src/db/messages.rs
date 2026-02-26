@@ -409,6 +409,85 @@ pub fn get_thread_messages(
     Ok(messages)
 }
 
+/// Build a complete email thread by transitively walking the References chain.
+///
+/// Starting from `message_id` and the optional space-separated `references` string,
+/// this function repeatedly queries related messages (via `get_thread_messages`) and
+/// collects every message_id, in_reply_to, and references_header ID it encounters.
+/// The process repeats until no new IDs are discovered (transitive closure).
+///
+/// The result is deduplicated by `(folder, uid)` and sorted by `date_epoch` ascending.
+pub fn get_full_thread(
+    conn: &Connection,
+    message_id: &str,
+    references: Option<&str>,
+) -> Result<Vec<CachedMessage>, String> {
+    use std::collections::HashSet;
+
+    // Step 1: Seed the set of known message IDs.
+    let mut known_ids: HashSet<String> = HashSet::new();
+    known_ids.insert(message_id.to_string());
+    if let Some(refs) = references {
+        for id in refs.split_whitespace() {
+            if !id.is_empty() {
+                known_ids.insert(id.to_string());
+            }
+        }
+    }
+
+    // Step 2-4: Iteratively query until no new IDs are found.
+    let mut processed_ids: HashSet<String> = HashSet::new();
+    let mut all_messages: Vec<CachedMessage> = Vec::new();
+
+    loop {
+        // Find IDs we haven't queried yet.
+        let to_query: Vec<String> = known_ids
+            .difference(&processed_ids)
+            .cloned()
+            .collect();
+
+        if to_query.is_empty() {
+            break;
+        }
+
+        for id in &to_query {
+            processed_ids.insert(id.clone());
+
+            let found = get_thread_messages(conn, id)?;
+            for msg in found {
+                // Extract IDs from each found message and add to known set.
+                if let Some(ref mid) = msg.message_id {
+                    if !mid.is_empty() {
+                        known_ids.insert(mid.clone());
+                    }
+                }
+                if let Some(ref irt) = msg.in_reply_to {
+                    if !irt.is_empty() {
+                        known_ids.insert(irt.clone());
+                    }
+                }
+                if let Some(ref refs) = msg.references_header {
+                    for r in refs.split_whitespace() {
+                        if !r.is_empty() {
+                            known_ids.insert(r.to_string());
+                        }
+                    }
+                }
+                all_messages.push(msg);
+            }
+        }
+    }
+
+    // Step 5: Deduplicate by (folder, uid) pair.
+    let mut seen: HashSet<(String, u32)> = HashSet::new();
+    all_messages.retain(|msg| seen.insert((msg.folder.clone(), msg.uid)));
+
+    // Step 6: Sort by date_epoch ascending.
+    all_messages.sort_by_key(|msg| parse_date_to_epoch(&msg.date));
+
+    Ok(all_messages)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,5 +719,58 @@ mod tests {
         assert_eq!(thread.len(), 2);
         assert_eq!(thread[0].uid, 1); // matched by message_id
         assert_eq!(thread[1].uid, 3); // matched by references_header LIKE
+    }
+
+    #[test]
+    fn test_get_full_thread_walks_references_chain() {
+        let conn = open_test_db();
+        ensure_folder(&conn, "INBOX");
+
+        // Message 1: original
+        upsert_message(&conn, "INBOX", 1, Some("<a@ex>"), None, None,
+            "Hello", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+        // Message 2: reply to 1
+        upsert_message(&conn, "INBOX", 2, Some("<b@ex>"), Some("<a@ex>"), Some("<a@ex>"),
+            "Re: Hello", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "").unwrap();
+        // Message 3: reply to 2, references both
+        upsert_message(&conn, "INBOX", 3, Some("<c@ex>"), Some("<b@ex>"), Some("<a@ex> <b@ex>"),
+            "Re: Re: Hello", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "").unwrap();
+
+        // Starting from message 2, should find the entire thread (1, 2, 3).
+        let thread = get_full_thread(&conn, "<b@ex>", Some("<a@ex>")).unwrap();
+        assert_eq!(thread.len(), 3);
+        assert_eq!(thread[0].uid, 1);
+        assert_eq!(thread[1].uid, 2);
+        assert_eq!(thread[2].uid, 3);
+    }
+
+    #[test]
+    fn test_get_full_thread_from_leaf_message() {
+        let conn = open_test_db();
+        ensure_folder(&conn, "INBOX");
+
+        upsert_message(&conn, "INBOX", 1, Some("<root@ex>"), None, None,
+            "Start", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+        upsert_message(&conn, "INBOX", 2, Some("<mid@ex>"), Some("<root@ex>"), Some("<root@ex>"),
+            "Re: Start", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "").unwrap();
+        upsert_message(&conn, "INBOX", 3, Some("<leaf@ex>"), Some("<mid@ex>"), Some("<root@ex> <mid@ex>"),
+            "Re: Re: Start", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "").unwrap();
+
+        // Starting from the leaf message, should still find entire thread.
+        let thread = get_full_thread(&conn, "<leaf@ex>", Some("<root@ex> <mid@ex>")).unwrap();
+        assert_eq!(thread.len(), 3);
+    }
+
+    #[test]
+    fn test_get_full_thread_single_message() {
+        let conn = open_test_db();
+        ensure_folder(&conn, "INBOX");
+
+        upsert_message(&conn, "INBOX", 1, Some("<solo@ex>"), None, None,
+            "Solo", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+
+        let thread = get_full_thread(&conn, "<solo@ex>", None).unwrap();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].uid, 1);
     }
 }
