@@ -4,6 +4,7 @@ pub mod drafts;
 pub mod folders;
 pub mod health;
 pub mod messages;
+pub mod search;
 pub mod send;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -142,6 +143,7 @@ pub fn create_router(
             "/drafts/{draft_id}/attachments/{attachment_id}/content",
             get(attachments::get_attachment_content),
         )
+        .route("/search", get(search::search_messages))
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 
