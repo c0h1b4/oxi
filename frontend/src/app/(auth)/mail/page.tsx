@@ -8,9 +8,11 @@ import { ReadingPane } from "@/components/mail/ReadingPane";
 import { ComposeDialog } from "@/components/mail/ComposeDialog";
 import { ContactsPanel } from "@/components/contacts/ContactsPanel";
 import { useUiStore } from "@/stores/useUiStore";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 
 export default function MailPage() {
   const viewMode = useUiStore((s) => s.viewMode);
+  useKeyboardShortcuts();
 
   if (viewMode === "contacts") {
     return (
