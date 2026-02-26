@@ -65,9 +65,10 @@ ehthumbs.db
 # NOTE: .env.example is NOT ignored — it should be committed as a template
 
 # =============================================================================
-# Data / Runtime
+# Data / Runtime (SQLite caches, Tantivy search indexes)
 # =============================================================================
 /data/
+backend/data/
 
 # =============================================================================
 # Logs
