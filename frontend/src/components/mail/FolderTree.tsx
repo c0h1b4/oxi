@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useIsFetching } from "@tanstack/react-query";
 import { useFolders, useRenameFolder } from "@/hooks/useFolders";
-import { usePrefetchAllFolders } from "@/hooks/useMessages";
+import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { Button } from "@/components/ui/button";
@@ -173,6 +173,49 @@ function FolderItem({
   const setActiveFolder = useUiStore((s) => s.setActiveFolder);
   const isActive = activeFolder === folder.name;
   const isFetching = useIsFetching({ queryKey: ["messages", folder.name] });
+  const moveMessage = useMoveMessage();
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear when leaving the button itself, not its children
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      try {
+        const raw = e.dataTransfer.getData("application/json");
+        if (!raw) return;
+        const data = JSON.parse(raw) as {
+          uid: number;
+          folder: string;
+          subject: string;
+        };
+        if (data.folder === folder.name) return; // same folder, no-op
+        moveMessage.mutate({
+          fromFolder: data.folder,
+          toFolder: folder.name,
+          uid: data.uid,
+        });
+      } catch {
+        // ignore malformed drag data
+      }
+    },
+    [folder.name, moveMessage],
+  );
 
   if (isRenaming) {
     return (
@@ -192,12 +235,17 @@ function FolderItem({
     <FolderContextMenu folderName={folder.name} onRename={onStartRename}>
       <button
         onClick={() => setActiveFolder(folder.name)}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         aria-current={isActive ? "page" : undefined}
         className={cn(
           "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
           isActive
             ? "bg-primary/10 font-semibold text-primary"
             : "font-medium text-sidebar-foreground hover:bg-sidebar-accent",
+          isDragOver && "ring-2 ring-primary",
         )}
       >
         {getFolderIcon(folder.name)}
