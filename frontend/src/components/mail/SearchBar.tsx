@@ -86,6 +86,7 @@ export function SearchBar() {
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Search mail... (Ctrl+K)"
+          data-search-input
           className="h-8 w-full rounded-md border border-border bg-background py-1 pl-8 pr-8 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
         {inputValue && (
