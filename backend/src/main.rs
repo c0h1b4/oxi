@@ -5,6 +5,8 @@ mod imap;
 mod smtp;
 mod auth;
 mod routes;
+#[allow(dead_code)]
+mod search;
 
 use std::sync::Arc;
 use std::time::Duration;
