@@ -19,6 +19,18 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";
 
+/** Check if a folder name refers to the Drafts folder. */
+export function isDraftsFolder(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "drafts" || lower.includes("draft");
+}
+
+/** Title case: first letter uppercase, rest lowercase. E.g. "INBOX" → "Inbox" */
+export function formatFolderName(name: string): string {
+  if (!name) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+}
+
 /** Sort priority for well-known folders.  Lower = higher in the list. */
 function folderSortOrder(name: string): number {
   const lower = name.toLowerCase();
@@ -77,7 +89,7 @@ function FolderItem({ folder }: { folder: FolderType }) {
       )}
     >
       {getFolderIcon(folder.name)}
-      <span className="flex-1 truncate text-left">{folder.name}</span>
+      <span className="flex-1 truncate text-left">{formatFolderName(folder.name)}</span>
       {folder.unread_count > 0 ? (
         <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold text-primary-foreground">
           {folder.unread_count}
@@ -135,6 +147,7 @@ export function FolderTree() {
               ))}
           </div>
         )}
+
       </nav>
     </div>
   );

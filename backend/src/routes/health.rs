@@ -24,6 +24,8 @@ mod tests {
     use crate::config::AppConfig;
     use crate::imap::client::ImapClient;
     use crate::imap::client::mock::MockImapClient;
+    use crate::smtp::client::SmtpClient;
+    use crate::smtp::client::mock::MockSmtpClient;
     use crate::routes::create_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -47,7 +49,8 @@ mod tests {
         });
         let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
         let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
-        let app = create_router(config, store, imap_client);
+        let smtp_client: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
+        let app = create_router(config, store, imap_client, smtp_client);
 
         let response = app
             .oneshot(

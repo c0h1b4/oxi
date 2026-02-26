@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   Mail,
   PenSquare,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useComposeStore } from "@/stores/useComposeStore";
 
 function NavButton({
   icon,
@@ -58,14 +60,6 @@ export function NavRail() {
     }
     return prefersDark;
   });
-  const [toast, setToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 2000);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
   const toggleDark = useCallback(() => {
     const next = !dark;
     setDark(next);
@@ -88,7 +82,7 @@ export function NavRail() {
   }, [router]);
 
   const showComingSoon = useCallback((feature: string) => {
-    setToast(`${feature} — coming soon`);
+    toast(`${feature} — coming soon`);
   }, []);
 
   return (
@@ -103,8 +97,7 @@ export function NavRail() {
         <NavButton
           icon={<PenSquare className="size-5" />}
           label="Compose"
-          disabled
-          onClick={() => showComingSoon("Compose")}
+          onClick={() => useComposeStore.getState().openCompose()}
         />
         <NavButton
           icon={<Mail className="size-5" />}
@@ -154,12 +147,6 @@ export function NavRail() {
         />
       </div>
 
-      {/* Toast notification */}
-      {toast && (
-        <div className="absolute bottom-16 left-16 z-50 whitespace-nowrap rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background shadow-lg">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }

@@ -134,7 +134,7 @@ struct ThreadMessage {
 }
 
 /// Attachment metadata (without the binary data).
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct AttachmentMeta {
     id: String,
     filename: Option<String>,
@@ -386,8 +386,17 @@ pub async fn get_message(
     let cached_body = db::messages::get_cached_body(&conn, &folder, uid)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let (body_html, body_text, attachments, raw_headers) = if let Some((html, text)) = cached_body {
-        (html, text, vec![], String::new())
+    // Treat a cache hit with missing attachments_json as stale (pre-V006 cache).
+    // Re-fetch from IMAP so attachments and inline images are properly resolved.
+    let usable_cache = cached_body.filter(|c| c.attachments_json.is_some());
+
+    let (body_html, body_text, attachments, raw_headers) = if let Some(cached) = usable_cache {
+        let attachments: Vec<AttachmentMeta> = cached
+            .attachments_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
+        (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default())
     } else {
         // Fetch from IMAP.
         let body = imap_client
@@ -402,16 +411,6 @@ pub async fn get_message(
 
         // Sanitize HTML.
         let sanitized_html = body.text_html.as_deref().map(sanitize_html);
-
-        // Cache the body.
-        db::messages::cache_message_body(
-            &conn,
-            &folder,
-            uid,
-            sanitized_html.as_deref(),
-            body.text_plain.as_deref(),
-        )
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         let attachment_meta: Vec<AttachmentMeta> = body
             .attachments
@@ -443,6 +442,21 @@ pub async fn get_message(
             }
             html
         });
+
+        // Serialize attachment metadata for caching.
+        let att_json = serde_json::to_string(&attachment_meta).ok();
+
+        // Cache the body along with attachments and raw headers.
+        db::messages::cache_message_body(
+            &conn,
+            &folder,
+            uid,
+            resolved_html.as_deref(),
+            body.text_plain.as_deref(),
+            att_json.as_deref(),
+            Some(&body.raw_headers),
+        )
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         (resolved_html, body.text_plain, attachment_meta, body.raw_headers)
     };
@@ -643,7 +657,9 @@ pub async fn download_attachment(
         .unwrap_or_else(|| format!("attachment_{index}"));
     let content_type = attachment.content_type;
 
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""));
+    let is_inline = content_type.starts_with("image/") || content_type == "application/pdf";
+    let disp_type = if is_inline { "inline" } else { "attachment" };
+    let disposition = format!("{disp_type}; filename=\"{}\"", filename.replace('"', "\\\""));
 
     Ok(Response::builder()
         .header("content-type", &content_type)
