@@ -253,6 +253,30 @@ pub fn get_folder(conn: &Connection, name: &str) -> Result<Option<CachedFolder>,
     }
 }
 
+/// Delete a folder and all its cached messages.
+pub fn delete_folder_and_messages(conn: &Connection, folder_name: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM messages WHERE folder = ?1", params![folder_name])
+        .map_err(|e| format!("Failed to delete folder messages: {e}"))?;
+    conn.execute("DELETE FROM folders WHERE name = ?1", params![folder_name])
+        .map_err(|e| format!("Failed to delete folder: {e}"))?;
+    Ok(())
+}
+
+/// Rename a folder in the cache, updating both folders and messages tables.
+pub fn rename_folder_in_cache(conn: &Connection, old_name: &str, new_name: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE messages SET folder = ?1 WHERE folder = ?2",
+        params![new_name, old_name],
+    )
+    .map_err(|e| format!("Failed to rename messages folder: {e}"))?;
+    conn.execute(
+        "UPDATE folders SET name = ?1 WHERE name = ?2",
+        params![new_name, old_name],
+    )
+    .map_err(|e| format!("Failed to rename folder: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
