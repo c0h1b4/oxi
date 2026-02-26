@@ -49,6 +49,7 @@ interface UiState {
   density: "compact" | "comfortable";
   searchQuery: string;
   searchActive: boolean;
+  viewMode: "mail" | "contacts";
 
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
@@ -59,6 +60,7 @@ interface UiState {
   setSearchQuery: (query: string) => void;
   setSearchActive: (active: boolean) => void;
   clearSearch: () => void;
+  setViewMode: (mode: "mail" | "contacts") => void;
 }
 
 const initial = loadSettings();
@@ -72,6 +74,7 @@ export const useUiStore = create<UiState>((set) => ({
   density: "comfortable",
   searchQuery: "",
   searchActive: false,
+  viewMode: "mail",
 
   setActiveFolder: (folder) =>
     set({ activeFolder: folder, selectedMessageUid: null }),
@@ -89,4 +92,5 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
   clearSearch: () => set({ searchQuery: "", searchActive: false }),
+  setViewMode: (mode) => set({ viewMode: mode }),
 }));
