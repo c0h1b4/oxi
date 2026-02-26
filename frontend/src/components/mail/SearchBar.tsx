@@ -68,10 +68,12 @@ export function SearchBar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  // Sync input value when store is cleared externally
+  // Sync input value when the Zustand store is cleared externally (e.g. pressing
+  // Escape or clicking the clear button).  This is an intentional synchronisation
+  // between external state and local component state.
   useEffect(() => {
     if (!searchActive && searchQuery === "") {
-      setInputValue("");
+      setInputValue(""); // eslint-disable-line react-hooks/set-state-in-effect -- syncing external store → local state
     }
   }, [searchActive, searchQuery]);
 

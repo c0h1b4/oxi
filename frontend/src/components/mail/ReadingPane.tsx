@@ -365,7 +365,7 @@ export function ReadingPane() {
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(new Set());
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
-  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = useMessage(
+  const { data, isLoading, isError, isPlaceholderData, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0,
   );
