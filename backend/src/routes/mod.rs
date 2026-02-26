@@ -920,6 +920,10 @@ mod tests {
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
                 size: 2048,
+                message_id: None,
+                in_reply_to: None,
+                references: None,
+                cc: vec![],
             },
             ImapMessageHeader {
                 uid: 2,
@@ -936,6 +940,10 @@ mod tests {
                 flags: vec![],
                 has_attachments: false,
                 size: 4096,
+                message_id: None,
+                in_reply_to: None,
+                references: None,
+                cc: vec![],
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
@@ -1000,6 +1008,10 @@ mod tests {
                 flags: vec!["\\Seen".to_string()],
                 has_attachments: false,
                 size: 1024,
+                message_id: None,
+                in_reply_to: None,
+                references: None,
+                cc: vec![],
             }])
             .with_bodies(vec![ImapMessageBody {
                 uid: 42,

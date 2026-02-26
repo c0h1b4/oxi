@@ -23,12 +23,20 @@ interface FolderContextMenuProps {
   folderName: string;
   onRename: () => void;
   children: ReactNode;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragEnter?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
 }
 
 export function FolderContextMenu({
   folderName,
   onRename,
   children,
+  onDragOver,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
 }: FolderContextMenuProps) {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(
     null,
@@ -98,7 +106,7 @@ export function FolderContextMenu({
   }, [confirmDelete, deleteFolder, folderName, closeMenu]);
 
   return (
-    <div onContextMenu={handleContextMenu}>
+    <div onContextMenu={handleContextMenu} onDragOver={onDragOver} onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDrop={onDrop}>
       {children}
 
       {menuPos && (
