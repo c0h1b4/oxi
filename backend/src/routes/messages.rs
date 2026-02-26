@@ -12,6 +12,7 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
+use crate::search::engine::{IndexableMessage, SearchEngine};
 
 // ---------------------------------------------------------------------------
 // Query / request types
@@ -197,6 +198,7 @@ pub async fn list_messages(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
+    Extension(search_engine): Extension<Arc<SearchEngine>>,
     Path(folder): Path<String>,
     Query(query): Query<ListMessagesQuery>,
 ) -> Result<Response, AppError> {
@@ -312,6 +314,43 @@ pub async fn list_messages(
                 .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
             }
 
+            // Index newly synced messages into the search engine.
+            if !headers.is_empty() {
+                if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
+                    let indexable: Vec<IndexableMessage> = headers
+                        .iter()
+                        .map(|h| {
+                            let from_address = h
+                                .from
+                                .first()
+                                .map(|a| a.address.as_str())
+                                .unwrap_or("");
+                            let from_name = h
+                                .from
+                                .first()
+                                .and_then(|a| a.name.as_deref())
+                                .unwrap_or("");
+                            let subject = h.subject.as_deref().unwrap_or("");
+                            let date = h.date.as_deref().unwrap_or("");
+                            let to_json = serde_json::to_string(&h.to)
+                                .unwrap_or_else(|_| "[]".to_string());
+                            IndexableMessage {
+                                uid: h.uid,
+                                folder: folder.clone(),
+                                subject: subject.to_string(),
+                                from_address: from_address.to_string(),
+                                from_name: from_name.to_string(),
+                                to_addresses: to_json,
+                                body_text: String::new(),
+                                date_epoch: crate::db::messages::parse_date_to_epoch_public(date),
+                                has_attachments: h.has_attachments,
+                            }
+                        })
+                        .collect();
+                    let _ = user_index.index_messages_batch(&indexable);
+                }
+            }
+
             // Update folder metadata with UIDVALIDITY and message count.
             db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
                 .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
@@ -374,6 +413,7 @@ pub async fn get_message(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
+    Extension(search_engine): Extension<Arc<SearchEngine>>,
     Path((folder, uid)): Path<(String, u32)>,
 ) -> Result<Response, AppError> {
     let creds = build_creds(&session, &config)?;
@@ -461,14 +501,28 @@ pub async fn get_message(
         (resolved_html, body.text_plain, attachment_meta, body.raw_headers)
     };
 
-    // Get the message header from cache.
-    let messages = db::messages::get_messages(&conn, &folder, 0, u32::MAX)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-
-    let msg = messages
-        .into_iter()
-        .find(|m| m.uid == uid)
+    // Get the message header from cache (use efficient single-message lookup).
+    let msg = db::messages::get_single_message(&conn, &folder, uid)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
         .ok_or_else(|| AppError::NotFound(format!("Message UID {uid} not found in cache")))?;
+
+    // Re-index message with full body text for search.
+    if let Some(ref text) = body_text {
+        if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
+            let indexable = IndexableMessage {
+                uid: msg.uid,
+                folder: msg.folder.clone(),
+                subject: msg.subject.clone(),
+                from_address: msg.from_address.clone(),
+                from_name: msg.from_name.clone(),
+                to_addresses: msg.to_addresses.clone(),
+                body_text: text.clone(),
+                date_epoch: crate::db::messages::parse_date_to_epoch_public(&msg.date),
+                has_attachments: msg.has_attachments,
+            };
+            let _ = user_index.index_message(&indexable);
+        }
+    }
 
     // Look up thread messages if this message has a message_id.
     let thread = if let Some(ref message_id) = msg.message_id {

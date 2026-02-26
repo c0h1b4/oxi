@@ -80,6 +80,7 @@ pub fn create_router(
     store: Arc<SessionStore>,
     imap_client: Arc<dyn ImapClient>,
     smtp_client: Arc<dyn SmtpClient>,
+    search_engine: Arc<crate::search::engine::SearchEngine>,
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
@@ -156,6 +157,7 @@ pub fn create_router(
         .nest("/api", api_router)
         .fallback_service(static_service)
         .layer(Extension(smtp_client))
+        .layer(Extension(search_engine))
         .layer(Extension(imap_client))
         .layer(Extension(store))
         .layer(Extension(config.clone()))
@@ -263,6 +265,13 @@ mod tests {
         dir
     }
 
+    /// Helper: create a test SearchEngine backed by the given data directory.
+    fn test_search_engine(data_dir: &str) -> Arc<crate::search::engine::SearchEngine> {
+        Arc::new(crate::search::engine::SearchEngine::new(
+            std::path::PathBuf::from(data_dir),
+        ))
+    }
+
     /// Helper: provision a user database so that route handlers can open it.
     /// Migrations are applied automatically by `open_user_db`.
     fn provision_user_db(data_dir: &str, user_hash: &str) {
@@ -278,7 +287,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -307,7 +316,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -336,7 +345,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -366,7 +375,7 @@ mod tests {
         fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -395,7 +404,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -424,7 +433,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -448,7 +457,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -485,7 +494,7 @@ mod tests {
         cfg.imap_host = Some("127.0.0.1".to_string());
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -519,7 +528,7 @@ mod tests {
         cfg.imap_host = Some("127.0.0.1".to_string());
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -548,7 +557,7 @@ mod tests {
         cfg.tls_enabled = false;
         let config = Arc::new(cfg);
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -583,7 +592,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -608,7 +617,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -638,7 +647,7 @@ mod tests {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -665,7 +674,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store.clone(), test_imap_client(), test_smtp_client());
+        let app = create_router(config, store.clone(), test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -705,7 +714,7 @@ mod tests {
             "pass".to_string(),
             "hash".to_string(),
         );
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -767,7 +776,7 @@ mod tests {
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -810,7 +819,7 @@ mod tests {
         let mock = MockImapClient::new()
             .with_error(ImapError::ConnectionFailed("test failure".to_string()));
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -836,7 +845,7 @@ mod tests {
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client());
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"));
 
         let response = app
             .oneshot(
@@ -901,7 +910,7 @@ mod tests {
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -972,7 +981,7 @@ mod tests {
                 raw_headers: String::new(),
             }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config.clone(), store.clone(), imap_client.clone(), test_smtp_client());
+        let app = create_router(config.clone(), store.clone(), imap_client.clone(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         // First, populate the message cache by listing messages.
         let response = app
@@ -989,7 +998,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // Now get the full message.
-        let app2 = create_router(config, store, imap_client, test_smtp_client());
+        let app2 = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
         let response = app2
             .oneshot(
                 Request::builder()
@@ -1060,7 +1069,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1115,7 +1124,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1170,7 +1179,7 @@ mod tests {
 
         let mock = MockImapClient::new();
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1224,7 +1233,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1295,7 +1304,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(
@@ -1343,7 +1352,7 @@ mod tests {
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()));
 
         let response = app
             .oneshot(

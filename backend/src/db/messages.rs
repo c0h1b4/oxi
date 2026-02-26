@@ -127,6 +127,12 @@ pub fn max_uid(conn: &Connection, folder: &str) -> Result<u32, String> {
     .map_err(|e| format!("Failed to get max uid: {e}"))
 }
 
+/// Public wrapper to parse a date string to a Unix epoch timestamp.
+/// Useful when other modules need to compute `date_epoch` from a raw date string.
+pub fn parse_date_to_epoch_public(date: &str) -> i64 {
+    parse_date_to_epoch(date)
+}
+
 /// Parse a date string to a Unix epoch timestamp (seconds).
 /// Tries RFC2822 first (IMAP dates), then ISO 8601.
 /// Returns 0 on parse failure.
@@ -332,6 +338,25 @@ pub fn get_cached_body(
         Ok(body) => Ok(body),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(format!("Failed to get cached body: {e}")),
+    }
+}
+
+/// Return a single message by folder and UID, or None if not found.
+pub fn get_single_message(conn: &Connection, folder: &str, uid: u32) -> Result<Option<CachedMessage>, String> {
+    let sql = format!(
+        "SELECT {MSG_SELECT_COLS}
+         FROM messages
+         WHERE folder = ?1 AND uid = ?2"
+    );
+
+    let result = conn.query_row(&sql, params![folder, uid], |row| {
+        row_to_cached_message(row)
+    });
+
+    match result {
+        Ok(msg) => Ok(Some(msg)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("Failed to get single message: {e}")),
     }
 }
 
