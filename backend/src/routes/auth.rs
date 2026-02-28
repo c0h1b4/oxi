@@ -10,12 +10,15 @@ use crate::auth::middleware::SESSION_COOKIE;
 use crate::auth::session::{SessionState, SessionStore};
 use crate::auth::user_data;
 use crate::config::AppConfig;
+use crate::db;
 
 /// JSON body expected on `POST /api/auth/login`.
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 
@@ -134,9 +137,41 @@ pub async fn login(
                     .into_response();
             }
 
+            // Auto-create a default identity if the user doesn't have one yet.
+            if let Ok(conn) = db::pool::open_user_db(&config.data_dir, &user_hash) {
+                match db::identities::has_identities(&conn) {
+                    Ok(false) => {
+                        let default_identity = db::identities::CreateIdentity {
+                            email: body.email.clone(),
+                            display_name: String::new(),
+                            signature_html: String::new(),
+                            is_default: true,
+                        };
+                        if let Err(e) = db::identities::create_identity(&conn, &default_identity) {
+                            tracing::warn!(error = %e, "Failed to auto-create default identity");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to check for existing identities");
+                    }
+                    _ => {} // Already has identities, nothing to do.
+                }
+            }
+
             // Create session.
-            let token = store.insert(body.email.clone(), body.password, user_hash);
-            let max_age = config.session_timeout_hours * 3600;
+            const REMEMBER_ME_HOURS: u64 = 30 * 24; // 30 days
+            let session_hours = if body.remember {
+                REMEMBER_ME_HOURS
+            } else {
+                config.session_timeout_hours
+            };
+            let timeout_override = if body.remember {
+                Some(std::time::Duration::from_secs(session_hours * 3600))
+            } else {
+                None
+            };
+            let token = store.insert(body.email.clone(), body.password, user_hash, timeout_override);
+            let max_age = session_hours * 3600;
             let secure = config.environment != "development";
             let cookie = session_cookie(&token, max_age, secure);
 
@@ -344,6 +379,7 @@ mod tests {
             "user@test.com".to_string(),
             "pass".to_string(),
             "hash".to_string(),
+            None,
         );
         assert!(store.get(&token).is_some());
         store.remove(&token);

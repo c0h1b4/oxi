@@ -53,7 +53,9 @@ mod tests {
         let search_engine = Arc::new(crate::search::engine::SearchEngine::new(
             std::path::PathBuf::from("/tmp/oxi-test"),
         ));
-        let app = create_router(config, store, imap_client, smtp_client, search_engine);
+        let event_bus = Arc::new(crate::realtime::events::EventBus::new());
+        let idle_manager = Arc::new(crate::realtime::idle::IdleManager::new());
+        let app = create_router(config, store, imap_client, smtp_client, search_engine, event_bus, idle_manager);
 
         let response = app
             .oneshot(

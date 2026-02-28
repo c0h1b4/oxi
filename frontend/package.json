@@ -2,7 +2,7 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.27.0",
+  "packageManager": "bun",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -30,11 +30,9 @@
     "tailwind-merge": "^3.5.0",
     "zustand": "^5.0.11"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
+  "trustedDependencies": [
+    "esbuild"
+  ],
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",

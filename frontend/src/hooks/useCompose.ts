@@ -13,6 +13,7 @@ interface SendParams {
   inReplyTo: string | null;
   references: string | null;
   draftId: string | null;
+  fromIdentityId: number | null;
 }
 
 interface SendResponse {
@@ -102,6 +103,7 @@ export function useSendMessage() {
         in_reply_to: params.inReplyTo,
         references: params.references,
         draft_id: params.draftId,
+        from_identity_id: params.fromIdentityId,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messages"] });

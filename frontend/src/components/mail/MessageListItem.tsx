@@ -10,7 +10,7 @@ interface MessageListItemProps {
   message: MessageHeader;
   isSelected: boolean;
   density: "compact" | "comfortable";
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   bulkSelectMode: boolean;
   isBulkSelected: boolean;
   onBulkToggle: (uid: number) => void;
@@ -146,7 +146,7 @@ export const MessageListItem = memo(function MessageListItem({
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onClick();
+            onClick(e as unknown as React.MouseEvent);
           }
         }}
         draggable
@@ -243,7 +243,7 @@ export const MessageListItem = memo(function MessageListItem({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onClick();
+          onClick(e as unknown as React.MouseEvent);
         }
       }}
       draggable

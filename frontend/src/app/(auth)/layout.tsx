@@ -24,7 +24,7 @@ export default function AuthLayout({
         }
       })
       .catch(() => {
-        if (!cancelled) router.replace("/login");
+        if (!cancelled) router.replace("/");
       });
     return () => {
       cancelled = true;

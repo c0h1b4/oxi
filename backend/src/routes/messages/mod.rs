@@ -5,7 +5,9 @@ use axum::extract::Path;
 use axum::extract::Query;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use serde::{Deserialize, Serialize};
+
+mod types;
+use types::*;
 
 use crate::auth::session::SessionState;
 use crate::config::AppConfig;
@@ -13,137 +15,6 @@ use crate::db;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::search::engine::{IndexableMessage, SearchEngine, UserIndex};
-
-// ---------------------------------------------------------------------------
-// Query / request types
-// ---------------------------------------------------------------------------
-
-/// Query parameters for `GET /api/folders/:folder/messages`.
-#[derive(Deserialize)]
-pub struct ListMessagesQuery {
-    #[serde(default)]
-    pub page: u32,
-    #[serde(default = "default_per_page")]
-    pub per_page: u32,
-}
-
-fn default_per_page() -> u32 {
-    50
-}
-
-/// Request body for `PATCH /api/messages/:folder/:uid/flags`.
-#[derive(Deserialize)]
-pub struct UpdateFlagsRequest {
-    pub flags: Vec<String>,
-    pub add: bool,
-}
-
-/// Request body for `POST /api/messages/move`.
-#[derive(Deserialize)]
-pub struct MoveMessageRequest {
-    pub from_folder: String,
-    pub to_folder: String,
-    pub uid: u32,
-}
-
-// ---------------------------------------------------------------------------
-// Response types
-// ---------------------------------------------------------------------------
-
-/// Response envelope for `GET /api/folders/:folder/messages`.
-#[derive(Serialize)]
-struct ListMessagesResponse {
-    messages: Vec<MessageSummary>,
-    total_count: u32,
-    page: u32,
-    per_page: u32,
-}
-
-/// A message summary in the list response.
-#[derive(Serialize)]
-struct MessageSummary {
-    uid: u32,
-    folder: String,
-    subject: String,
-    from_address: String,
-    from_name: String,
-    to_addresses: String,
-    date: String,
-    flags: String,
-    size: u32,
-    has_attachments: bool,
-    snippet: String,
-}
-
-/// An email address entry for the detail response.
-#[derive(Serialize, Deserialize, Clone)]
-struct AddressEntry {
-    name: Option<String>,
-    address: String,
-}
-
-/// Parse a JSON-encoded address list string (e.g. from the SQLite cache) into
-/// a `Vec<AddressEntry>`. Returns an empty vec on parse failure.
-fn parse_address_list(json_str: &str) -> Vec<AddressEntry> {
-    serde_json::from_str(json_str).unwrap_or_default()
-}
-
-/// Split a comma-separated flags string into a `Vec<String>`.
-fn parse_flags(flags_csv: &str) -> Vec<String> {
-    if flags_csv.is_empty() {
-        return vec![];
-    }
-    flags_csv.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-}
-
-/// Response for `GET /api/messages/:folder/:uid`.
-#[derive(Serialize)]
-struct MessageDetailResponse {
-    uid: u32,
-    folder: String,
-    subject: String,
-    from_address: String,
-    from_name: String,
-    to_addresses: Vec<AddressEntry>,
-    cc_addresses: Vec<AddressEntry>,
-    date: String,
-    flags: Vec<String>,
-    has_attachments: bool,
-    html: Option<String>,
-    text: Option<String>,
-    raw_headers: String,
-    attachments: Vec<AttachmentMeta>,
-    thread: Vec<ThreadMessage>,
-}
-
-/// A message summary within a thread.
-#[derive(Serialize)]
-struct ThreadMessage {
-    uid: u32,
-    folder: String,
-    message_id: Option<String>,
-    in_reply_to: Option<String>,
-    subject: String,
-    from_address: String,
-    from_name: String,
-    to_addresses: String,
-    cc_addresses: String,
-    date: String,
-    flags: String,
-    size: u32,
-    has_attachments: bool,
-    snippet: String,
-}
-
-/// Attachment metadata (without the binary data).
-#[derive(Serialize, Deserialize)]
-struct AttachmentMeta {
-    id: String,
-    filename: Option<String>,
-    content_type: String,
-    size: usize,
-    content_id: Option<String>,
-}
 
 // ---------------------------------------------------------------------------
 // Helper: build IMAP credentials from session + config
@@ -252,7 +123,11 @@ pub async fn list_messages(
                 .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
         }
 
-        let needs_sync = needs_full_sync || cached_count == 0 || status.exists != cached_count;
+        // Force sync when the folder was explicitly invalidated (e.g. after a
+        // message move), even if IMAP exists == cached count.
+        let folder_invalidated = db::folders::is_folder_messages_invalidated(&conn, &folder)
+            .unwrap_or(false);
+        let needs_sync = needs_full_sync || cached_count == 0 || status.exists != cached_count || folder_invalidated;
 
         if needs_sync {
             // Determine which UIDs to fetch.

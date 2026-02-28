@@ -1,7 +1,7 @@
 # =============================================================================
 # oxi.email — Multi-stage Docker build
 # =============================================================================
-# Stage 1: Frontend static export (Next.js via pnpm)
+# Stage 1: Frontend static export (Next.js via bun)
 # Stage 2: Backend release build (Rust/Axum)
 # Stage 3: Minimal runtime image (Debian bookworm-slim)
 # =============================================================================
@@ -9,19 +9,17 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — Frontend build
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS frontend-build
-
-RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+FROM oven/bun:1 AS frontend-build
 
 WORKDIR /app/frontend
 
 # Copy dependency manifests first for layer caching
-COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
 
 # Copy remaining frontend source and build static export
 COPY frontend/ .
-RUN pnpm build
+RUN bun run build
 
 # ---------------------------------------------------------------------------
 # Stage 2 — Backend build

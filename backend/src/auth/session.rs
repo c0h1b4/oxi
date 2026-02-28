@@ -29,6 +29,9 @@ pub struct SessionState {
     /// Monotonic timestamp of the last time this session was accessed.
     /// Updated on every successful `get` to implement sliding-window expiry.
     pub last_accessed: Instant,
+    /// Per-session timeout override. When `Some`, takes precedence over the
+    /// store's default timeout (used for "keep me logged in").
+    pub timeout_override: Option<Duration>,
 }
 
 /// Thread-safe, in-memory session store backed by `DashMap`.
@@ -63,13 +66,22 @@ impl SessionStore {
     /// Create a new session for the given credentials and return its token.
     ///
     /// The session's `last_accessed` timestamp is set to `Instant::now()`.
-    pub fn insert(&self, email: String, password: String, user_hash: String) -> SessionId {
+    /// An optional `timeout_override` can extend (or shorten) the session
+    /// lifetime for this individual session.
+    pub fn insert(
+        &self,
+        email: String,
+        password: String,
+        user_hash: String,
+        timeout_override: Option<Duration>,
+    ) -> SessionId {
         let token = Self::generate_token();
         let state = SessionState {
             email,
             password,
             user_hash,
             last_accessed: Instant::now(),
+            timeout_override,
         };
         self.sessions.insert(token.clone(), state);
         token
@@ -84,7 +96,8 @@ impl SessionStore {
     pub fn get(&self, token: &str) -> Option<SessionState> {
         let mut entry = self.sessions.get_mut(token)?;
         let now = Instant::now();
-        if now.duration_since(entry.last_accessed) > self.timeout {
+        let effective_timeout = entry.timeout_override.unwrap_or(self.timeout);
+        if now.duration_since(entry.last_accessed) > effective_timeout {
             // Drop the mutable reference before removing so we don't
             // deadlock on the same shard.
             drop(entry);
@@ -169,6 +182,7 @@ mod tests {
             "alice@example.com".into(),
             "hunter2".into(),
             "abc123".into(),
+        None,
         );
 
         let state = store.get(&token).expect("session should exist");
@@ -186,7 +200,7 @@ mod tests {
     #[test]
     fn remove_existing_session_returns_true() {
         let store = long_lived_store();
-        let token = store.insert("bob@test.com".into(), "pass".into(), "hash".into());
+        let token = store.insert("bob@test.com".into(), "pass".into(), "hash".into(), None);
 
         assert!(store.remove(&token));
         assert!(store.get(&token).is_none());
@@ -201,7 +215,7 @@ mod tests {
     #[test]
     fn expired_session_returns_none_on_get() {
         let store = short_lived_store();
-        let token = store.insert("eve@test.com".into(), "pass".into(), "hash".into());
+        let token = store.insert("eve@test.com".into(), "pass".into(), "hash".into(), None);
 
         // Wait for the session to expire.
         thread::sleep(Duration::from_millis(100));
@@ -217,8 +231,8 @@ mod tests {
     #[test]
     fn purge_expired_removes_stale_sessions() {
         let store = short_lived_store();
-        let _t1 = store.insert("a@test.com".into(), "p".into(), "h".into());
-        let _t2 = store.insert("b@test.com".into(), "p".into(), "h".into());
+        let _t1 = store.insert("a@test.com".into(), "p".into(), "h".into(), None);
+        let _t2 = store.insert("b@test.com".into(), "p".into(), "h".into(), None);
         assert_eq!(store.len(), 2);
 
         thread::sleep(Duration::from_millis(100));
@@ -230,7 +244,7 @@ mod tests {
     #[test]
     fn purge_expired_keeps_active_sessions() {
         let store = SessionStore::new(Duration::from_secs(3600));
-        let _t1 = store.insert("alive@test.com".into(), "p".into(), "h".into());
+        let _t1 = store.insert("alive@test.com".into(), "p".into(), "h".into(), None);
 
         store.purge_expired();
 
@@ -243,7 +257,7 @@ mod tests {
         // At 160ms the session should still be alive because the sliding
         // window was refreshed.
         let store = SessionStore::new(Duration::from_millis(150));
-        let token = store.insert("slide@test.com".into(), "p".into(), "h".into());
+        let token = store.insert("slide@test.com".into(), "p".into(), "h".into(), None);
 
         thread::sleep(Duration::from_millis(80));
         assert!(store.get(&token).is_some(), "session should still be alive");
@@ -258,8 +272,8 @@ mod tests {
     #[test]
     fn concurrent_sessions_are_isolated() {
         let store = long_lived_store();
-        let t1 = store.insert("user1@test.com".into(), "pass1".into(), "hash1".into());
-        let t2 = store.insert("user2@test.com".into(), "pass2".into(), "hash2".into());
+        let t1 = store.insert("user1@test.com".into(), "pass1".into(), "hash1".into(), None);
+        let t2 = store.insert("user2@test.com".into(), "pass2".into(), "hash2".into(), None);
 
         // Each token resolves to its own session.
         let s1 = store.get(&t1).unwrap();
@@ -279,7 +293,7 @@ mod tests {
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
 
-        let t = store.insert("x@test.com".into(), "p".into(), "h".into());
+        let t = store.insert("x@test.com".into(), "p".into(), "h".into(), None);
         assert!(!store.is_empty());
         assert_eq!(store.len(), 1);
 
@@ -298,7 +312,7 @@ mod tests {
             let s = Arc::clone(&store_arc);
             handles.push(thread::spawn(move || {
                 let email = format!("thread{}@test.com", i);
-                let token = s.insert(email.clone(), "pass".into(), "hash".into());
+                let token = s.insert(email.clone(), "pass".into(), "hash".into(), None);
                 let state = s.get(&token).expect("should find own session");
                 assert_eq!(state.email, email);
                 token

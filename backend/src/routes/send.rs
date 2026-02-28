@@ -28,6 +28,9 @@ pub struct SendRequest {
     /// If sending from a draft, include the draft ID to load attachments
     /// and clean up after send.
     pub draft_id: Option<String>,
+    /// Optional identity ID to use as the From address.
+    /// If not provided, falls back to the session email.
+    pub from_identity_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +82,22 @@ pub async fn send_message_handler(
         password: session.password.clone(),
     };
 
+    // Resolve the From address: use identity if specified, else session email.
+    let from_address = if let Some(identity_id) = req.from_identity_id {
+        let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+            .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
+        let identity = db::identities::get_identity(&conn, identity_id)
+            .map_err(AppError::InternalError)?
+            .ok_or_else(|| AppError::NotFound("Identity not found".to_string()))?;
+        if identity.display_name.is_empty() {
+            identity.email
+        } else {
+            format!("\"{}\" <{}>", identity.display_name, identity.email)
+        }
+    } else {
+        session.email.clone()
+    };
+
     // Load attachments from draft if draft_id is provided.
     let attachments = if let Some(ref draft_id) = req.draft_id {
         load_draft_attachments(&config.data_dir, &session.user_hash, draft_id)?
@@ -88,7 +107,7 @@ pub async fn send_message_handler(
 
     // Build the sendable message.
     let message = SendableMessage {
-        from: session.email.clone(),
+        from: from_address,
         to: req.to,
         cc: req.cc,
         bcc: req.bcc,
