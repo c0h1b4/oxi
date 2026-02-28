@@ -20,7 +20,7 @@ import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { Button } from "@/components/ui/button";
-import { FolderContextMenu, isSystemFolder } from "@/components/mail/FolderContextMenu";
+import { FolderContextMenu } from "@/components/mail/FolderContextMenu";
 import { CreateFolderDialog } from "@/components/mail/CreateFolderDialog";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";

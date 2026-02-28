@@ -110,10 +110,9 @@ async fn handle_socket(
             event = rx.recv() => {
                 match event {
                     Ok(mail_event) => {
-                        if let Ok(json) = serde_json::to_string(&mail_event) {
-                            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                        if let Ok(json) = serde_json::to_string(&mail_event)
+                            && ws_tx.send(Message::Text(json.into())).await.is_err() {
                                 break;
-                            }
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {

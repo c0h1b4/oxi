@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Plus, Pencil, Trash2, Star, X, Check, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Star, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   useIdentities,
