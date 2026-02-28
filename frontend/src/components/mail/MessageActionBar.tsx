@@ -31,6 +31,24 @@ import {
   buildReferences,
 } from "@/lib/email-utils";
 import type { EmailAddress } from "@/types/message";
+import { useIdentities } from "@/hooks/useIdentities";
+import type { Identity } from "@/types/identity";
+
+/** Find the identity whose email matches one of the To/CC addresses. */
+function findMatchingIdentity(
+  identities: Identity[] | undefined,
+  toAddresses: EmailAddress[],
+  ccAddresses: EmailAddress[],
+): number | null {
+  if (!identities || identities.length === 0) return null;
+  const allRecipientEmails = [...toAddresses, ...ccAddresses].map((a) =>
+    a.address.toLowerCase(),
+  );
+  const match = identities.find((i) =>
+    allRecipientEmails.includes(i.email.toLowerCase()),
+  );
+  return match?.id ?? null;
+}
 
 function formatAddressList(addresses: EmailAddress[]): string {
   return addresses
@@ -47,16 +65,30 @@ export function MessageActionBar() {
   const deleteMessage = useDeleteMessage();
 
   const { data } = useMessage(activeFolder, selectedMessageUid ?? 0);
+  const { data: identities } = useIdentities();
 
   const disabled = !data;
 
   const isSeen = data?.flags.includes("\\Seen") ?? false;
   const isFlagged = data?.flags.includes("\\Flagged") ?? false;
 
+  // Reply All is redundant for 1-to-1 conversations (no other recipients besides sender + me)
+  const isDirectConversation = (() => {
+    if (!data) return false;
+    const myEmail = useAuthStore.getState().email ?? "";
+    const otherRecipients = [...data.to_addresses, ...data.cc_addresses].filter(
+      (a) =>
+        a.address.toLowerCase() !== myEmail.toLowerCase() &&
+        a.address.toLowerCase() !== data.from_address.toLowerCase(),
+    );
+    return otherRecipients.length === 0;
+  })();
+
   const handleReply = () => {
     if (!data) return;
     const messageId = extractHeader(data.raw_headers, "Message-ID");
     const refs = extractHeader(data.raw_headers, "References");
+    const matchedId = findMatchingIdentity(identities, data.to_addresses, data.cc_addresses);
     useComposeStore.getState().openReply({
       to: data.from_address,
       cc: "",
@@ -64,6 +96,7 @@ export function MessageActionBar() {
       body: buildReplyBody(data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
+      fromIdentityId: matchedId,
     });
   };
 
@@ -82,6 +115,7 @@ export function MessageActionBar() {
         a.address.toLowerCase() !== data.from_address.toLowerCase(),
     );
     const ccList = allRecipients.map((a) => a.address).join(", ");
+    const matchedId = findMatchingIdentity(identities, data.to_addresses, data.cc_addresses);
     useComposeStore.getState().openReply({
       to: replyTo,
       cc: ccList,
@@ -89,6 +123,7 @@ export function MessageActionBar() {
       body: buildReplyBody(data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
+      fromIdentityId: matchedId,
     });
   };
 
@@ -159,42 +194,42 @@ export function MessageActionBar() {
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-2 py-1">
+    <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1">
       {/* Reply */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleReply}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply}>
         <Reply className="size-4" />
         <span className="hidden xl:inline">Reply</span>
       </Button>
 
-      {/* Reply All */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleReplyAll}>
+      {/* Reply All — disabled for 1-to-1 conversations */}
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || isDirectConversation} onClick={handleReplyAll}>
         <ReplyAll className="size-4" />
         <span className="hidden xl:inline">Reply all</span>
       </Button>
 
       {/* Forward */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleForward}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleForward}>
         <Forward className="size-4" />
         <span className="hidden xl:inline">Forward</span>
       </Button>
 
-      <div className="mx-0.5 h-5 w-px bg-border" />
+      <div className="mx-0.5 h-5 w-px shrink-0 bg-border" />
 
       {/* Delete */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleDelete}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleDelete}>
         <Trash2 className="size-4" />
         <span className="hidden xl:inline">{activeFolder === "Trash" ? "Delete" : "Delete"}</span>
       </Button>
 
       {/* Archive */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive}>
         <Archive className="size-4" />
         <span className="hidden xl:inline">Archive</span>
       </Button>
 
       {/* Move to */}
       {disabled ? (
-        <Button variant="ghost" size="sm" className="gap-1.5" disabled>
+        <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
           <span className="hidden xl:inline">Move to...</span>
         </Button>
       ) : (
@@ -210,13 +245,13 @@ export function MessageActionBar() {
       )}
 
       {/* Junk */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleJunk}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleJunk}>
         <AlertCircle className="size-4" />
         <span className="hidden xl:inline">Junk</span>
       </Button>
 
       {/* Star/Unstar */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleToggleStar}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleStar}>
         {isFlagged ? (
           <Star className="size-4 fill-primary text-primary" />
         ) : (
@@ -226,7 +261,7 @@ export function MessageActionBar() {
       </Button>
 
       {/* Mark read/unread */}
-      <Button variant="ghost" size="sm" className="gap-1.5" disabled={disabled} onClick={handleToggleRead}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleRead}>
         {isSeen ? (
           <MailOpen className="size-4" />
         ) : (

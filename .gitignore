@@ -21,7 +21,7 @@ next-env.d.ts
 # Uncomment the ones you don't use:
 # package-lock.json
 # yarn.lock
-# pnpm-lock.yaml
+pnpm-lock.yaml
 
 # =============================================================================
 # Docker

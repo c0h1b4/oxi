@@ -20,7 +20,7 @@ import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { Button } from "@/components/ui/button";
-import { FolderContextMenu, isSystemFolder } from "@/components/mail/FolderContextMenu";
+import { FolderContextMenu } from "@/components/mail/FolderContextMenu";
 import { CreateFolderDialog } from "@/components/mail/CreateFolderDialog";
 import { cn } from "@/lib/utils";
 import type { Folder as FolderType } from "@/types/folder";
@@ -277,7 +277,7 @@ function FolderItem({
         )}
       >
         {getFolderIcon(folder.name)}
-        <span className="flex-1 truncate text-left">{folder.name}</span>
+        <span className="flex-1 truncate text-left">{formatFolderName(folder.name)}</span>
         {folder.unread_count > 0 ? (
           <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold text-primary-foreground">
             {folder.unread_count}

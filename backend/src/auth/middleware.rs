@@ -166,6 +166,7 @@ mod tests {
             "alice@example.com".into(),
             "hunter2".into(),
             "abc123".into(),
+        None,
         );
         let router = guarded_router(store);
 
@@ -188,6 +189,7 @@ mod tests {
             "bob@example.com".into(),
             "pass".into(),
             "hash".into(),
+        None,
         );
 
         // Wait for the session to expire.
@@ -216,6 +218,7 @@ mod tests {
             "multi@example.com".into(),
             "pass".into(),
             "hash".into(),
+        None,
         );
         let router = guarded_router(store);
 
@@ -241,6 +244,7 @@ mod tests {
             "wrong@example.com".into(),
             "pass".into(),
             "hash".into(),
+        None,
         );
         let router = guarded_router(store);
 

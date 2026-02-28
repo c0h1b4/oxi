@@ -9,6 +9,7 @@ export interface ReplyParams {
   body: string;
   inReplyTo: string | null;
   references: string | null;
+  fromIdentityId?: number | null;
 }
 
 export interface ForwardParams {
@@ -48,6 +49,7 @@ interface ComposeState {
   showCc: boolean;
   showBcc: boolean;
   attachments: ComposeAttachment[];
+  fromIdentityId: number | null;
 
   openCompose: () => void;
   openReply: (params: ReplyParams) => void;
@@ -58,6 +60,7 @@ interface ComposeState {
   setShowCc: (show: boolean) => void;
   setShowBcc: (show: boolean) => void;
   setDraftId: (id: string) => void;
+  setFromIdentityId: (id: number | null) => void;
   addAttachments: (atts: ComposeAttachment[]) => void;
   removeAttachment: (id: string) => void;
   reset: () => void;
@@ -76,6 +79,7 @@ const initialState = {
   showCc: false,
   showBcc: false,
   attachments: [] as ComposeAttachment[],
+  fromIdentityId: null as number | null,
 };
 
 export const useComposeStore = create<ComposeState>((set) => ({
@@ -94,6 +98,7 @@ export const useComposeStore = create<ComposeState>((set) => ({
       inReplyTo: params.inReplyTo,
       references: params.references,
       showCc: params.cc.length > 0,
+      fromIdentityId: params.fromIdentityId ?? null,
     }),
 
   openForward: (params) =>
@@ -129,6 +134,8 @@ export const useComposeStore = create<ComposeState>((set) => ({
   setShowBcc: (show) => set({ showBcc: show }),
 
   setDraftId: (id) => set({ draftId: id }),
+
+  setFromIdentityId: (id) => set({ fromIdentityId: id }),
 
   addAttachments: (atts) =>
     set((state) => ({ attachments: [...state.attachments, ...atts] })),
