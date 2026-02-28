@@ -22,7 +22,7 @@ export function useWebSocket() {
   const backoffRef = useRef(1000);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  const connectRef = useRef<() => void>();
+  const connectRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
