@@ -277,7 +277,7 @@ function FolderItem({
         )}
       >
         {getFolderIcon(folder.name)}
-        <span className="flex-1 truncate text-left">{folder.name}</span>
+        <span className="flex-1 truncate text-left">{formatFolderName(folder.name)}</span>
         {folder.unread_count > 0 ? (
           <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold text-primary-foreground">
             {folder.unread_count}

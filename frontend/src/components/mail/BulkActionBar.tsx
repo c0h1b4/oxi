@@ -118,7 +118,7 @@ export function BulkActionBar() {
     [runBulkAction, moveMessage, activeFolder],
   );
 
-  if (selectedUids.length < 2) return null;
+  if (selectedUids.length < 1) return null;
 
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5">

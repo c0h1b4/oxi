@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertDialog, Dialog } from "radix-ui";
+import { Dialog } from "radix-ui";
 import {
   Send,
   X,
@@ -12,7 +12,6 @@ import {
   Save,
   Maximize2,
   Minimize2,
-  Download,
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,36 +24,16 @@ import {
   useDeleteDraft,
 } from "@/hooks/useCompose";
 import { RichTextEditor } from "@/components/mail/RichTextEditor";
+import { useIdentities } from "@/hooks/useIdentities";
 import { cn } from "@/lib/utils";
-
-function countRecipients(...fields: string[]): number {
-  return fields.reduce(
-    (count, field) =>
-      count +
-      field
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0).length,
-    0,
-  );
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Strip HTML tags to produce a plain-text fallback. */
-function stripHtml(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  return doc.body.textContent ?? "";
-}
-
-/** Generate a UUID v4 (crypto-based). */
-function generateId(): string {
-  return crypto.randomUUID();
-}
+import {
+  countRecipients,
+  formatFileSize,
+  stripHtml,
+  generateId,
+  DiscardAlertDialog,
+  AttachmentPreviewDialog,
+} from "./ComposeDialog/index";
 
 export function ComposeDialog() {
   const {
@@ -70,11 +49,13 @@ export function ComposeDialog() {
     showCc,
     showBcc,
     attachments,
+    fromIdentityId,
     closeCompose,
     setField,
     setShowCc,
     setShowBcc,
     setDraftId,
+    setFromIdentityId,
     addAttachments,
     removeAttachment,
     reset,
@@ -85,7 +66,7 @@ export function ComposeDialog() {
   const uploadMutation = useUploadAttachment();
   const deleteMutation = useDeleteAttachment();
   const deleteDraftMutation = useDeleteDraft();
-  const [sending, setSending] = useState(false);
+  const { data: identities } = useIdentities();
   const [draftSaved, setDraftSaved] = useState(false);
   const [showDiscardAlert, setShowDiscardAlert] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -97,13 +78,27 @@ export function ComposeDialog() {
   const lastSavedHashRef = useRef<string>("");
 
   const hasContent = useCallback(() => {
-    return !!(to.trim() || cc.trim() || bcc.trim() || subject.trim() || stripHtml(body).trim() || attachments.length > 0);
+    return !!(
+      to.trim() ||
+      cc.trim() ||
+      bcc.trim() ||
+      subject.trim() ||
+      stripHtml(body).trim() ||
+      attachments.length > 0
+    );
   }, [to, cc, bcc, subject, body, attachments]);
+
+  // Auto-select the default identity when dialog opens and no identity is set
+  useEffect(() => {
+    if (isOpen && fromIdentityId === null && identities && identities.length > 0) {
+      const defaultIdentity = identities.find((i) => i.is_default) ?? identities[0];
+      setFromIdentityId(defaultIdentity.id);
+    }
+  }, [isOpen, fromIdentityId, identities, setFromIdentityId]);
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
     if (isOpen && toInputRef.current) {
-      // Small delay to let the dialog animation complete
       const t = setTimeout(() => toInputRef.current?.focus(), 100);
       return () => clearTimeout(t);
     }
@@ -115,40 +110,62 @@ export function ComposeDialog() {
   }, [to, cc, bcc, subject, body]);
 
   // Save draft function. When force=true, skip the hash guard (used for explicit save/close).
-  const saveDraft = useCallback((force = false) => {
-    const hash = computeHash();
-    // Don't save if nothing changed (unless forced) or compose is empty
-    if (!force && hash === lastSavedHashRef.current) return;
-    if (!to.trim() && !cc.trim() && !bcc.trim() && !subject.trim() && !stripHtml(body).trim()) return;
+  const saveDraft = useCallback(
+    (force = false) => {
+      const hash = computeHash();
+      // Don't save if nothing changed (unless forced) or compose is empty
+      if (!force && hash === lastSavedHashRef.current) return;
+      if (
+        !to.trim() &&
+        !cc.trim() &&
+        !bcc.trim() &&
+        !subject.trim() &&
+        !stripHtml(body).trim()
+      )
+        return;
 
-    let currentDraftId = draftId;
-    if (!currentDraftId) {
-      currentDraftId = generateId();
-      setDraftId(currentDraftId);
-    }
+      let currentDraftId = draftId;
+      if (!currentDraftId) {
+        currentDraftId = generateId();
+        setDraftId(currentDraftId);
+      }
 
-    saveDraftMutation.mutate(
-      {
-        id: currentDraftId,
-        to,
-        cc,
-        bcc,
-        subject,
-        textBody: stripHtml(body),
-        htmlBody: body,
-        inReplyTo: inReplyTo,
-        references: references,
-      },
-      {
-        onSuccess: () => {
-          lastSavedHashRef.current = hash;
-          setDraftSaved(true);
-          setTimeout(() => setDraftSaved(false), 3000);
-          toast.success("Draft saved");
+      saveDraftMutation.mutate(
+        {
+          id: currentDraftId,
+          to,
+          cc,
+          bcc,
+          subject,
+          textBody: stripHtml(body),
+          htmlBody: body,
+          inReplyTo: inReplyTo,
+          references: references,
         },
-      },
-    );
-  }, [computeHash, to, cc, bcc, subject, body, draftId, setDraftId, inReplyTo, references, saveDraftMutation]);
+        {
+          onSuccess: () => {
+            lastSavedHashRef.current = hash;
+            setDraftSaved(true);
+            setTimeout(() => setDraftSaved(false), 3000);
+            toast.success("Draft saved");
+          },
+        }
+      );
+    },
+    [
+      computeHash,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      draftId,
+      setDraftId,
+      inReplyTo,
+      references,
+      saveDraftMutation,
+    ]
+  );
 
   // Auto-save every 30s when dialog is open
   useEffect(() => {
@@ -171,10 +188,21 @@ export function ComposeDialog() {
     // Convert preview URLs back to cid: references for the email MIME body
     const sendHtml = body.replace(
       /\/api\/drafts\/[^/]+\/attachments\/([^/]+)\/content/g,
-      (_match, attId) => `cid:${attId}`,
+      (_match, attId) => `cid:${attId}`
     );
     sendMutation.mutate(
-      { to, cc, bcc, subject, body: plainText, htmlBody: sendHtml, inReplyTo, references, draftId },
+      {
+        to,
+        cc,
+        bcc,
+        subject,
+        body: plainText,
+        htmlBody: sendHtml,
+        inReplyTo,
+        references,
+        draftId,
+        fromIdentityId,
+      },
       {
         onSuccess: () => {
           toast.success("Message sent");
@@ -182,9 +210,8 @@ export function ComposeDialog() {
         },
         onError: (error) => {
           toast.error(`Failed to send: ${error.message}`);
-          setSending(false);
         },
-      },
+      }
     );
   }, [
     to,
@@ -195,13 +222,13 @@ export function ComposeDialog() {
     inReplyTo,
     references,
     draftId,
+    fromIdentityId,
     sendMutation,
     reset,
   ]);
 
   const handleSend = useCallback(() => {
     if (!to.trim() && !cc.trim() && !bcc.trim()) return;
-    setSending(true);
     closeCompose();
 
     // 5-second undo window via sonner
@@ -217,7 +244,6 @@ export function ComposeDialog() {
         label: "Undo",
         onClick: () => {
           clearTimeout(timer);
-          setSending(false);
           useComposeStore.setState({ isOpen: true });
         },
       },
@@ -259,7 +285,7 @@ export function ComposeDialog() {
         saveDraft(true);
       }
     },
-    [handleSend, saveDraft],
+    [handleSend, saveDraft]
   );
 
   const handleAttachFiles = useCallback(() => {
@@ -288,19 +314,19 @@ export function ComposeDialog() {
                 filename: a.filename,
                 contentType: a.content_type,
                 size: a.size,
-              })),
+              }))
             );
           },
           onError: (error) => {
             toast.error(`Upload failed: ${error.message}`);
           },
-        },
+        }
       );
 
       // Reset the input so the same file can be re-selected
       e.target.value = "";
     },
-    [draftId, setDraftId, uploadMutation, addAttachments],
+    [draftId, setDraftId, uploadMutation, addAttachments]
   );
 
   const handleImageUpload = useCallback(
@@ -329,7 +355,9 @@ export function ComposeDialog() {
                 ]);
                 // Return a preview URL that the browser can render.
                 // The send flow converts these back to cid: references.
-                resolve(`/api/drafts/${currentDraftId}/attachments/${att.id}/content`);
+                resolve(
+                  `/api/drafts/${currentDraftId}/attachments/${att.id}/content`
+                );
               } else {
                 resolve(null);
               }
@@ -338,11 +366,11 @@ export function ComposeDialog() {
               toast.error(`Image upload failed: ${error.message}`);
               resolve(null);
             },
-          },
+          }
         );
       });
     },
-    [draftId, setDraftId, uploadMutation, addAttachments],
+    [draftId, setDraftId, uploadMutation, addAttachments]
   );
 
   const handleRemoveAttachment = useCallback(
@@ -357,10 +385,10 @@ export function ComposeDialog() {
           onError: (error) => {
             toast.error(`Delete failed: ${error.message}`);
           },
-        },
+        }
       );
     },
-    [draftId, deleteMutation, removeAttachment],
+    [draftId, deleteMutation, removeAttachment]
   );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -412,18 +440,22 @@ export function ComposeDialog() {
                 filename: a.filename,
                 contentType: a.content_type,
                 size: a.size,
-              })),
+              }))
             );
             toast.success(`${data.attachments.length} file(s) attached`);
           },
           onError: (error) => {
             toast.error(`Upload failed: ${error.message}`);
           },
-        },
+        }
       );
     },
-    [draftId, setDraftId, uploadMutation, addAttachments],
+    [draftId, setDraftId, uploadMutation, addAttachments]
   );
+
+  const previewAttachment = previewAttId
+    ? attachments.find((a) => a.id === previewAttId)
+    : null;
 
   return (
     <>
@@ -442,7 +474,7 @@ export function ComposeDialog() {
               "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
               expanded
                 ? "inset-4 sm:left-20"
-                : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20",
+                : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
             )}
             onKeyDown={handleKeyDown}
             onDragEnter={handleDragEnter}
@@ -493,6 +525,30 @@ export function ComposeDialog() {
 
             {/* Fields */}
             <div className="flex flex-col border-b border-border">
+              {identities && identities.length > 1 && (
+                <div className="flex items-center border-b border-border/50 px-4">
+                  <label className="w-12 shrink-0 text-xs text-muted-foreground">
+                    From
+                  </label>
+                  <select
+                    value={fromIdentityId ?? ""}
+                    onChange={(e) =>
+                      setFromIdentityId(
+                        e.target.value ? Number(e.target.value) : null
+                      )
+                    }
+                    className="flex-1 bg-transparent py-2 text-sm outline-none"
+                  >
+                    {identities.map((identity) => (
+                      <option key={identity.id} value={identity.id}>
+                        {identity.display_name
+                          ? `${identity.display_name} <${identity.email}>`
+                          : identity.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex items-center border-b border-border/50 px-4">
                 <label className="w-12 shrink-0 text-xs text-muted-foreground">
                   To
@@ -589,7 +645,10 @@ export function ComposeDialog() {
                       title="Preview"
                     >
                       <Paperclip className="size-3 shrink-0 text-muted-foreground" />
-                      <span className="max-w-[150px] truncate" title={att.filename}>
+                      <span
+                        className="max-w-[150px] truncate"
+                        title={att.filename}
+                      >
                         {att.filename}
                       </span>
                       <span className="text-muted-foreground">
@@ -629,7 +688,7 @@ export function ComposeDialog() {
                   className={cn(
                     "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                     "bg-primary text-primary-foreground hover:bg-primary/90",
-                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    "disabled:cursor-not-allowed disabled:opacity-50"
                   )}
                 >
                   <Send className="size-4" />
@@ -685,107 +744,25 @@ export function ComposeDialog() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      <AlertDialog.Root open={showDiscardAlert} onOpenChange={setShowDiscardAlert}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-          <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl">
-            <AlertDialog.Title className="text-base font-semibold">
-              Are you sure?
-            </AlertDialog.Title>
-            <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
-              The message has not been sent and has unsaved changes. Do you want to discard your changes?
-            </AlertDialog.Description>
-            <div className="mt-6 flex justify-end gap-3">
-              <AlertDialog.Cancel asChild>
-                <button className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
-                  Cancel
-                </button>
-              </AlertDialog.Cancel>
-              <AlertDialog.Action asChild>
-                <button
-                  onClick={confirmDiscard}
-                  className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-                >
-                  Discard
-                </button>
-              </AlertDialog.Action>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+      <DiscardAlertDialog
+        open={showDiscardAlert}
+        onOpenChange={setShowDiscardAlert}
+        onConfirm={confirmDiscard}
+      />
 
       {/* Attachment preview dialog */}
-      {previewAttId && draftId && (() => {
-        const att = attachments.find((a) => a.id === previewAttId);
-        if (!att) return null;
-        const previewUrl = `/api/drafts/${draftId}/attachments/${att.id}/content`;
-        return (
-          <Dialog.Root open onOpenChange={(open) => !open && setPreviewAttId(null)}>
-            <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/70" />
-              <Dialog.Content className="fixed inset-4 z-[60] flex flex-col rounded-xl border border-border bg-background shadow-2xl">
-                <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                  <Dialog.Title className="flex items-center gap-2 text-sm font-semibold">
-                    <Paperclip className="size-4 text-muted-foreground" />
-                    <span className="max-w-[400px] truncate">{att.filename}</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      ({formatFileSize(att.size)})
-                    </span>
-                  </Dialog.Title>
-                  <div className="flex items-center gap-1">
-                    <a
-                      href={previewUrl}
-                      download={att.filename}
-                      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      title="Download"
-                    >
-                      <Download className="size-4" />
-                    </a>
-                    <Dialog.Close asChild>
-                      <button
-                        className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        title="Close"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    </Dialog.Close>
-                  </div>
-                </div>
-                <div className="flex flex-1 items-center justify-center overflow-auto p-4">
-                  {att.contentType.startsWith("image/") ? (
-                    <img
-                      src={previewUrl}
-                      alt={att.filename}
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  ) : att.contentType === "application/pdf" ? (
-                    <iframe
-                      src={previewUrl}
-                      className="h-full w-full border-none"
-                      title={att.filename}
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-4 text-center">
-                      <Paperclip className="size-12 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground">
-                        Preview not available for this file type
-                      </p>
-                      <a
-                        href={previewUrl}
-                        download={att.filename}
-                        className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                      >
-                        <Download className="size-4" />
-                        Download
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
-        );
-      })()}
+      {previewAttachment && draftId && (
+        <AttachmentPreviewDialog
+          attachment={{
+            id: previewAttachment.id,
+            filename: previewAttachment.filename,
+            contentType: previewAttachment.contentType,
+            size: previewAttachment.size,
+          }}
+          previewUrl={`/api/drafts/${draftId}/attachments/${previewAttachment.id}/content`}
+          onClose={() => setPreviewAttId(null)}
+        />
+      )}
     </>
   );
 }

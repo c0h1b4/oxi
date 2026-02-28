@@ -8,8 +8,10 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost, apiDelete } from "@/lib/api";
-import type { MessagesResponse, MessageDetail } from "@/types/message";
+import { useUiStore } from "@/stores/useUiStore";
+import type { MessagesResponse, MessageDetail, MessageHeader } from "@/types/message";
 
 const PER_PAGE = 50;
 
@@ -85,8 +87,87 @@ export function useMoveMessage() {
         to_folder: toFolder,
         uid,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
+    onMutate: async ({ fromFolder, toFolder, uid }) => {
+      // If the moved message is currently being read, deselect it.
+      const { selectedMessageUid, selectMessage } = useUiStore.getState();
+      if (selectedMessageUid === uid) {
+        selectMessage(null);
+      }
+
+      // Cancel in-flight fetches so they don't overwrite our optimistic update.
+      await queryClient.cancelQueries({ queryKey: ["messages", fromFolder] });
+      await queryClient.cancelQueries({ queryKey: ["messages", toFolder] });
+
+      const prevFrom = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
+        ["messages", fromFolder],
+      );
+      const prevTo = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
+        ["messages", toFolder],
+      );
+
+      // Find the message in the source folder cache.
+      let movedMsg: MessageHeader | undefined;
+      if (prevFrom) {
+        for (const page of prevFrom.pages) {
+          movedMsg = page.messages.find((m) => m.uid === uid);
+          if (movedMsg) break;
+        }
+      }
+
+      // Remove from source folder cache.
+      if (prevFrom) {
+        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
+          ["messages", fromFolder],
+          {
+            ...prevFrom,
+            pages: prevFrom.pages.map((page) => ({
+              ...page,
+              messages: page.messages.filter((m) => m.uid !== uid),
+              total_count: Math.max(0, page.total_count - 1),
+            })),
+          },
+        );
+      }
+
+      // Insert into destination folder cache (first page) with a placeholder
+      // UID. The background refetch will reconcile with the real UID.
+      if (movedMsg && prevTo) {
+        const entry: MessageHeader = {
+          ...movedMsg,
+          folder: toFolder,
+        };
+        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
+          ["messages", toFolder],
+          {
+            ...prevTo,
+            pages: prevTo.pages.map((page, i) =>
+              i === 0
+                ? {
+                    ...page,
+                    messages: [entry, ...page.messages],
+                    total_count: page.total_count + 1,
+                  }
+                : { ...page, total_count: page.total_count + 1 },
+            ),
+          },
+        );
+      }
+
+      return { prevFrom, prevTo };
+    },
+    onError: (_err, { fromFolder, toFolder }, context) => {
+      // Rollback on failure.
+      if (context?.prevFrom) {
+        queryClient.setQueryData(["messages", fromFolder], context.prevFrom);
+      }
+      if (context?.prevTo) {
+        queryClient.setQueryData(["messages", toFolder], context.prevTo);
+      }
+    },
+    onSettled: (_data, _err, { fromFolder, toFolder }) => {
+      // Always refetch to reconcile with server state.
+      queryClient.invalidateQueries({ queryKey: ["messages", fromFolder] });
+      queryClient.invalidateQueries({ queryKey: ["messages", toFolder] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
@@ -97,7 +178,39 @@ export function useDeleteMessage() {
   return useMutation({
     mutationFn: ({ folder, uid }: { folder: string; uid: number }) =>
       apiDelete(`/messages/${encodeURIComponent(folder)}/${uid}`),
-    onSuccess: (_, { folder }) => {
+    onMutate: async ({ folder, uid }) => {
+      // Clear reading pane / bulk selection if this message is active.
+      const { selectedMessageUid, selectMessage } = useUiStore.getState();
+      if (selectedMessageUid === uid) {
+        selectMessage(null);
+      }
+
+      // Optimistic removal from cache.
+      await queryClient.cancelQueries({ queryKey: ["messages", folder] });
+      const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
+        ["messages", folder],
+      );
+      if (prev) {
+        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
+          ["messages", folder],
+          {
+            ...prev,
+            pages: prev.pages.map((page) => ({
+              ...page,
+              messages: page.messages.filter((m) => m.uid !== uid),
+              total_count: Math.max(0, page.total_count - 1),
+            })),
+          },
+        );
+      }
+      return { prev };
+    },
+    onError: (_err, { folder }, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(["messages", folder], context.prev);
+      }
+    },
+    onSettled: (_, _err, { folder }) => {
       queryClient.invalidateQueries({ queryKey: ["messages", folder] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     },

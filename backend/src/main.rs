@@ -4,6 +4,7 @@ mod db;
 mod imap;
 mod smtp;
 mod auth;
+mod realtime;
 mod routes;
 mod search;
 
@@ -56,8 +57,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::path::PathBuf::from(&config.data_dir),
     ));
 
+    // Create the real-time event bus and IDLE manager.
+    let event_bus = Arc::new(realtime::events::EventBus::new());
+    let idle_manager = Arc::new(realtime::idle::IdleManager::new());
+
     // Build the application router with auth, session, and static file serving.
-    let app = routes::create_router(config.clone(), store, imap_client, smtp_client, search_engine);
+    let app = routes::create_router(
+        config.clone(),
+        store,
+        imap_client,
+        smtp_client,
+        search_engine,
+        event_bus,
+        idle_manager,
+    );
 
     // Bind to the configured host and port.
     let bind_addr = format!("{}:{}", config.host, config.port);

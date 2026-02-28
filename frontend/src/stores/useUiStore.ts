@@ -49,7 +49,7 @@ interface UiState {
   density: "compact" | "comfortable";
   searchQuery: string;
   searchActive: boolean;
-  viewMode: "mail" | "contacts";
+  viewMode: "mail" | "contacts" | "settings";
   selectedMessageUids: number[];
   bulkSelectMode: boolean;
 
@@ -62,7 +62,7 @@ interface UiState {
   setSearchQuery: (query: string) => void;
   setSearchActive: (active: boolean) => void;
   clearSearch: () => void;
-  setViewMode: (mode: "mail" | "contacts") => void;
+  setViewMode: (mode: "mail" | "contacts" | "settings") => void;
   toggleBulkSelect: (uid: number) => void;
   selectAllMessages: (uids: number[]) => void;
   clearBulkSelection: () => void;
