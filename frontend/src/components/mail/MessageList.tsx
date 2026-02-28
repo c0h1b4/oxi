@@ -205,11 +205,45 @@ export function MessageList() {
     }
   }, [lastItemIndex, messages.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  // Anchor UID for shift-click range selection.
+  const anchorUidRef = useRef<number | null>(null);
+
   const handleClick = useCallback(
-    (uid: number) => {
+    (uid: number, e: React.MouseEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      const isShift = e.shiftKey;
+
+      if (isMod) {
+        // Cmd/Ctrl+click: toggle this message in bulk selection.
+        // If entering bulk mode while reading a message, include the read message too.
+        if (selectedMessageUids.length === 0 && selectedMessageUid != null && selectedMessageUid !== uid) {
+          selectAllMessages([selectedMessageUid, uid]);
+        } else {
+          toggleBulkSelect(uid);
+        }
+        anchorUidRef.current = uid;
+        return;
+      }
+
+      if (isShift && anchorUidRef.current != null) {
+        // Shift+click: select range from anchor to clicked message.
+        const uids = messages.map((m) => m.uid);
+        const anchorIdx = uids.indexOf(anchorUidRef.current);
+        const clickedIdx = uids.indexOf(uid);
+        if (anchorIdx !== -1 && clickedIdx !== -1) {
+          const start = Math.min(anchorIdx, clickedIdx);
+          const end = Math.max(anchorIdx, clickedIdx);
+          selectAllMessages(uids.slice(start, end + 1));
+        }
+        return;
+      }
+
+      // Plain click: normal single-message selection, clear bulk.
+      clearBulkSelection();
       selectMessage(uid);
+      anchorUidRef.current = uid;
     },
-    [selectMessage],
+    [selectMessage, toggleBulkSelect, selectAllMessages, clearBulkSelection, messages, selectedMessageUid, selectedMessageUids],
   );
 
   const allUids = messages.map((m) => m.uid);
@@ -324,7 +358,7 @@ export function MessageList() {
                       message={message}
                       isSelected={selectedMessageUid === message.uid}
                       density={density}
-                      onClick={() => handleClick(message.uid)}
+                      onClick={(e) => handleClick(message.uid, e)}
                       bulkSelectMode={bulkSelectMode}
                       isBulkSelected={selectedMessageUids.includes(message.uid)}
                       onBulkToggle={toggleBulkSelect}

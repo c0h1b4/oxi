@@ -1,0 +1,103 @@
+"use client";
+
+import { useEffect, useRef, useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+export type WsStatus = "connected" | "connecting" | "disconnected";
+
+interface MailEvent {
+  type: "NewMessages" | "FlagsChanged" | "FolderUpdated";
+  data?: { folder: string };
+}
+
+/**
+ * Connects to the backend WebSocket endpoint for real-time mail events.
+ * Automatically reconnects with exponential backoff on disconnect.
+ * Invalidates React Query caches when events arrive.
+ */
+export function useWebSocket() {
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<WsStatus>("disconnected");
+  const wsRef = useRef<WebSocket | null>(null);
+  const backoffRef = useRef(1000);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  const connect = useCallback(() => {
+    if (!mountedRef.current) return;
+
+    setStatus("connecting");
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (!mountedRef.current) return;
+      setStatus("connected");
+      backoffRef.current = 1000; // Reset backoff on successful connect
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const mailEvent: MailEvent = JSON.parse(event.data);
+        switch (mailEvent.type) {
+          case "NewMessages":
+            if (mailEvent.data?.folder) {
+              queryClient.invalidateQueries({
+                queryKey: ["messages", mailEvent.data.folder],
+              });
+            }
+            queryClient.invalidateQueries({ queryKey: ["folders"] });
+            break;
+          case "FlagsChanged":
+            if (mailEvent.data?.folder) {
+              queryClient.invalidateQueries({
+                queryKey: ["messages", mailEvent.data.folder],
+              });
+            }
+            queryClient.invalidateQueries({ queryKey: ["folders"] });
+            break;
+          case "FolderUpdated":
+            queryClient.invalidateQueries({ queryKey: ["folders"] });
+            break;
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return;
+      setStatus("disconnected");
+      wsRef.current = null;
+
+      // Reconnect with exponential backoff
+      const delay = backoffRef.current;
+      backoffRef.current = Math.min(delay * 2, 30000);
+      reconnectTimerRef.current = setTimeout(connect, delay);
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror, which handles reconnection
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    connect();
+
+    return () => {
+      mountedRef.current = false;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [connect]);
+
+  return status;
+}

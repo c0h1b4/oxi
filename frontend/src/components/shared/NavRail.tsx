@@ -81,7 +81,7 @@ export function NavRail() {
     } catch {
       // Even if the API call fails, redirect to login
     }
-    router.replace("/login");
+    router.replace("/");
   }, [router]);
 
   const showComingSoon = useCallback((feature: string) => {
@@ -117,8 +117,8 @@ export function NavRail() {
         <NavButton
           icon={<Settings className="size-5" />}
           label="Settings"
-          disabled
-          onClick={() => showComingSoon("Settings")}
+          active={viewMode === "settings"}
+          onClick={() => setViewMode(viewMode === "settings" ? "mail" : "settings")}
         />
       </div>
 
