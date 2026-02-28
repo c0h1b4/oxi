@@ -171,7 +171,7 @@ pub fn update_identity(
         return get_identity(conn, id);
     }
 
-    sets.push(format!("updated_at = datetime('now')"));
+    sets.push("updated_at = datetime('now')".to_string());
     let set_clause = sets.join(", ");
     let sql = format!("UPDATE identities SET {set_clause} WHERE id = ?{idx}");
     values.push(Box::new(id));

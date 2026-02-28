@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 export type WsStatus = "connected" | "connecting" | "disconnected";
@@ -22,69 +22,72 @@ export function useWebSocket() {
   const backoffRef = useRef(1000);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-
-    setStatus("connecting");
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) return;
-      setStatus("connected");
-      backoffRef.current = 1000; // Reset backoff on successful connect
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const mailEvent: MailEvent = JSON.parse(event.data);
-        switch (mailEvent.type) {
-          case "NewMessages":
-            if (mailEvent.data?.folder) {
-              queryClient.invalidateQueries({
-                queryKey: ["messages", mailEvent.data.folder],
-              });
-            }
-            queryClient.invalidateQueries({ queryKey: ["folders"] });
-            break;
-          case "FlagsChanged":
-            if (mailEvent.data?.folder) {
-              queryClient.invalidateQueries({
-                queryKey: ["messages", mailEvent.data.folder],
-              });
-            }
-            queryClient.invalidateQueries({ queryKey: ["folders"] });
-            break;
-          case "FolderUpdated":
-            queryClient.invalidateQueries({ queryKey: ["folders"] });
-            break;
-        }
-      } catch {
-        // Ignore malformed messages
-      }
-    };
-
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      setStatus("disconnected");
-      wsRef.current = null;
-
-      // Reconnect with exponential backoff
-      const delay = backoffRef.current;
-      backoffRef.current = Math.min(delay * 2, 30000);
-      reconnectTimerRef.current = setTimeout(connect, delay);
-    };
-
-    ws.onerror = () => {
-      // onclose will fire after onerror, which handles reconnection
-    };
-  }, [queryClient]);
+  const connectRef = useRef<() => void>();
 
   useEffect(() => {
     mountedRef.current = true;
+
+    const connect = () => {
+      if (!mountedRef.current) return;
+
+      setStatus("connecting");
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (!mountedRef.current) return;
+        setStatus("connected");
+        backoffRef.current = 1000; // Reset backoff on successful connect
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const mailEvent: MailEvent = JSON.parse(event.data);
+          switch (mailEvent.type) {
+            case "NewMessages":
+              if (mailEvent.data?.folder) {
+                queryClient.invalidateQueries({
+                  queryKey: ["messages", mailEvent.data.folder],
+                });
+              }
+              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              break;
+            case "FlagsChanged":
+              if (mailEvent.data?.folder) {
+                queryClient.invalidateQueries({
+                  queryKey: ["messages", mailEvent.data.folder],
+                });
+              }
+              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              break;
+            case "FolderUpdated":
+              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              break;
+          }
+        } catch {
+          // Ignore malformed messages
+        }
+      };
+
+      ws.onclose = () => {
+        if (!mountedRef.current) return;
+        setStatus("disconnected");
+        wsRef.current = null;
+
+        // Reconnect with exponential backoff
+        const delay = backoffRef.current;
+        backoffRef.current = Math.min(delay * 2, 30000);
+        reconnectTimerRef.current = setTimeout(() => connectRef.current?.(), delay);
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after onerror, which handles reconnection
+      };
+    };
+
+    connectRef.current = connect;
     connect();
 
     return () => {
@@ -97,7 +100,7 @@ export function useWebSocket() {
         wsRef.current = null;
       }
     };
-  }, [connect]);
+  }, [queryClient]);
 
   return status;
 }
