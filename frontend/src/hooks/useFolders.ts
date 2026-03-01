@@ -2,13 +2,15 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { useWsStatus } from "@/lib/ws-context";
 import type { FoldersResponse } from "@/types/folder";
 
 export function useFolders() {
+  const { status } = useWsStatus();
   return useQuery({
     queryKey: ["folders"],
     queryFn: () => apiGet<FoldersResponse>("/folders"),
-    refetchInterval: 30_000, // Poll every 30 seconds for folder count updates
+    refetchInterval: status === "connected" ? false : 30_000,
   });
 }
 

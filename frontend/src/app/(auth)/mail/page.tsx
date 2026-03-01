@@ -11,39 +11,44 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { useUiStore } from "@/stores/useUiStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { WsContext } from "@/lib/ws-context";
 
 export default function MailPage() {
   const viewMode = useUiStore((s) => s.viewMode);
   useKeyboardShortcuts();
-  useWebSocket();
+  const { status: wsStatus, failCount: wsFailCount } = useWebSocket();
 
   if (viewMode === "contacts") {
     return (
-      <div className="flex h-screen w-full overflow-hidden">
-        <NavRail />
-        <ContactsPanel />
-      </div>
+      <WsContext.Provider value={{ status: wsStatus, failCount: wsFailCount }}>
+        <div className="flex h-screen w-full overflow-hidden">
+          <NavRail wsStatus={wsStatus} wsFailCount={wsFailCount} />
+          <ContactsPanel />
+        </div>
+      </WsContext.Provider>
     );
   }
 
   if (viewMode === "settings") {
     return (
-      <div className="flex h-screen w-full overflow-hidden">
-        <NavRail />
-        <SettingsPanel />
-      </div>
+      <WsContext.Provider value={{ status: wsStatus, failCount: wsFailCount }}>
+        <div className="flex h-screen w-full overflow-hidden">
+          <NavRail wsStatus={wsStatus} wsFailCount={wsFailCount} />
+          <SettingsPanel />
+        </div>
+      </WsContext.Provider>
     );
   }
 
   return (
-    <>
+    <WsContext.Provider value={{ status: wsStatus, failCount: wsFailCount }}>
       <ThreePanelLayout
-        navRail={<NavRail />}
+        navRail={<NavRail wsStatus={wsStatus} wsFailCount={wsFailCount} />}
         sidebar={<FolderTree />}
         messageList={<MessageList />}
         readingPane={<ReadingPane />}
       />
       <ComposeDialog />
-    </>
+    </WsContext.Provider>
   );
 }
