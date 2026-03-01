@@ -20,7 +20,9 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
   const [status, setStatus] = useState<WsStatus>("disconnected");
   const [failCount, setFailCount] = useState(0);
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(1000);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
