@@ -13,6 +13,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (6, include_str!("../../migrations/V006__cache_attachments_and_headers.sql")),
     (7, include_str!("../../migrations/V007__contacts.sql")),
     (8, include_str!("../../migrations/V008__identities.sql")),
+    (9, include_str!("../../migrations/V009__notification_preferences.sql")),
 ];
 
 /// Run any pending migrations based on SQLite's `user_version` PRAGMA.
