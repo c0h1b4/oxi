@@ -20,6 +20,8 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
   const [status, setStatus] = useState<WsStatus>("disconnected");
   const [failCount, setFailCount] = useState(0);
   const onEventRef = useRef(onEvent);
+  // Sync ref on every render so the WebSocket handler always calls the latest
+  // callback without restarting the connection (intentionally no dep array).
   useEffect(() => {
     onEventRef.current = onEvent;
   });
