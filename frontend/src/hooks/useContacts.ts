@@ -45,10 +45,12 @@ export function useDeleteContact() {
 export function useAutocomplete(query: string) {
   return useQuery({
     queryKey: ["contacts-autocomplete", query],
-    queryFn: () =>
-      apiGet<Contact[]>(
+    queryFn: async () => {
+      const res = await apiGet<{ suggestions: { email: string; name: string }[] }>(
         `/contacts/autocomplete?q=${encodeURIComponent(query)}&limit=10`,
-      ),
+      );
+      return res.suggestions;
+    },
     enabled: query.length >= 2,
   });
 }

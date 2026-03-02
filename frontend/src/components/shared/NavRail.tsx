@@ -2,7 +2,6 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import {
   Mail,
   PenSquare,
@@ -10,7 +9,7 @@ import {
   Settings,
   Moon,
   Sun,
-  Info,
+  Keyboard,
   LogOut,
 } from "lucide-react";
 import { apiPost } from "@/lib/api";
@@ -87,10 +86,6 @@ export function NavRail() {
     router.replace("/");
   }, [router]);
 
-  const showComingSoon = useCallback((feature: string) => {
-    toast(`${feature} — coming soon`);
-  }, []);
-
   return (
     <div className="relative flex h-full w-14 flex-col items-center border-r border-border bg-sidebar py-3">
       {/* Logo */}
@@ -144,10 +139,9 @@ export function NavRail() {
           onClick={toggleDark}
         />
         <NavButton
-          icon={<Info className="size-5" />}
-          label="About"
-          disabled
-          onClick={() => showComingSoon("About")}
+          icon={<Keyboard className="size-5" />}
+          label="Keyboard shortcuts"
+          onClick={() => useUiStore.getState().setShortcutsOpen(true)}
         />
         <NavButton
           icon={<LogOut className="size-5" />}
