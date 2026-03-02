@@ -100,3 +100,14 @@ pub struct FolderStatus {
     /// The highest UID that will be assigned to the next appended message.
     pub uid_next: u32,
 }
+
+/// Extended folder status from an IMAP `STATUS` command with CONDSTORE fields.
+/// Used for cheap pre-checks before full sync.
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderStatusExtended {
+    pub uid_validity: u32,
+    pub exists: u32,
+    pub uid_next: u32,
+    pub unseen: u32,
+    pub highest_modseq: u64,
+}

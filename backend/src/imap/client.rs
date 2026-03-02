@@ -8,8 +8,8 @@ use super::parse::{
 
 pub use super::error::ImapError;
 pub use super::types::{
-    EmailAddress, FolderStatus, ImapAttachment, ImapCredentials, ImapFolder, ImapMessageBody,
-    ImapMessageHeader,
+    EmailAddress, FolderStatus, FolderStatusExtended, ImapAttachment, ImapCredentials, ImapFolder,
+    ImapMessageBody, ImapMessageHeader,
 };
 
 pub(crate) use super::connection::connect;
@@ -137,6 +137,31 @@ pub trait ImapClient: Send + Sync {
         folder_name: &str,
         subscribe: bool,
     ) -> Result<(), ImapError>;
+
+    /// Fetch only UIDs and FLAGS for all messages in a folder.
+    /// Used for periodic reconciliation to detect flag changes and deletions.
+    async fn fetch_uids_and_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<Vec<(u32, Vec<String>)>, ImapError>;
+
+    /// Lightweight STATUS command to get folder metadata without SELECT.
+    /// Returns UIDVALIDITY, EXISTS, UIDNEXT, UNSEEN, and HIGHESTMODSEQ.
+    async fn folder_status_extended(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<FolderStatusExtended, ImapError>;
+
+    /// Fetch only messages whose flags changed since `since_modseq` using CONDSTORE.
+    /// Returns (vec of (uid, flags), new_highest_modseq).
+    async fn fetch_changed_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        since_modseq: u64,
+    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -792,5 +817,108 @@ impl ImapClient for RealImapClient {
         }
         session.logout().await.ok();
         Ok(())
+    }
+
+    async fn fetch_uids_and_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
+        let mut session = connect(creds).await?;
+
+        session
+            .select(folder)
+            .await
+            .map_err(|e| match &e {
+                async_imap::error::Error::No(msg)
+                    if msg.to_lowercase().contains("not found")
+                        || msg.to_lowercase().contains("doesn't exist")
+                        || msg.to_lowercase().contains("does not exist")
+                        || msg.to_lowercase().contains("no such") =>
+                {
+                    ImapError::FolderNotFound(folder.to_string())
+                }
+                _ => map_imap_error(e),
+            })?;
+
+        let results = {
+            let mut fetch_stream = session
+                .uid_fetch("1:*", "(UID FLAGS)")
+                .await
+                .map_err(map_imap_error)?;
+
+            let mut items = Vec::new();
+            while let Some(result) = fetch_stream.next().await {
+                let fetch = result.map_err(map_imap_error)?;
+                if let Some(uid) = fetch.uid {
+                    let flags: Vec<String> = fetch.flags().map(|f| flag_to_string(&f)).collect();
+                    items.push((uid, flags));
+                }
+            }
+            items
+        };
+
+        let _ = session.logout().await;
+        Ok(results)
+    }
+
+    async fn folder_status_extended(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<FolderStatusExtended, ImapError> {
+        let mut session = connect(creds).await?;
+
+        let mailbox = session
+            .status(folder, "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)")
+            .await
+            .map_err(map_imap_error)?;
+
+        let result = FolderStatusExtended {
+            uid_validity: mailbox.uid_validity.unwrap_or(0),
+            exists: mailbox.exists,
+            uid_next: mailbox.uid_next.unwrap_or(0),
+            unseen: mailbox.unseen.unwrap_or(0),
+            highest_modseq: mailbox.highest_modseq.unwrap_or(0),
+        };
+
+        let _ = session.logout().await;
+        Ok(result)
+    }
+
+    async fn fetch_changed_flags(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+        since_modseq: u64,
+    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
+        let mut session = connect(creds).await?;
+
+        let mailbox = session
+            .select_condstore(folder)
+            .await
+            .map_err(map_imap_error)?;
+
+        let new_modseq = mailbox.highest_modseq.unwrap_or(0);
+
+        let items = {
+            let mut fetch_stream = session
+                .uid_fetch("1:*", format!("(UID FLAGS) (CHANGEDSINCE {})", since_modseq))
+                .await
+                .map_err(map_imap_error)?;
+
+            let mut items = Vec::new();
+            while let Some(result) = fetch_stream.next().await {
+                let fetch = result.map_err(map_imap_error)?;
+                if let Some(uid) = fetch.uid {
+                    let flags: Vec<String> = fetch.flags().map(|f| flag_to_string(&f)).collect();
+                    items.push((uid, flags));
+                }
+            }
+            items
+        };
+
+        let _ = session.logout().await;
+        Ok((items, new_modseq))
     }
 }

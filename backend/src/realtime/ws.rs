@@ -9,7 +9,7 @@ use tokio::sync::broadcast;
 
 use crate::auth::session::{SessionState, SessionStore};
 use crate::config::AppConfig;
-use crate::imap::client::ImapCredentials;
+use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
 
@@ -39,6 +39,7 @@ pub async fn ws_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(event_bus): Extension<Arc<EventBus>>,
     Extension(idle_manager): Extension<Arc<IdleManager>>,
+    Extension(imap_client): Extension<Arc<dyn ImapClient>>,
 ) -> Response {
     // Authenticate from cookie.
     let session = headers
@@ -65,7 +66,7 @@ pub async fn ws_handler(
     });
 
     ws.on_upgrade(move |socket| {
-        handle_socket(socket, session, event_bus, idle_manager, imap_creds)
+        handle_socket(socket, session, config, event_bus, idle_manager, imap_client, imap_creds)
     })
 }
 
@@ -76,8 +77,10 @@ pub async fn ws_handler(
 async fn handle_socket(
     socket: WebSocket,
     session: SessionState,
+    config: Arc<AppConfig>,
     event_bus: Arc<EventBus>,
     idle_manager: Arc<IdleManager>,
+    imap_client: Arc<dyn ImapClient>,
     imap_creds: Option<ImapCredentials>,
 ) {
     let user_hash = session.user_hash.clone();
@@ -88,16 +91,29 @@ async fn handle_socket(
     let mut rx = event_bus.subscribe(&user_hash).await;
 
     // Start IMAP IDLE for INBOX if IMAP is configured.
-    if let Some(ref creds) = imap_creds {
+    // Also start the periodic sync loop for flag/deletion reconciliation.
+    let sync_handle = if let Some(ref creds) = imap_creds {
         idle_manager
             .start_idle(
                 user_hash.clone(),
                 "INBOX".to_string(),
                 creds.clone(),
                 event_bus.clone(),
+                config.clone(),
             )
             .await;
-    }
+
+        let handle = tokio::spawn(super::sync::sync_loop(
+            user_hash.clone(),
+            creds.clone(),
+            config,
+            imap_client,
+            event_bus.clone(),
+        ));
+        Some(handle)
+    } else {
+        None
+    };
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -144,6 +160,11 @@ async fn handle_socket(
     }
 
     tracing::info!(user = %session.email, "WebSocket disconnected");
+
+    // Stop the periodic sync task.
+    if let Some(handle) = sync_handle {
+        handle.abort();
+    }
 
     // Stop IDLE tasks and clean up the event channel.
     idle_manager.stop_all(&user_hash).await;
