@@ -11,6 +11,7 @@ pub struct MockImapClient {
     headers: Mutex<Vec<ImapMessageHeader>>,
     bodies: Mutex<Vec<ImapMessageBody>>,
     folder_status: Mutex<Option<FolderStatus>>,
+    folder_status_ext: Mutex<Option<FolderStatusExtended>>,
     should_fail: Mutex<Option<ImapError>>,
     pub appended: Mutex<Vec<(String, Vec<u8>)>>,
 }
@@ -23,6 +24,7 @@ impl MockImapClient {
             headers: Mutex::new(Vec::new()),
             bodies: Mutex::new(Vec::new()),
             folder_status: Mutex::new(None),
+            folder_status_ext: Mutex::new(None),
             should_fail: Mutex::new(None),
             appended: Mutex::new(Vec::new()),
         }
@@ -44,6 +46,13 @@ impl MockImapClient {
     #[allow(dead_code)]
     pub fn with_folder_status(self, status: FolderStatus) -> Self {
         *self.folder_status.lock().unwrap() = Some(status);
+        self
+    }
+
+    /// Pre-load an extended folder status that `folder_status_extended` will return.
+    #[allow(dead_code)]
+    pub fn with_folder_status_extended(self, status: FolderStatusExtended) -> Self {
+        *self.folder_status_ext.lock().unwrap() = Some(status);
         self
     }
 
@@ -272,6 +281,63 @@ impl ImapClient for MockImapClient {
             return Err(clone_error(err));
         }
         Ok(())
+    }
+
+    async fn fetch_uids_and_flags(
+        &self,
+        _creds: &ImapCredentials,
+        _folder: &str,
+    ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
+        if let Some(ref err) = *self.should_fail.lock().unwrap() {
+            return Err(clone_error(err));
+        }
+        let headers = self.headers.lock().unwrap();
+        Ok(headers.iter().map(|h| (h.uid, h.flags.clone())).collect())
+    }
+
+    async fn folder_status_extended(
+        &self,
+        _creds: &ImapCredentials,
+        _folder: &str,
+    ) -> Result<FolderStatusExtended, ImapError> {
+        {
+            let fail = self.should_fail.lock().unwrap();
+            if let Some(ref err) = *fail {
+                return Err(clone_error(err));
+            }
+        }
+        {
+            let status = self.folder_status_ext.lock().unwrap();
+            if let Some(ref s) = *status {
+                return Ok(s.clone());
+            }
+        }
+        // Derive from headers.
+        let headers = self.headers.lock().unwrap();
+        let exists = headers.len() as u32;
+        let uid_next = headers.iter().map(|h| h.uid).max().unwrap_or(0) + 1;
+        Ok(FolderStatusExtended {
+            uid_validity: 1,
+            exists,
+            uid_next,
+            unseen: 0,
+            highest_modseq: 0,
+        })
+    }
+
+    async fn fetch_changed_flags(
+        &self,
+        _creds: &ImapCredentials,
+        _folder: &str,
+        _since_modseq: u64,
+    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
+        if let Some(ref err) = *self.should_fail.lock().unwrap() {
+            return Err(clone_error(err));
+        }
+        // In mock, return all headers as "changed" with modseq 0.
+        let headers = self.headers.lock().unwrap();
+        let items: Vec<(u32, Vec<String>)> = headers.iter().map(|h| (h.uid, h.flags.clone())).collect();
+        Ok((items, 0))
     }
 }
 
