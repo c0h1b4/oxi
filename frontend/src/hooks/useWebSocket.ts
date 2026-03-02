@@ -7,7 +7,12 @@ export type WsStatus = "connected" | "connecting" | "disconnected";
 
 export interface MailEvent {
   type: "NewMessages" | "FlagsChanged" | "FolderUpdated";
-  data?: { folder: string };
+  data?: {
+    folder: string;
+    count?: number;
+    latest_sender?: string;
+    latest_subject?: string;
+  };
 }
 
 /**

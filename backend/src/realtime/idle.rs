@@ -191,23 +191,35 @@ async fn run_idle_session(
                         // CONDSTORE sync is fast (~200-500ms), so run it
                         // BEFORE publishing. This ensures the DB is up-to-date
                         // when the frontend refetches.
-                        session = fetch_new_after_idle(
+                        let result;
+                        (session, result) = fetch_new_after_idle(
                             session, user_hash, folder, config,
                         )
                         .await;
 
-                        // Publish event — DB is already current.
-                        // FlagsChanged covers all change types (new messages,
-                        // flag changes, deletions); the frontend invalidates
-                        // both messages and folders queries.
-                        event_bus
-                            .publish(
-                                user_hash,
-                                MailEvent::FlagsChanged {
-                                    folder: folder.to_string(),
-                                },
-                            )
-                            .await;
+                        // Publish the correct event based on what changed.
+                        if result.new_count > 0 {
+                            event_bus
+                                .publish(
+                                    user_hash,
+                                    MailEvent::NewMessages {
+                                        folder: folder.to_string(),
+                                        count: result.new_count,
+                                        latest_sender: result.latest_sender,
+                                        latest_subject: result.latest_subject,
+                                    },
+                                )
+                                .await;
+                        } else if result.flags_updated > 0 || result.deleted_count > 0 {
+                            event_bus
+                                .publish(
+                                    user_hash,
+                                    MailEvent::FlagsChanged {
+                                        folder: folder.to_string(),
+                                    },
+                                )
+                                .await;
+                        }
                     }
                     IdleResponse::Timeout => {
                         tracing::debug!(
@@ -241,6 +253,27 @@ async fn run_idle_session(
     }
 }
 
+/// Summary of what changed during a post-IDLE reconciliation.
+struct ReconcileResult {
+    new_count: u32,
+    flags_updated: u32,
+    deleted_count: u32,
+    latest_sender: Option<String>,
+    latest_subject: Option<String>,
+}
+
+impl ReconcileResult {
+    fn empty() -> Self {
+        Self {
+            new_count: 0,
+            flags_updated: 0,
+            deleted_count: 0,
+            latest_sender: None,
+            latest_subject: None,
+        }
+    }
+}
+
 /// Reconcile the local cache after IDLE detects new data.
 ///
 /// Uses CONDSTORE when available for fast incremental sync (~200-500ms),
@@ -253,7 +286,7 @@ async fn fetch_new_after_idle(
     user_hash: &str,
     folder: &str,
     config: &AppConfig,
-) -> async_imap::Session<ImapStream> {
+) -> (async_imap::Session<ImapStream>, ReconcileResult) {
     // Read cached folder state from DB.
     let (cached_modseq, max_cached_uid, cached_count) =
         match db::pool::open_user_db(&config.data_dir, user_hash) {
@@ -269,7 +302,7 @@ async fn fetch_new_after_idle(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "IDLE fetch: failed to open DB");
-                return session;
+                return (session, ReconcileResult::empty());
             }
         };
 
@@ -278,7 +311,7 @@ async fn fetch_new_after_idle(
         Ok(mb) => mb,
         Err(e) => {
             tracing::warn!(error = %e, "IDLE fetch: select_condstore failed");
-            return session;
+            return (session, ReconcileResult::empty());
         }
     };
 
@@ -294,7 +327,7 @@ async fn fetch_new_after_idle(
             modseq = server_modseq,
             "IDLE fetch: nothing changed (modseq match)"
         );
-        return session;
+        return (session, ReconcileResult::empty());
     }
 
     // ── CONDSTORE fast path ──────────────────────────────────────────
@@ -380,6 +413,13 @@ async fn fetch_new_after_idle(
                     fetch_uids_and_remove_deleted(&mut session, user_hash, folder, config).await;
             }
 
+            // Look up the latest message's sender/subject if new messages arrived.
+            let (latest_sender, latest_subject) = if new_count > 0 {
+                lookup_latest_message(config, user_hash, folder)
+            } else {
+                (None, None)
+            };
+
             // Update folder sync status with new modseq.
             if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
                 let _ = db::folders::update_folder_sync_status(
@@ -399,7 +439,13 @@ async fn fetch_new_after_idle(
                 );
             }
 
-            return session;
+            return (session, ReconcileResult {
+                new_count,
+                flags_updated,
+                deleted_count,
+                latest_sender,
+                latest_subject,
+            });
         }
         // CHANGEDSINCE fetch failed — fall through to full scan below.
     }
@@ -414,7 +460,7 @@ async fn fetch_new_after_idle(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "IDLE fetch: failed to open DB for fallback");
-                return session;
+                return (session, ReconcileResult::empty());
             }
         };
 
@@ -446,7 +492,7 @@ async fn fetch_new_after_idle(
         };
 
     let Some(imap_uids) = imap_uids else {
-        return session;
+        return (session, ReconcileResult::empty());
     };
 
     // Fetch headers for new messages.
@@ -485,6 +531,13 @@ async fn fetch_new_after_idle(
         let _ = db::folders::refresh_unread_count(&conn, folder);
     }
 
+    // Look up the latest message's sender/subject if new messages arrived.
+    let (latest_sender, latest_subject) = if new_count > 0 {
+        lookup_latest_message(config, user_hash, folder)
+    } else {
+        (None, None)
+    };
+
     if new_count > 0 || deleted_count > 0 {
         tracing::info!(
             user_hash = %user_hash,
@@ -495,7 +548,46 @@ async fn fetch_new_after_idle(
         );
     }
 
-    session
+    (session, ReconcileResult {
+        new_count,
+        flags_updated: 0,
+        deleted_count,
+        latest_sender,
+        latest_subject,
+    })
+}
+
+/// Look up the most recent message in the DB for sender/subject details.
+fn lookup_latest_message(
+    config: &AppConfig,
+    user_hash: &str,
+    folder: &str,
+) -> (Option<String>, Option<String>) {
+    let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) else {
+        return (None, None);
+    };
+    let max_uid = db::messages::max_uid(&conn, folder).unwrap_or(0);
+    if max_uid == 0 {
+        return (None, None);
+    }
+    match db::messages::get_single_message(&conn, folder, max_uid) {
+        Ok(Some(msg)) => {
+            let sender = if !msg.from_name.is_empty() {
+                Some(msg.from_name)
+            } else if !msg.from_address.is_empty() {
+                Some(msg.from_address)
+            } else {
+                None
+            };
+            let subject = if !msg.subject.is_empty() {
+                Some(msg.subject)
+            } else {
+                None
+            };
+            (sender, subject)
+        }
+        _ => (None, None),
+    }
 }
 
 /// Fetch full headers for messages in the given UID range and store them in the DB.
