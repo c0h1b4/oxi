@@ -91,7 +91,6 @@ pub fn get_contact(conn: &Connection, id: &str) -> Result<Option<Contact>, Strin
 }
 
 /// Get a contact by email address. Returns `None` if not found.
-#[allow(dead_code)]
 pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<Contact>, String> {
     let sql = format!(
         "SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE email = ?1"

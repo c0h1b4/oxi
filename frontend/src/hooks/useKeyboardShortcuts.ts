@@ -102,7 +102,6 @@ export function useKeyboardShortcuts() {
           if (activeFolder === "Trash") {
             deleteMessage.mutate(
               { folder: activeFolder, uid: selectedMessageUid },
-              { onSuccess: () => selectMessage(null) },
             );
           } else {
             moveMessage.mutate(
@@ -111,7 +110,6 @@ export function useKeyboardShortcuts() {
                 toFolder: "Trash",
                 uid: selectedMessageUid,
               },
-              { onSuccess: () => selectMessage(null) },
             );
           }
           break;

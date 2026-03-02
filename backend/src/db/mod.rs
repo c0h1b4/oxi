@@ -1,3 +1,4 @@
+pub mod contact_groups;
 pub mod contacts;
 pub mod drafts;
 pub mod folders;

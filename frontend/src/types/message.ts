@@ -18,6 +18,7 @@ export interface MessageHeader {
   size: number;
   has_attachments: boolean;
   snippet: string;
+  reaction: string | null;
 }
 
 export interface MessageDetail {

@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod auth;
+pub mod contact_groups;
 pub mod contacts;
 pub mod drafts;
 pub mod folder_mgmt;
@@ -18,7 +19,7 @@ use std::time::Duration;
 
 use axum::extract::ConnectInfo;
 use axum::http::Request;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Router, middleware};
 use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
@@ -164,9 +165,27 @@ pub fn create_router(
         )
         .route("/search", get(search::search_messages))
         .route(
+            "/contact-groups",
+            get(contact_groups::list_groups_handler).post(contact_groups::create_group_handler),
+        )
+        .route(
+            "/contact-groups/{id}",
+            put(contact_groups::update_group_handler).delete(contact_groups::delete_group_handler),
+        )
+        .route(
+            "/contact-groups/{id}/members",
+            get(contact_groups::list_members_handler).post(contact_groups::add_member_handler),
+        )
+        .route(
+            "/contact-groups/{id}/members/{contact_id}",
+            delete(contact_groups::remove_member_handler),
+        )
+        .route(
             "/contacts",
             get(contacts::list_contacts_handler).post(contacts::create_contact_handler),
         )
+        .route("/contacts/export", get(contacts::export_contacts_handler))
+        .route("/contacts/import", post(contacts::import_contacts_handler))
         .route(
             "/contacts/autocomplete",
             get(contacts::autocomplete_handler),
@@ -174,6 +193,10 @@ pub fn create_router(
         .route(
             "/contacts/{id}",
             get(contacts::get_contact_handler).delete(contacts::delete_contact_handler),
+        )
+        .route(
+            "/contacts/{id}/export",
+            get(contacts::export_single_contact_handler),
         )
         .route(
             "/identities",

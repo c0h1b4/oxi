@@ -220,6 +220,13 @@ export const MessageListItem = memo(function MessageListItem({
         {/* Subject */}
         <span className={cn("min-w-0 flex-1 truncate", isFlagged && "text-primary")}>{message.subject || "(no subject)"}</span>
 
+        {/* Reaction emoji */}
+        {message.reaction && (
+          <span className="shrink-0 text-base leading-none" title="Reaction">
+            {message.reaction}
+          </span>
+        )}
+
         {/* Attachment icon */}
         {message.has_attachments && (
           <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
@@ -332,6 +339,13 @@ export const MessageListItem = memo(function MessageListItem({
             </span>
           )}
         </span>
+
+        {/* Reaction emoji */}
+        {message.reaction && (
+          <span className="shrink-0 text-base leading-none" title="Reaction">
+            {message.reaction}
+          </span>
+        )}
 
         {/* Attachment icon */}
         {message.has_attachments && (
