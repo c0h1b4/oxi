@@ -25,6 +25,8 @@ export function useKeyboardShortcuts() {
   const searchActive = useUiStore((s) => s.searchActive);
   const setSearchActive = useUiStore((s) => s.setSearchActive);
   const clearSearch = useUiStore((s) => s.clearSearch);
+  const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
+  const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
 
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
@@ -49,8 +51,22 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Cmd/Ctrl+P — command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+
       // Don't handle other shortcuts when typing in inputs
       if (isInputFocused()) return;
+
+      // ? — keyboard shortcuts reference
+      if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
 
       // Escape — close reading pane or clear search
       if (e.key === "Escape") {
@@ -152,6 +168,8 @@ export function useKeyboardShortcuts() {
     searchActive,
     setSearchActive,
     clearSearch,
+    setShortcutsOpen,
+    setCommandPaletteOpen,
     updateFlags,
     moveMessage,
     deleteMessage,

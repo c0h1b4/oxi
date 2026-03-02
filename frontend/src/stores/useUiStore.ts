@@ -52,6 +52,8 @@ interface UiState {
   viewMode: "mail" | "contacts" | "settings";
   selectedMessageUids: number[];
   bulkSelectMode: boolean;
+  shortcutsOpen: boolean;
+  commandPaletteOpen: boolean;
 
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
@@ -67,6 +69,8 @@ interface UiState {
   selectAllMessages: (uids: number[]) => void;
   clearBulkSelection: () => void;
   setBulkSelectMode: (mode: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
 const initial = loadSettings();
@@ -83,6 +87,8 @@ export const useUiStore = create<UiState>((set) => ({
   viewMode: "mail",
   selectedMessageUids: [],
   bulkSelectMode: false,
+  shortcutsOpen: false,
+  commandPaletteOpen: false,
 
   setActiveFolder: (folder) =>
     set({ activeFolder: folder, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -116,4 +122,6 @@ export const useUiStore = create<UiState>((set) => ({
   clearBulkSelection: () => set({ selectedMessageUids: [], bulkSelectMode: false }),
   setBulkSelectMode: (mode) =>
     set({ bulkSelectMode: mode, selectedMessageUids: mode ? [] : [] }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 }));
