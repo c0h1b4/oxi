@@ -7,6 +7,7 @@ import {
   useNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@/hooks/useNotificationPreferences";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useFolders } from "@/hooks/useFolders";
 import { cn } from "@/lib/utils";
 
@@ -56,11 +57,7 @@ export function NotificationSettings() {
   const { data: prefs, isLoading } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
   const { data: foldersData } = useFolders();
-
-  const browserPermission =
-    typeof window !== "undefined" && "Notification" in window
-      ? Notification.permission
-      : "denied";
+  const { permission: browserPermission } = useNotifications();
 
   const handleToggle = useCallback(
     (field: "enabled" | "sound", value: boolean) => {

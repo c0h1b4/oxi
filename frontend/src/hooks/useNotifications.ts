@@ -5,14 +5,12 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useNotificationPreferences } from "./useNotificationPreferences";
 import type { MailEvent } from "./useWebSocket";
 
-type NotifPermission = "default" | "granted" | "denied";
-
 export function useNotifications() {
-  const [permission, setPermission] = useState<NotifPermission>(() => {
+  const [permission, setPermission] = useState<NotificationPermission>(() => {
     if (typeof window === "undefined" || !("Notification" in window)) {
       return "denied";
     }
-    return Notification.permission as NotifPermission;
+    return Notification.permission;
   });
   const [bannerDismissed, setBannerDismissed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -27,7 +25,7 @@ export function useNotifications() {
   const requestPermission = useCallback(async () => {
     if (!("Notification" in window)) return;
     const result = await Notification.requestPermission();
-    setPermission(result as NotifPermission);
+    setPermission(result);
   }, []);
 
   const dismissBanner = useCallback(() => {
@@ -38,8 +36,7 @@ export function useNotifications() {
   // Re-check permission on visibility change
   useEffect(() => {
     if (!("Notification" in window)) return;
-    const check = () =>
-      setPermission(Notification.permission as NotifPermission);
+    const check = () => setPermission(Notification.permission);
     document.addEventListener("visibilitychange", check);
     return () => document.removeEventListener("visibilitychange", check);
   }, []);
@@ -57,7 +54,7 @@ export function useNotifications() {
 
       const notification = new Notification("New email", {
         body: `New message in ${folder}`,
-        tag: `oxi-${folder}-${Date.now()}`,
+        tag: `oxi-${folder}`,
         icon: "/favicon.ico",
       });
 
