@@ -9,7 +9,12 @@ use tokio::sync::{broadcast, RwLock};
 #[allow(dead_code)]
 pub enum MailEvent {
     /// New messages arrived in a folder.
-    NewMessages { folder: String },
+    NewMessages {
+        folder: String,
+        count: u32,
+        latest_sender: Option<String>,
+        latest_subject: Option<String>,
+    },
     /// Flags changed on messages in a folder.
     FlagsChanged { folder: String },
     /// Folder list or counts changed.
@@ -93,11 +98,19 @@ mod tests {
         let bus = Arc::new(EventBus::new());
         let mut rx: tokio::sync::broadcast::Receiver<MailEvent> = bus.subscribe("user1").await;
 
-        bus.publish("user1", MailEvent::NewMessages { folder: "INBOX".to_string() }).await;
+        bus.publish("user1", MailEvent::NewMessages {
+            folder: "INBOX".to_string(),
+            count: 1,
+            latest_sender: Some("alice@example.com".to_string()),
+            latest_subject: Some("Hello".to_string()),
+        }).await;
 
         let event: MailEvent = rx.recv().await.unwrap();
         match event {
-            MailEvent::NewMessages { folder } => assert_eq!(folder, "INBOX"),
+            MailEvent::NewMessages { folder, count, .. } => {
+                assert_eq!(folder, "INBOX");
+                assert_eq!(count, 1);
+            }
             _ => panic!("unexpected event type"),
         }
     }

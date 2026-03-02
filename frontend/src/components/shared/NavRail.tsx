@@ -17,6 +17,8 @@ import { apiPost } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUiStore } from "@/stores/useUiStore";
+import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
+import { useWsStatus } from "@/lib/ws-context";
 
 function NavButton({
   icon,
@@ -49,6 +51,7 @@ function NavButton({
 }
 
 export function NavRail() {
+  const { status: wsStatus, failCount: wsFailCount } = useWsStatus();
   const router = useRouter();
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -124,6 +127,8 @@ export function NavRail() {
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      <ConnectionStatus status={wsStatus} failCount={wsFailCount} />
 
       {/* Bottom actions */}
       <div className="flex flex-col items-center gap-1">

@@ -7,6 +7,7 @@ pub mod folders;
 pub mod health;
 pub mod identities;
 pub mod messages;
+pub mod notification_preferences;
 pub mod search;
 pub mod send;
 
@@ -183,6 +184,11 @@ pub fn create_router(
             get(identities::get_identity_handler)
                 .put(identities::update_identity_handler)
                 .delete(identities::delete_identity_handler),
+        )
+        .route(
+            "/settings/notifications",
+            get(notification_preferences::get_notification_preferences)
+                .put(notification_preferences::update_notification_preferences),
         )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));

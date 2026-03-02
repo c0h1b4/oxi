@@ -169,6 +169,25 @@ pub fn update_folder_status(
     Ok(())
 }
 
+/// Update folder sync metadata after a CONDSTORE or STATUS-based sync.
+/// Sets highest_modseq, total_count, uid_validity, and touches messages_updated_at.
+pub fn update_folder_sync_status(
+    conn: &Connection,
+    name: &str,
+    uid_validity: u32,
+    total_count: u32,
+    highest_modseq: u64,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE folders SET uid_validity = ?1, total_count = ?2, highest_modseq = ?3,
+                messages_updated_at = datetime('now')
+         WHERE name = ?4",
+        params![uid_validity, total_count, highest_modseq as i64, name],
+    )
+    .map_err(|e| format!("Failed to update folder sync status: {e}"))?;
+    Ok(())
+}
+
 /// Recompute and store the unread count for a folder from the messages table.
 pub fn refresh_unread_count(conn: &Connection, folder_name: &str) -> Result<(), String> {
     let unread: u32 = conn
