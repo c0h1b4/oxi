@@ -34,6 +34,7 @@ pnpm-lock.yaml
 .agent/
 .claude/
 .worktrees/
+run.sh
 
 # =============================================================================
 # IDE / Editor
