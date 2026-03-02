@@ -370,6 +370,24 @@ pub fn delete_message(conn: &Connection, folder: &str, uid: u32) -> Result<(), S
     Ok(())
 }
 
+/// Return all (uid, flags_csv) pairs for a folder, for reconciliation.
+pub fn get_all_uids_and_flags(conn: &Connection, folder: &str) -> Result<Vec<(u32, String)>, String> {
+    let mut stmt = conn
+        .prepare("SELECT uid, flags FROM messages WHERE folder = ?1")
+        .map_err(|e| format!("Failed to prepare get_all_uids_and_flags: {e}"))?;
+    let rows = stmt
+        .query_map(params![folder], |row| {
+            Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("Failed to query uids and flags: {e}"))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| format!("Failed to read uid/flags row: {e}"))?);
+    }
+    Ok(result)
+}
+
 /// Find messages related to the given `target_message_id` for threading.
 ///
 /// Returns messages where:

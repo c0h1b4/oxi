@@ -11,7 +11,10 @@ import type {
 export function useIdentities() {
   return useQuery({
     queryKey: ["identities"],
-    queryFn: () => apiGet<Identity[]>("/identities"),
+    queryFn: async () => {
+      const res = await apiGet<{ identities: Identity[] }>("/identities");
+      return res.identities;
+    },
   });
 }
 

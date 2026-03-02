@@ -5,9 +5,14 @@ import { useQueryClient } from "@tanstack/react-query";
 
 export type WsStatus = "connected" | "connecting" | "disconnected";
 
-interface MailEvent {
+export interface MailEvent {
   type: "NewMessages" | "FlagsChanged" | "FolderUpdated";
-  data?: { folder: string };
+  data?: {
+    folder: string;
+    count?: number;
+    latest_sender?: string;
+    latest_subject?: string;
+  };
 }
 
 /**
@@ -15,9 +20,16 @@ interface MailEvent {
  * Automatically reconnects with exponential backoff on disconnect.
  * Invalidates React Query caches when events arrive.
  */
-export function useWebSocket() {
+export function useWebSocket(onEvent?: (event: MailEvent) => void) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<WsStatus>("disconnected");
+  const [failCount, setFailCount] = useState(0);
+  const onEventRef = useRef(onEvent);
+  // Sync ref on every render so the WebSocket handler always calls the latest
+  // callback without restarting the connection (intentionally no dep array).
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(1000);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -39,12 +51,14 @@ export function useWebSocket() {
       ws.onopen = () => {
         if (!mountedRef.current) return;
         setStatus("connected");
+        setFailCount(0);
         backoffRef.current = 1000; // Reset backoff on successful connect
       };
 
       ws.onmessage = (event) => {
         try {
           const mailEvent: MailEvent = JSON.parse(event.data);
+          onEventRef.current?.(mailEvent);
           switch (mailEvent.type) {
             case "NewMessages":
               if (mailEvent.data?.folder) {
@@ -74,6 +88,7 @@ export function useWebSocket() {
       ws.onclose = () => {
         if (!mountedRef.current) return;
         setStatus("disconnected");
+        setFailCount((c) => c + 1);
         wsRef.current = null;
 
         // Reconnect with exponential backoff
@@ -102,5 +117,5 @@ export function useWebSocket() {
     };
   }, [queryClient]);
 
-  return status;
+  return { status, failCount };
 }
