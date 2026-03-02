@@ -51,6 +51,7 @@ pub(crate) struct MessageSummary {
     pub(crate) size: u32,
     pub(crate) has_attachments: bool,
     pub(crate) snippet: String,
+    pub(crate) reaction: Option<String>,
 }
 
 /// An email address entry for the detail response.

@@ -59,7 +59,6 @@ function formatAddressList(addresses: EmailAddress[]): string {
 export function MessageActionBar() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
-  const selectMessage = useUiStore((s) => s.selectMessage);
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
   const deleteMessage = useDeleteMessage();
@@ -145,32 +144,20 @@ export function MessageActionBar() {
   const handleDelete = () => {
     if (!data) return;
     if (activeFolder === "Trash") {
-      deleteMessage.mutate(
-        { folder: activeFolder, uid: data.uid },
-        { onSuccess: () => selectMessage(null) },
-      );
+      deleteMessage.mutate({ folder: activeFolder, uid: data.uid });
     } else {
-      moveMessage.mutate(
-        { fromFolder: activeFolder, toFolder: "Trash", uid: data.uid },
-        { onSuccess: () => selectMessage(null) },
-      );
+      moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Trash", uid: data.uid });
     }
   };
 
   const handleArchive = () => {
     if (!data) return;
-    moveMessage.mutate(
-      { fromFolder: activeFolder, toFolder: "Archive", uid: data.uid },
-      { onSuccess: () => selectMessage(null) },
-    );
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Archive", uid: data.uid });
   };
 
   const handleJunk = () => {
     if (!data) return;
-    moveMessage.mutate(
-      { fromFolder: activeFolder, toFolder: "Junk", uid: data.uid },
-      { onSuccess: () => selectMessage(null) },
-    );
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Junk", uid: data.uid });
   };
 
   const handleToggleStar = () => {
@@ -236,10 +223,7 @@ export function MessageActionBar() {
         <MoveToFolderMenu
           currentFolder={activeFolder}
           onMove={(toFolder) => {
-            moveMessage.mutate(
-              { fromFolder: activeFolder, toFolder, uid: data.uid },
-              { onSuccess: () => selectMessage(null) },
-            );
+            moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
           }}
         />
       )}

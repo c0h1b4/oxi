@@ -402,6 +402,7 @@ mod tests {
             in_reply_to: None,
             references: None,
             cc: vec![],
+            reaction: None,
         }]);
 
         let headers = mock

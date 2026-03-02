@@ -188,6 +188,7 @@ pub async fn list_messages(
                     header.size,
                     header.has_attachments,
                     "",
+                    header.reaction.as_deref(),
                 )
                 .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
             }
@@ -274,6 +275,7 @@ pub async fn list_messages(
             size: m.size,
             has_attachments: m.has_attachments,
             snippet: m.snippet,
+            reaction: m.reaction,
         })
         .collect();
 
@@ -446,6 +448,7 @@ pub async fn get_message(
                 size: 0,
                 has_attachments: !attachments.is_empty(),
                 snippet: String::new(),
+                reaction: None,
             }
         }
     };
