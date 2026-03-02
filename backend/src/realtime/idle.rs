@@ -381,17 +381,17 @@ async fn fetch_new_after_idle(
 
             // Apply flag changes to DB.
             let mut flags_updated = 0u32;
-            if !flag_changes.is_empty() {
-                if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
-                    for (uid, flags) in &flag_changes {
-                        let mut sorted = flags.clone();
-                        sorted.sort();
-                        let flags_csv = sorted.join(",");
-                        if db::messages::update_message_flags(&conn, folder, *uid, &flags_csv)
-                            .is_ok()
-                        {
-                            flags_updated += 1;
-                        }
+            if !flag_changes.is_empty()
+                && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+            {
+                for (uid, flags) in &flag_changes {
+                    let mut sorted = flags.clone();
+                    sorted.sort();
+                    let flags_csv = sorted.join(",");
+                    if db::messages::update_message_flags(&conn, folder, *uid, &flags_csv)
+                        .is_ok()
+                    {
+                        flags_updated += 1;
                     }
                 }
             }
@@ -513,12 +513,12 @@ async fn fetch_new_after_idle(
         .copied()
         .filter(|uid| !imap_uids.contains(uid))
         .collect();
-    if !deleted_uids.is_empty() {
-        if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
-            for uid in &deleted_uids {
-                if db::messages::delete_message(&conn, folder, *uid).is_ok() {
-                    deleted_count += 1;
-                }
+    if !deleted_uids.is_empty()
+        && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+    {
+        for uid in &deleted_uids {
+            if db::messages::delete_message(&conn, folder, *uid).is_ok() {
+                deleted_count += 1;
             }
         }
     }
@@ -791,10 +791,10 @@ async fn fetch_uids_and_remove_deleted(
     if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
         let cached = db::messages::get_all_uids_and_flags(&conn, folder).unwrap_or_default();
         for (uid, _) in &cached {
-            if !imap_uids.contains(uid) {
-                if db::messages::delete_message(&conn, folder, *uid).is_ok() {
-                    deleted_count += 1;
-                }
+            if !imap_uids.contains(uid)
+                && db::messages::delete_message(&conn, folder, *uid).is_ok()
+            {
+                deleted_count += 1;
             }
         }
     }

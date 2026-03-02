@@ -151,6 +151,7 @@ struct FolderSnapshot {
 }
 
 /// CONDSTORE path: fetch only changed flags, detect deletions via count comparison.
+#[allow(clippy::too_many_arguments)]
 async fn sync_condstore(
     config: &AppConfig,
     user_hash: &str,
