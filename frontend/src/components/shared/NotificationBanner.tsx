@@ -1,6 +1,7 @@
 "use client";
 
 import { Bell, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface NotificationBannerProps {
   onEnable: () => void;
@@ -14,19 +15,12 @@ export function NotificationBanner({ onEnable, onDismiss }: NotificationBannerPr
       <p className="flex-1 text-sm text-foreground">
         Enable desktop notifications to get alerted about new emails.
       </p>
-      <button
-        onClick={onEnable}
-        className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-      >
+      <Button size="xs" onClick={onEnable}>
         Enable
-      </button>
-      <button
-        onClick={onDismiss}
-        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        aria-label="Dismiss"
-      >
+      </Button>
+      <Button variant="ghost" size="icon-xs" onClick={onDismiss} aria-label="Dismiss">
         <X className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }

@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
-import type { WsStatus } from "@/hooks/useWebSocket";
+import { useWsStatus } from "@/lib/ws-context";
 
 function NavButton({
   icon,
@@ -50,7 +50,8 @@ function NavButton({
   );
 }
 
-export function NavRail({ wsStatus = "disconnected" as WsStatus, wsFailCount = 0 }: { wsStatus?: WsStatus; wsFailCount?: number } = {}) {
+export function NavRail() {
+  const { status: wsStatus, failCount: wsFailCount } = useWsStatus();
   const router = useRouter();
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
