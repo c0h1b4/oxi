@@ -29,7 +29,7 @@ export function useUpdateNotificationPreferences() {
     mutationFn: (data: UpdateNotificationPreferences) =>
       apiPut<NotificationPreferences>(
         "/settings/notifications",
-        data as unknown as Record<string, unknown>,
+        data as Record<string, unknown>,
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notification-preferences"] });

@@ -58,7 +58,7 @@ export function useNotifications() {
       const notification = new Notification("New email", {
         body: `New message in ${folder}`,
         tag: `oxi-${folder}-${Date.now()}`,
-        icon: "/icon-192.png",
+        icon: "/favicon.ico",
       });
 
       notification.onclick = () => {
