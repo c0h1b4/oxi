@@ -6,3 +6,4 @@ pub mod identities;
 pub mod messages;
 pub mod notification_preferences;
 pub mod pool;
+pub mod tags;

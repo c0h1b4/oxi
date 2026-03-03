@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// Default page size for paginated list queries.
+pub fn default_per_page() -> u32 {
+    50
+}
+
 /// Query parameters for `GET /api/folders/:folder/messages`.
 #[derive(Deserialize)]
 pub(crate) struct ListMessagesQuery {
@@ -7,10 +12,6 @@ pub(crate) struct ListMessagesQuery {
     pub(crate) page: u32,
     #[serde(default = "default_per_page")]
     pub(crate) per_page: u32,
-}
-
-fn default_per_page() -> u32 {
-    50
 }
 
 /// Request body for `PATCH /api/messages/:folder/:uid/flags`.
@@ -38,20 +39,21 @@ pub(crate) struct ListMessagesResponse {
 }
 
 /// A message summary in the list response.
-#[derive(Serialize)]
-pub(crate) struct MessageSummary {
-    pub(crate) uid: u32,
-    pub(crate) folder: String,
-    pub(crate) subject: String,
-    pub(crate) from_address: String,
-    pub(crate) from_name: String,
-    pub(crate) to_addresses: String,
-    pub(crate) date: String,
-    pub(crate) flags: String,
-    pub(crate) size: u32,
-    pub(crate) has_attachments: bool,
-    pub(crate) snippet: String,
-    pub(crate) reaction: Option<String>,
+#[derive(Serialize, Clone)]
+pub struct MessageSummary {
+    pub uid: u32,
+    pub folder: String,
+    pub subject: String,
+    pub from_address: String,
+    pub from_name: String,
+    pub to_addresses: String,
+    pub date: String,
+    pub flags: String,
+    pub size: u32,
+    pub has_attachments: bool,
+    pub snippet: String,
+    pub reaction: Option<String>,
+    pub tags: Vec<crate::db::tags::MessageTag>,
 }
 
 /// An email address entry for the detail response.

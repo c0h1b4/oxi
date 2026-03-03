@@ -11,6 +11,7 @@ pub mod messages;
 pub mod notification_preferences;
 pub mod search;
 pub mod send;
+pub mod tags;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -179,6 +180,30 @@ pub fn create_router(
         .route(
             "/contact-groups/{id}/members/{contact_id}",
             delete(contact_groups::remove_member_handler),
+        )
+        .route(
+            "/tags",
+            get(tags::list_tags_handler).post(tags::create_tag_handler),
+        )
+        .route(
+            "/tags/{id}",
+            put(tags::update_tag_handler).delete(tags::delete_tag_handler),
+        )
+        .route(
+            "/tags/{id}/messages",
+            post(tags::tag_message_handler).get(tags::list_tag_messages_handler),
+        )
+        .route(
+            "/tags/{id}/messages/bulk",
+            post(tags::bulk_tag_handler),
+        )
+        .route(
+            "/tags/{id}/messages/{folder}/{uid}",
+            delete(tags::untag_message_handler),
+        )
+        .route(
+            "/messages/{folder}/{uid}/tags",
+            get(tags::get_message_tags_handler),
         )
         .route(
             "/contacts",
