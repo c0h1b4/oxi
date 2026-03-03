@@ -429,7 +429,7 @@ pub async fn export_contacts_handler(
 
     let vcf: String = contacts
         .iter()
-        .map(|c| contact_to_vcard(c))
+        .map(contact_to_vcard)
         .collect::<Vec<_>>()
         .join("\r\n");
 
@@ -497,7 +497,7 @@ pub async fn import_contacts_handler(
 ) -> Result<Response, AppError> {
     // Read the uploaded file content
     let mut vcf_content = String::new();
-    while let Some(field) = multipart
+    if let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(format!("Invalid multipart data: {e}")))?
@@ -508,7 +508,6 @@ pub async fn import_contacts_handler(
             .map_err(|e| AppError::BadRequest(format!("Failed to read field: {e}")))?;
         vcf_content =
             String::from_utf8(data.to_vec()).map_err(|_| AppError::BadRequest("Invalid UTF-8 in vCard file".to_string()))?;
-        break; // Only process the first field
     }
 
     if vcf_content.is_empty() {
