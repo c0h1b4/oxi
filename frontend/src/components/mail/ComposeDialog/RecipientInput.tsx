@@ -17,7 +17,9 @@ export function RecipientInput({
   inputRef,
 }: RecipientInputProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [showDropdown, setShowDropdown] = useState(false);
+  // Track the query for which the dropdown was dismissed, so typing a new
+  // query naturally re-opens it without setState-in-effect.
+  const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Extract the text after the last comma as the autocomplete query
@@ -26,10 +28,8 @@ export function RecipientInput({
 
   const hasSuggestions = !!suggestions && suggestions.length > 0 && query.length >= 2;
 
-  useEffect(() => {
-    setShowDropdown(hasSuggestions);
-    setSelectedIndex(0);
-  }, [hasSuggestions]);
+  // Dropdown shows when there are suggestions and the user hasn't dismissed this exact query
+  const showDropdown = hasSuggestions && dismissedQuery !== query;
 
   const selectSuggestion = useCallback(
     (suggestion: { email: string; name: string }) => {
@@ -40,9 +40,9 @@ export function RecipientInput({
         : suggestion.email;
       parts.push(formatted);
       onChange(parts.join(", ") + ", ");
-      setShowDropdown(false);
+      setDismissedQuery(query);
     },
-    [value, onChange],
+    [value, onChange, query],
   );
 
   const handleKeyDown = useCallback(
@@ -61,22 +61,22 @@ export function RecipientInput({
           selectSuggestion(suggestions[selectedIndex]);
         }
       } else if (e.key === "Escape") {
-        setShowDropdown(false);
+        setDismissedQuery(query);
       }
     },
-    [showDropdown, suggestions, selectedIndex, selectSuggestion],
+    [showDropdown, suggestions, selectedIndex, selectSuggestion, query],
   );
 
   // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setShowDropdown(false);
+        setDismissedQuery(query);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  }, [query]);
 
   return (
     <div ref={containerRef} className="relative flex-1">
@@ -84,9 +84,12 @@ export function RecipientInput({
         ref={inputRef}
         type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setSelectedIndex(0);
+        }}
         onKeyDown={handleKeyDown}
-        onFocus={() => hasSuggestions && setShowDropdown(true)}
+        onFocus={() => setDismissedQuery(null)}
         placeholder={placeholder}
         className="w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
       />

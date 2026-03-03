@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 interface GroupDialogProps {
@@ -12,23 +12,15 @@ interface GroupDialogProps {
   title?: string;
 }
 
-export function GroupDialog({
-  open,
+/** Inner form that resets state naturally via remount when `open` toggles. */
+function GroupForm({
   onClose,
   onSubmit,
   isPending,
-  initialName = "",
-  title = "New Group",
-}: GroupDialogProps) {
-  const [name, setName] = useState(initialName);
-
-  useEffect(() => {
-    if (open) {
-      setName(initialName);
-    }
-  }, [open, initialName]);
-
-  if (!open) return null;
+  initialName,
+  title,
+}: Omit<GroupDialogProps, "open">) {
+  const [name, setName] = useState(initialName ?? "");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -82,4 +74,12 @@ export function GroupDialog({
       </div>
     </div>
   );
+}
+
+export function GroupDialog({
+  open,
+  ...rest
+}: GroupDialogProps) {
+  if (!open) return null;
+  return <GroupForm {...rest} />;
 }
