@@ -2,6 +2,7 @@ pub mod attachments;
 pub mod auth;
 pub mod contact_groups;
 pub mod contacts;
+pub mod display_preferences;
 pub mod drafts;
 pub mod folder_mgmt;
 pub mod folders;
@@ -232,6 +233,11 @@ pub fn create_router(
             get(identities::get_identity_handler)
                 .put(identities::update_identity_handler)
                 .delete(identities::delete_identity_handler),
+        )
+        .route(
+            "/settings/display",
+            get(display_preferences::get_display_preferences)
+                .put(display_preferences::update_display_preferences),
         )
         .route(
             "/settings/notifications",
