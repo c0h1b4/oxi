@@ -19,6 +19,7 @@ import {
   useDeleteMessage,
 } from "@/hooks/useMessages";
 import { MoveToFolderMenu } from "./MoveToFolderMenu";
+import { TagPicker } from "./TagPicker";
 import { Button } from "@/components/ui/button";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -181,7 +182,7 @@ export function MessageActionBar() {
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1">
+    <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1">
       {/* Reply */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply}>
         <Reply className="size-4" />
@@ -253,6 +254,11 @@ export function MessageActionBar() {
         )}
         <span className="hidden xl:inline">{isSeen ? "Unread" : "Read"}</span>
       </Button>
+
+      {/* Tags */}
+      {data && (
+        <TagPicker folder={activeFolder} uid={data.uid} />
+      )}
     </div>
   );
 }

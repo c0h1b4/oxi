@@ -4,6 +4,7 @@ import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PenLine, X } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
+import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
@@ -158,29 +159,41 @@ function DraftItems() {
 
 export function MessageList() {
   const activeFolder = useUiStore((s) => s.activeFolder);
+  const activeTagId = useUiStore((s) => s.activeTagId);
   const density = useUiStore((s) => s.density);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
-  const showDrafts = isDraftsFolder(activeFolder);
+  const showDrafts = !activeTagId && isDraftsFolder(activeFolder);
   const selectedMessageUids = useUiStore((s) => s.selectedMessageUids);
   const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
   const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
   const selectAllMessages = useUiStore((s) => s.selectAllMessages);
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
 
-  const {
-    data,
-    isLoading,
-    isError,
-    refetch,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useMessages(activeFolder);
+  const folderQuery = useMessages(activeFolder);
+  const tagQuery = useTagMessages(activeTagId);
+  const { data: tagsData } = useTags();
+
+  // Select the right data source based on whether a tag filter is active.
+  const isTagView = !!activeTagId;
+  const data = isTagView ? undefined : folderQuery.data;
+  const isLoading = isTagView ? tagQuery.isLoading : folderQuery.isLoading;
+  const isError = isTagView ? tagQuery.isError : folderQuery.isError;
+  const refetch = isTagView ? tagQuery.refetch : folderQuery.refetch;
+  const fetchNextPage = folderQuery.fetchNextPage;
+  const hasNextPage = isTagView ? false : folderQuery.hasNextPage;
+  const isFetchingNextPage = isTagView ? false : folderQuery.isFetchingNextPage;
 
   // Flatten all pages into a single array of messages.
-  const messages = data?.pages.flatMap((page) => page.messages) ?? [];
-  const totalCount = data?.pages[0]?.total_count ?? 0;
+  const folderMessages = data?.pages.flatMap((page) => page.messages) ?? [];
+  const tagMessages = isTagView ? (tagQuery.data?.messages ?? []) : [];
+  const messages = isTagView ? tagMessages : folderMessages;
+  const totalCount = isTagView
+    ? (tagQuery.data?.total_count ?? 0)
+    : (data?.pages[0]?.total_count ?? 0);
+
+  // Resolve tag name for header display.
+  const activeTagName = tagsData?.tags.find((t) => t.id === activeTagId)?.name;
 
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
@@ -291,7 +304,9 @@ export function MessageList() {
               )}
             </button>
           )}
-          <h2 className="text-sm font-semibold">{formatFolderName(activeFolder)}</h2>
+          <h2 className="text-sm font-semibold">
+            {isTagView ? `Tag: ${activeTagName ?? "..."}` : formatFolderName(activeFolder)}
+          </h2>
         </div>
         <span className="text-xs text-muted-foreground">
           {isLoading ? "\u2026" : `${totalCount} messages`}
@@ -321,7 +336,7 @@ export function MessageList() {
       {/* Empty state (only when not a drafts folder or no drafts either) */}
       {!isLoading && !isError && messages.length === 0 && !showDrafts && (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          No messages in this folder
+          {isTagView ? "No messages with this tag" : "No messages in this folder"}
         </div>
       )}
 

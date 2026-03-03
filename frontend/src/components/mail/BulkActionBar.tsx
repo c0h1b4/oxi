@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import {
   Mail,
   MailOpen,
   Star,
   Trash2,
   FolderInput,
+  Tag,
   X,
   Loader2,
 } from "lucide-react";
@@ -18,6 +19,8 @@ import {
   useDeleteMessage,
 } from "@/hooks/useMessages";
 import { useFolders } from "@/hooks/useFolders";
+import { useClickOutside } from "@/hooks/useClickOutside";
+import { useTags, useBulkAddTag } from "@/hooks/useTags";
 
 export function BulkActionBar() {
   const selectedUids = useUiStore((s) => s.selectedMessageUids);
@@ -30,25 +33,20 @@ export function BulkActionBar() {
 
   const [isBusy, setIsBusy] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const moveMenuRef = useRef<HTMLDivElement>(null);
+  const tagMenuRef = useRef<HTMLDivElement>(null);
 
   const { data: foldersData } = useFolders();
   const folders = foldersData?.folders ?? [];
+  const { data: tagsData } = useTags();
+  const allTags = tagsData?.tags ?? [];
+  const bulkAddTag = useBulkAddTag();
 
-  // Close move menu on click outside
-  useEffect(() => {
-    if (!moveMenuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        moveMenuRef.current &&
-        !moveMenuRef.current.contains(e.target as Node)
-      ) {
-        setMoveMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [moveMenuOpen]);
+  const closeMoveMenu = useCallback(() => setMoveMenuOpen(false), []);
+  const closeTagMenu = useCallback(() => setTagMenuOpen(false), []);
+  useClickOutside(moveMenuRef, closeMoveMenu, moveMenuOpen);
+  useClickOutside(tagMenuRef, closeTagMenu, tagMenuOpen);
 
   const runBulkAction = useCallback(
     async (
@@ -116,6 +114,17 @@ export function BulkActionBar() {
       );
     },
     [runBulkAction, moveMessage, activeFolder],
+  );
+
+  const handleBulkTag = useCallback(
+    (tagId: string) => {
+      setTagMenuOpen(false);
+      bulkAddTag.mutate({
+        tagId,
+        messages: selectedUids.map((uid) => ({ uid, folder: activeFolder })),
+      });
+    },
+    [bulkAddTag, selectedUids, activeFolder],
   );
 
   if (selectedUids.length < 1) return null;
@@ -220,6 +229,47 @@ export function BulkActionBar() {
             {folders.filter((f) => f.name !== activeFolder).length === 0 && (
               <span className="block px-3 py-1.5 text-sm text-muted-foreground">
                 No other folders
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Tag */}
+      <div className="relative" ref={tagMenuRef}>
+        <button
+          type="button"
+          title="Add tag"
+          disabled={isBusy}
+          onClick={() => setTagMenuOpen((prev) => !prev)}
+          className={cn(
+            "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "disabled:pointer-events-none disabled:opacity-50",
+            tagMenuOpen && "bg-accent text-foreground",
+          )}
+        >
+          <Tag className="size-4" />
+        </button>
+
+        {tagMenuOpen && (
+          <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] rounded-md border border-border bg-popover py-1 shadow-md">
+            {allTags.map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => handleBulkTag(tag.id)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+              >
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: tag.color }}
+                />
+                {tag.name}
+              </button>
+            ))}
+            {allTags.length === 0 && (
+              <span className="block px-3 py-1.5 text-sm text-muted-foreground">
+                No tags
               </span>
             )}
           </div>

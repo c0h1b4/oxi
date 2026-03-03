@@ -52,9 +52,11 @@ interface UiState {
   viewMode: "mail" | "contacts" | "settings";
   selectedMessageUids: number[];
   bulkSelectMode: boolean;
+  activeTagId: string | null;
   shortcutsOpen: boolean;
   commandPaletteOpen: boolean;
 
+  setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
   setSidebarWidth: (width: number) => void;
@@ -87,11 +89,14 @@ export const useUiStore = create<UiState>((set) => ({
   viewMode: "mail",
   selectedMessageUids: [],
   bulkSelectMode: false,
+  activeTagId: null,
   shortcutsOpen: false,
   commandPaletteOpen: false,
 
+  setActiveTag: (tagId) =>
+    set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   setActiveFolder: (folder) =>
-    set({ activeFolder: folder, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
+    set({ activeFolder: folder, activeTagId: null, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   selectMessage: (uid) => set({ selectedMessageUid: uid }),
   setSidebarWidth: (width) => {
     saveSettings({ sidebarWidth: width });

@@ -6,7 +6,7 @@ use axum::extract::Query;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 
-mod types;
+pub mod types;
 use types::*;
 
 use crate::auth::session::SessionState;
@@ -261,21 +261,32 @@ pub async fn list_messages(
         "list_messages: returning results"
     );
 
+    // Batch-fetch tags for all messages in this page.
+    let message_refs: Vec<(u32, &str)> = messages.iter().map(|m| (m.uid, m.folder.as_str())).collect();
+    let tags_map = db::tags::get_tags_for_messages(&conn, &message_refs).unwrap_or_default();
+
     let summaries: Vec<MessageSummary> = messages
         .into_iter()
-        .map(|m| MessageSummary {
-            uid: m.uid,
-            folder: m.folder,
-            subject: m.subject,
-            from_address: m.from_address,
-            from_name: m.from_name,
-            to_addresses: m.to_addresses,
-            date: m.date,
-            flags: m.flags,
-            size: m.size,
-            has_attachments: m.has_attachments,
-            snippet: m.snippet,
-            reaction: m.reaction,
+        .map(|m| {
+            let msg_tags = tags_map
+                .get(&(m.uid, m.folder.clone()))
+                .cloned()
+                .unwrap_or_default();
+            MessageSummary {
+                uid: m.uid,
+                folder: m.folder,
+                subject: m.subject,
+                from_address: m.from_address,
+                from_name: m.from_name,
+                to_addresses: m.to_addresses,
+                date: m.date,
+                flags: m.flags,
+                size: m.size,
+                has_attachments: m.has_attachments,
+                snippet: m.snippet,
+                reaction: m.reaction,
+                tags: msg_tags,
+            }
         })
         .collect();
 
