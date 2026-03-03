@@ -40,6 +40,8 @@ function saveSettings(settings: Partial<PersistedSettings>) {
   }
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
 interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
@@ -47,6 +49,7 @@ interface UiState {
   messageListWidth: number;
   readingPaneVisible: boolean;
   density: "compact" | "comfortable";
+  theme: ThemeMode;
   searchQuery: string;
   searchActive: boolean;
   viewMode: "mail" | "contacts" | "settings";
@@ -63,6 +66,7 @@ interface UiState {
   setMessageListWidth: (width: number) => void;
   setReadingPaneVisible: (visible: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
+  setTheme: (theme: ThemeMode) => void;
   setSearchQuery: (query: string) => void;
   setSearchActive: (active: boolean) => void;
   clearSearch: () => void;
@@ -84,6 +88,7 @@ export const useUiStore = create<UiState>((set) => ({
   messageListWidth: initial.messageListWidth,
   readingPaneVisible: true,
   density: "comfortable",
+  theme: "system",
   searchQuery: "",
   searchActive: false,
   viewMode: "mail",
@@ -108,6 +113,7 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
   setDensity: (density) => set({ density }),
+  setTheme: (theme) => set({ theme }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
   clearSearch: () => set({ searchQuery: "", searchActive: false }),
