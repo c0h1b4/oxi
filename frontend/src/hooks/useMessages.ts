@@ -105,8 +105,10 @@ export function useMoveMessage() {
       }
 
       // Cancel in-flight fetches so they don't overwrite our optimistic update.
-      await queryClient.cancelQueries({ queryKey: ["messages", fromFolder] });
-      await queryClient.cancelQueries({ queryKey: ["messages", toFolder] });
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["messages", fromFolder] }),
+        queryClient.cancelQueries({ queryKey: ["messages", toFolder] })
+      ]);
 
       const prevFrom = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
         ["messages", fromFolder],
@@ -153,10 +155,10 @@ export function useMoveMessage() {
             pages: prevTo.pages.map((page, i) =>
               i === 0
                 ? {
-                    ...page,
-                    messages: [entry, ...page.messages],
-                    total_count: page.total_count + 1,
-                  }
+                  ...page,
+                  messages: [entry, ...page.messages],
+                  total_count: page.total_count + 1,
+                }
                 : { ...page, total_count: page.total_count + 1 },
             ),
           },
