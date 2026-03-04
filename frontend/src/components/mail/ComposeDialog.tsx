@@ -23,7 +23,6 @@ import {
   useDeleteAttachment,
   useDeleteDraft,
 } from "@/hooks/useCompose";
-import { RichTextEditor } from "@/components/mail/RichTextEditor";
 import { useIdentities } from "@/hooks/useIdentities";
 import { cn } from "@/lib/utils";
 import {
@@ -35,6 +34,12 @@ import {
   AttachmentPreviewDialog,
 } from "./ComposeDialog/index";
 import { RecipientInput } from "./ComposeDialog/RecipientInput";
+import dynamic from "next/dynamic";
+
+const RichTextEditor = dynamic(
+  () => import("@/components/mail/RichTextEditor").then((mod) => mod.RichTextEditor),
+  { ssr: false }
+);
 
 export function ComposeDialog() {
   const {
