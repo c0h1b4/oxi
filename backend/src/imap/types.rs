@@ -47,6 +47,8 @@ pub struct ImapMessageHeader {
     pub references: Option<String>,
     /// CC addresses.
     pub cc: Vec<EmailAddress>,
+    /// Reaction emoji if this is an Outlook/Exchange reaction notification.
+    pub reaction: Option<String>,
 }
 
 /// The full body of an email message, including attachments.

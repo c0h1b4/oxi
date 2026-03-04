@@ -1,3 +1,5 @@
+import type { MessageTag } from "@/types/tag";
+
 export interface EmailAddress {
   name: string | null;
   address: string;
@@ -18,6 +20,8 @@ export interface MessageHeader {
   size: number;
   has_attachments: boolean;
   snippet: string;
+  reaction: string | null;
+  tags: MessageTag[];
 }
 
 export interface MessageDetail {

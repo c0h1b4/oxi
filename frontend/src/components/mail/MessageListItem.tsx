@@ -4,7 +4,24 @@ import { memo, useState, useCallback } from "react";
 import { Star, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateFlags } from "@/hooks/useMessages";
+import type { MessageTag } from "@/types/tag";
 import type { MessageHeader } from "@/types/message";
+
+function TagDots({ tags }: { tags: MessageTag[] | undefined }) {
+  if (!tags?.length) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      {tags.map((tag) => (
+        <span
+          key={tag.id}
+          className="size-2 rounded-full"
+          style={{ backgroundColor: tag.color }}
+          title={tag.name}
+        />
+      ))}
+    </span>
+  );
+}
 
 interface MessageListItemProps {
   message: MessageHeader;
@@ -220,6 +237,16 @@ export const MessageListItem = memo(function MessageListItem({
         {/* Subject */}
         <span className={cn("min-w-0 flex-1 truncate", isFlagged && "text-primary")}>{message.subject || "(no subject)"}</span>
 
+        {/* Tag color dots */}
+        <TagDots tags={message.tags} />
+
+        {/* Reaction emoji */}
+        {message.reaction && (
+          <span className="shrink-0 text-base leading-none" title="Reaction">
+            {message.reaction}
+          </span>
+        )}
+
         {/* Attachment icon */}
         {message.has_attachments && (
           <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
@@ -332,6 +359,16 @@ export const MessageListItem = memo(function MessageListItem({
             </span>
           )}
         </span>
+
+        {/* Tag color dots */}
+        <TagDots tags={message.tags} />
+
+        {/* Reaction emoji */}
+        {message.reaction && (
+          <span className="shrink-0 text-base leading-none" title="Reaction">
+            {message.reaction}
+          </span>
+        )}
 
         {/* Attachment icon */}
         {message.has_attachments && (

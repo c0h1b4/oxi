@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiPostFormData, apiDelete } from "@/lib/api";
 import type { Contact, ContactsResponse } from "@/types/contact";
 
 export function useContacts(search?: string) {
@@ -42,13 +42,32 @@ export function useDeleteContact() {
   });
 }
 
+export function useImportContacts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return apiPostFormData<{ created: number; updated: number; skipped: number }>(
+        "/contacts/import",
+        formData,
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    },
+  });
+}
+
 export function useAutocomplete(query: string) {
   return useQuery({
     queryKey: ["contacts-autocomplete", query],
-    queryFn: () =>
-      apiGet<Contact[]>(
+    queryFn: async () => {
+      const res = await apiGet<{ suggestions: { email: string; name: string }[] }>(
         `/contacts/autocomplete?q=${encodeURIComponent(query)}&limit=10`,
-      ),
+      );
+      return res.suggestions;
+    },
     enabled: query.length >= 2,
   });
 }

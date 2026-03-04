@@ -1,7 +1,10 @@
+pub mod contact_groups;
 pub mod contacts;
+pub mod display_preferences;
 pub mod drafts;
 pub mod folders;
 pub mod identities;
 pub mod messages;
 pub mod notification_preferences;
 pub mod pool;
+pub mod tags;

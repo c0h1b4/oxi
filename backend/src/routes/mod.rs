@@ -1,6 +1,8 @@
 pub mod attachments;
 pub mod auth;
+pub mod contact_groups;
 pub mod contacts;
+pub mod display_preferences;
 pub mod drafts;
 pub mod folder_mgmt;
 pub mod folders;
@@ -10,6 +12,7 @@ pub mod messages;
 pub mod notification_preferences;
 pub mod search;
 pub mod send;
+pub mod tags;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -18,7 +21,7 @@ use std::time::Duration;
 
 use axum::extract::ConnectInfo;
 use axum::http::Request;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Router, middleware};
 use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
@@ -164,9 +167,51 @@ pub fn create_router(
         )
         .route("/search", get(search::search_messages))
         .route(
+            "/contact-groups",
+            get(contact_groups::list_groups_handler).post(contact_groups::create_group_handler),
+        )
+        .route(
+            "/contact-groups/{id}",
+            put(contact_groups::update_group_handler).delete(contact_groups::delete_group_handler),
+        )
+        .route(
+            "/contact-groups/{id}/members",
+            get(contact_groups::list_members_handler).post(contact_groups::add_member_handler),
+        )
+        .route(
+            "/contact-groups/{id}/members/{contact_id}",
+            delete(contact_groups::remove_member_handler),
+        )
+        .route(
+            "/tags",
+            get(tags::list_tags_handler).post(tags::create_tag_handler),
+        )
+        .route(
+            "/tags/{id}",
+            put(tags::update_tag_handler).delete(tags::delete_tag_handler),
+        )
+        .route(
+            "/tags/{id}/messages",
+            post(tags::tag_message_handler).get(tags::list_tag_messages_handler),
+        )
+        .route(
+            "/tags/{id}/messages/bulk",
+            post(tags::bulk_tag_handler),
+        )
+        .route(
+            "/tags/{id}/messages/{folder}/{uid}",
+            delete(tags::untag_message_handler),
+        )
+        .route(
+            "/messages/{folder}/{uid}/tags",
+            get(tags::get_message_tags_handler),
+        )
+        .route(
             "/contacts",
             get(contacts::list_contacts_handler).post(contacts::create_contact_handler),
         )
+        .route("/contacts/export", get(contacts::export_contacts_handler))
+        .route("/contacts/import", post(contacts::import_contacts_handler))
         .route(
             "/contacts/autocomplete",
             get(contacts::autocomplete_handler),
@@ -174,6 +219,10 @@ pub fn create_router(
         .route(
             "/contacts/{id}",
             get(contacts::get_contact_handler).delete(contacts::delete_contact_handler),
+        )
+        .route(
+            "/contacts/{id}/export",
+            get(contacts::export_single_contact_handler),
         )
         .route(
             "/identities",
@@ -184,6 +233,11 @@ pub fn create_router(
             get(identities::get_identity_handler)
                 .put(identities::update_identity_handler)
                 .delete(identities::delete_identity_handler),
+        )
+        .route(
+            "/settings/display",
+            get(display_preferences::get_display_preferences)
+                .put(display_preferences::update_display_preferences),
         )
         .route(
             "/settings/notifications",

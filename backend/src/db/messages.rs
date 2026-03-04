@@ -22,6 +22,7 @@ pub struct CachedMessage {
     pub size: u32,
     pub has_attachments: bool,
     pub snippet: String,
+    pub reaction: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -43,9 +44,10 @@ fn row_to_cached_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedMess
         cc_addresses: row.get(9)?,
         date: row.get(10)?,
         flags: row.get(11)?,
-        size: row.get(12 + 1)?,     // size is column 13 (index 13)
+        size: row.get(13)?,
         has_attachments: has_attachments_int != 0,
         snippet: row.get(14)?,
+        reaction: row.get(15)?,
     })
 }
 
@@ -53,7 +55,7 @@ fn row_to_cached_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedMess
 const MSG_SELECT_COLS: &str =
     "uid, folder, message_id, in_reply_to, references_header,
      subject, from_address, from_name, to_addresses, cc_addresses,
-     date, flags, has_attachments, size, snippet";
+     date, flags, has_attachments, size, snippet, reaction";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -78,14 +80,15 @@ pub fn upsert_message(
     size: u32,
     has_attachments: bool,
     snippet: &str,
+    reaction: Option<&str>,
 ) -> Result<(), String> {
     let date_epoch = parse_date_to_epoch(date);
     conn.execute(
         "INSERT OR REPLACE INTO messages
             (uid, folder, message_id, in_reply_to, references_header,
              subject, from_address, from_name, to_addresses, cc_addresses,
-             date, flags, size, has_attachments, snippet, date_epoch)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             date, flags, size, has_attachments, snippet, date_epoch, reaction)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             uid,
             folder,
@@ -103,6 +106,7 @@ pub fn upsert_message(
             has_attachments as i32,
             snippet,
             date_epoch,
+            reaction,
         ],
     )
     .map_err(|e| format!("Failed to upsert message: {e}"))?;
@@ -536,6 +540,7 @@ mod tests {
             1024,
             false,
             "snippet",
+            None,
         )
         .unwrap();
     }
@@ -690,7 +695,7 @@ mod tests {
             &conn, "INBOX", 1,
             Some("<thread-1@example.com>"), None, None,
             "Hello", "alice@example.com", "Alice", "[]", "[]",
-            "2024-01-01T10:00:00Z", "", 100, false, "",
+            "2024-01-01T10:00:00Z", "", 100, false, "", None,
         ).unwrap();
 
         // Reply referencing original via in_reply_to.
@@ -700,7 +705,7 @@ mod tests {
             Some("<thread-1@example.com>"),
             None,
             "Re: Hello", "bob@example.com", "Bob", "[]", "[]",
-            "2024-01-02T10:00:00Z", "", 200, false, "",
+            "2024-01-02T10:00:00Z", "", 200, false, "", None,
         ).unwrap();
 
         let thread = get_thread_messages(&conn, "<thread-1@example.com>").unwrap();
@@ -720,7 +725,7 @@ mod tests {
             &conn, "INBOX", 1,
             Some("<orig@example.com>"), None, None,
             "Hello", "alice@example.com", "Alice", "[]", "[]",
-            "2024-01-01T10:00:00Z", "", 100, false, "",
+            "2024-01-01T10:00:00Z", "", 100, false, "", None,
         ).unwrap();
 
         // A message that references the original only via references_header.
@@ -730,7 +735,7 @@ mod tests {
             Some("<mid@example.com>"),
             Some("<orig@example.com> <mid@example.com>"),
             "Re: Re: Hello", "carol@example.com", "Carol", "[]", "[]",
-            "2024-01-03T10:00:00Z", "", 300, false, "",
+            "2024-01-03T10:00:00Z", "", 300, false, "", None,
         ).unwrap();
 
         let thread = get_thread_messages(&conn, "<orig@example.com>").unwrap();
@@ -746,13 +751,13 @@ mod tests {
 
         // Message 1: original
         upsert_message(&conn, "INBOX", 1, Some("<a@ex>"), None, None,
-            "Hello", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+            "Hello", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
         // Message 2: reply to 1
         upsert_message(&conn, "INBOX", 2, Some("<b@ex>"), Some("<a@ex>"), Some("<a@ex>"),
-            "Re: Hello", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "").unwrap();
+            "Re: Hello", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "", None).unwrap();
         // Message 3: reply to 2, references both
         upsert_message(&conn, "INBOX", 3, Some("<c@ex>"), Some("<b@ex>"), Some("<a@ex> <b@ex>"),
-            "Re: Re: Hello", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "").unwrap();
+            "Re: Re: Hello", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "", None).unwrap();
 
         // Starting from message 2, should find the entire thread (1, 2, 3).
         let thread = get_full_thread(&conn, "<b@ex>", Some("<a@ex>")).unwrap();
@@ -768,11 +773,11 @@ mod tests {
         ensure_folder(&conn, "INBOX");
 
         upsert_message(&conn, "INBOX", 1, Some("<root@ex>"), None, None,
-            "Start", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+            "Start", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
         upsert_message(&conn, "INBOX", 2, Some("<mid@ex>"), Some("<root@ex>"), Some("<root@ex>"),
-            "Re: Start", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "").unwrap();
+            "Re: Start", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "", None).unwrap();
         upsert_message(&conn, "INBOX", 3, Some("<leaf@ex>"), Some("<mid@ex>"), Some("<root@ex> <mid@ex>"),
-            "Re: Re: Start", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "").unwrap();
+            "Re: Re: Start", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "", None).unwrap();
 
         // Starting from the leaf message, should still find entire thread.
         let thread = get_full_thread(&conn, "<leaf@ex>", Some("<root@ex> <mid@ex>")).unwrap();
@@ -785,7 +790,7 @@ mod tests {
         ensure_folder(&conn, "INBOX");
 
         upsert_message(&conn, "INBOX", 1, Some("<solo@ex>"), None, None,
-            "Solo", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "").unwrap();
+            "Solo", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
 
         let thread = get_full_thread(&conn, "<solo@ex>", None).unwrap();
         assert_eq!(thread.len(), 1);
