@@ -739,6 +739,7 @@
                 in_reply_to: None,
                 references: None,
                 cc: vec![],
+                reaction: None,
             },
             ImapMessageHeader {
                 uid: 2,
@@ -759,6 +760,7 @@
                 in_reply_to: None,
                 references: None,
                 cc: vec![],
+                reaction: None,
             },
         ]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
@@ -828,6 +830,7 @@
                 in_reply_to: None,
                 references: None,
                 cc: vec![],
+                reaction: None,
             }])
             .with_bodies(vec![ImapMessageBody {
                 uid: 42,
@@ -921,7 +924,7 @@
             .unwrap();
         crate::db::messages::upsert_message(
             &conn, "INBOX", 1, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "",
+            "2024-01-01", "", 0, false, "", None,
         )
         .unwrap();
         drop(conn);
@@ -977,7 +980,7 @@
             .unwrap();
         crate::db::messages::upsert_message(
             &conn, "INBOX", 42, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "",
+            "2024-01-01", "", 0, false, "", None,
         )
         .unwrap();
         drop(conn);
@@ -1033,7 +1036,7 @@
             .unwrap();
         crate::db::messages::upsert_message(
             &conn, "INBOX", 7, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "",
+            "2024-01-01", "", 0, false, "", None,
         )
         .unwrap();
         drop(conn);

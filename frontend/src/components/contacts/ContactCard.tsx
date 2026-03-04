@@ -1,8 +1,14 @@
 "use client";
 
-import { Trash2, Building2, Mail, StickyNote, Clock, Tag } from "lucide-react";
+import { Trash2, Building2, Mail, StickyNote, Clock, Tag, Users, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Contact } from "@/types/contact";
+import type { Contact, ContactGroup } from "@/types/contact";
+import {
+  useAddGroupMember,
+  useRemoveGroupMember,
+} from "@/hooks/useContactGroups";
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/api";
 
 function formatDate(dateStr: string): string {
   try {
@@ -59,9 +65,59 @@ interface ContactCardProps {
   contact: Contact;
   onDelete: (id: string) => void;
   isDeleting: boolean;
+  groups?: ContactGroup[];
+  activeGroupId?: string | null;
 }
 
-export function ContactCard({ contact, onDelete, isDeleting }: ContactCardProps) {
+interface ContactGroupsResponse {
+  groups: ContactGroup[];
+}
+
+export function ContactCard({
+  contact,
+  onDelete,
+  isDeleting,
+  groups = [],
+  activeGroupId,
+}: ContactCardProps) {
+  const addMember = useAddGroupMember();
+  const removeMember = useRemoveGroupMember();
+
+  // Fetch which groups this contact belongs to
+  const { data: contactGroupsData } = useQuery({
+    queryKey: ["contact-groups-for", contact.id],
+    queryFn: async () => {
+      // We don't have a direct endpoint, so derive from the groups list
+      // by checking membership. For efficiency, we use the group members endpoint.
+      // But since that's per-group, let's just use a simple approach:
+      // check all groups' member lists. This is fine for small group counts.
+      const membershipResults = await Promise.all(
+        groups.map(async (g) => {
+          try {
+            const res = await apiGet<{ members: Contact[] }>(
+              `/contact-groups/${g.id}/members`,
+            );
+            const isMember = res.members.some((m) => m.id === contact.id);
+            return { groupId: g.id, isMember };
+          } catch {
+            return { groupId: g.id, isMember: false };
+          }
+        }),
+      );
+      return membershipResults;
+    },
+    enabled: groups.length > 0,
+  });
+
+  const memberGroupIds = new Set(
+    contactGroupsData
+      ?.filter((r) => r.isMember)
+      .map((r) => r.groupId) ?? [],
+  );
+
+  const memberGroups = groups.filter((g) => memberGroupIds.has(g.id));
+  const nonMemberGroups = groups.filter((g) => !memberGroupIds.has(g.id));
+
   return (
     <div className="rounded-lg border border-border bg-card p-6">
       <div className="flex items-start gap-4">
@@ -111,6 +167,69 @@ export function ContactCard({ contact, onDelete, isDeleting }: ContactCardProps)
               <Tag className="size-4 shrink-0" />
               <span className="capitalize">{contact.source}</span>
             </div>
+
+            {/* Groups section */}
+            {groups.length > 0 && (
+              <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                <Users className="size-4 shrink-0 mt-0.5" />
+                <div className="flex flex-wrap gap-1">
+                  {memberGroups.map((g) => (
+                    <span
+                      key={g.id}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                    >
+                      {g.name}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          removeMember.mutate({
+                            groupId: g.id,
+                            contactId: contact.id,
+                          })
+                        }
+                        className="rounded-full p-0.5 hover:bg-primary/20"
+                        title={`Remove from ${g.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {nonMemberGroups.length > 0 && (
+                    <div className="relative group">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/30 px-2 py-0.5 text-xs text-muted-foreground hover:border-primary hover:text-primary"
+                      >
+                        <Plus className="size-3" />
+                        Add to group
+                      </button>
+                      <div className="absolute left-0 top-full z-10 mt-1 hidden min-w-[140px] rounded-md border border-border bg-popover p-1 shadow-md group-hover:block">
+                        {nonMemberGroups.map((g) => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() =>
+                              addMember.mutate({
+                                groupId: g.id,
+                                contactId: contact.id,
+                              })
+                            }
+                            className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs text-foreground hover:bg-accent"
+                          >
+                            {g.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {memberGroups.length === 0 && nonMemberGroups.length === 0 && (
+                    <span className="text-xs text-muted-foreground/60">
+                      No groups
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center gap-4 text-xs text-muted-foreground/70">
               <div className="flex items-center gap-1">

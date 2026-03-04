@@ -19,6 +19,7 @@ import {
   useDeleteMessage,
 } from "@/hooks/useMessages";
 import { MoveToFolderMenu } from "./MoveToFolderMenu";
+import { TagPicker } from "./TagPicker";
 import { Button } from "@/components/ui/button";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -59,7 +60,6 @@ function formatAddressList(addresses: EmailAddress[]): string {
 export function MessageActionBar() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
-  const selectMessage = useUiStore((s) => s.selectMessage);
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
   const deleteMessage = useDeleteMessage();
@@ -145,32 +145,20 @@ export function MessageActionBar() {
   const handleDelete = () => {
     if (!data) return;
     if (activeFolder === "Trash") {
-      deleteMessage.mutate(
-        { folder: activeFolder, uid: data.uid },
-        { onSuccess: () => selectMessage(null) },
-      );
+      deleteMessage.mutate({ folder: activeFolder, uid: data.uid });
     } else {
-      moveMessage.mutate(
-        { fromFolder: activeFolder, toFolder: "Trash", uid: data.uid },
-        { onSuccess: () => selectMessage(null) },
-      );
+      moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Trash", uid: data.uid });
     }
   };
 
   const handleArchive = () => {
     if (!data) return;
-    moveMessage.mutate(
-      { fromFolder: activeFolder, toFolder: "Archive", uid: data.uid },
-      { onSuccess: () => selectMessage(null) },
-    );
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Archive", uid: data.uid });
   };
 
   const handleJunk = () => {
     if (!data) return;
-    moveMessage.mutate(
-      { fromFolder: activeFolder, toFolder: "Junk", uid: data.uid },
-      { onSuccess: () => selectMessage(null) },
-    );
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Junk", uid: data.uid });
   };
 
   const handleToggleStar = () => {
@@ -194,7 +182,7 @@ export function MessageActionBar() {
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1">
+    <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1">
       {/* Reply */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply}>
         <Reply className="size-4" />
@@ -236,10 +224,7 @@ export function MessageActionBar() {
         <MoveToFolderMenu
           currentFolder={activeFolder}
           onMove={(toFolder) => {
-            moveMessage.mutate(
-              { fromFolder: activeFolder, toFolder, uid: data.uid },
-              { onSuccess: () => selectMessage(null) },
-            );
+            moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
           }}
         />
       )}
@@ -269,6 +254,11 @@ export function MessageActionBar() {
         )}
         <span className="hidden xl:inline">{isSeen ? "Unread" : "Read"}</span>
       </Button>
+
+      {/* Tags */}
+      {data && (
+        <TagPicker folder={activeFolder} uid={data.uid} />
+      )}
     </div>
   );
 }

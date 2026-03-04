@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { FolderContextMenu } from "@/components/mail/FolderContextMenu";
 import { CreateFolderDialog } from "@/components/mail/CreateFolderDialog";
 import { cn } from "@/lib/utils";
+import { TagSection } from "@/components/mail/TagSection";
 import type { Folder as FolderType } from "@/types/folder";
 
 /** Map raw folder names to user-friendly display names. */
@@ -344,6 +345,9 @@ export function FolderTree() {
               ))}
           </div>
         )}
+
+        {/* Tags section */}
+        <TagSection />
       </nav>
 
       {/* New folder button */}

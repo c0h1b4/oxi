@@ -15,6 +15,9 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useNotifications } from "@/hooks/useNotifications";
 import { WsContext } from "@/lib/ws-context";
 import { NotificationBanner } from "@/components/shared/NotificationBanner";
+import { KeyboardShortcuts } from "@/components/shared/KeyboardShortcuts";
+import { CommandPalette } from "@/components/shared/CommandPalette";
+import { PreferencesLoader } from "@/components/PreferencesLoader";
 
 export default function MailPage() {
   const viewMode = useUiStore((s) => s.viewMode);
@@ -58,8 +61,11 @@ export default function MailPage() {
 
   return (
     <WsContext.Provider value={wsContextValue}>
+      <PreferencesLoader />
       {showBanner && <NotificationBanner onEnable={requestPermission} onDismiss={dismissBanner} />}
       {content}
+      <KeyboardShortcuts />
+      <CommandPalette />
     </WsContext.Provider>
   );
 }

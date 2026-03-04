@@ -604,7 +604,7 @@ async fn fetch_and_store_headers(
     let fetches: Option<Vec<_>> = match session
         .uid_fetch(
             uid_range,
-            "(UID ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (Message-ID In-Reply-To References)])",
+            "(UID ENVELOPE FLAGS BODYSTRUCTURE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (Message-ID In-Reply-To References Content-Class x-ms-exchange-generated-message-class)])",
         )
         .await
     {
@@ -699,6 +699,28 @@ async fn fetch_and_store_headers(
                     .or_else(|| val.as_text().map(|s| format!("<{s}>")))
             });
 
+            // Detect Outlook/Exchange reaction emails from headers.
+            let reaction = raw_header_bytes.and_then(|raw| {
+                let header_str = std::str::from_utf8(raw).ok()?;
+                let lower = header_str.to_lowercase();
+                let is_reaction = lower.contains("content-class: activitynotification")
+                    || lower.contains("urn:content-class:reaction");
+                if !is_reaction {
+                    return None;
+                }
+                let subj = subject.as_deref().unwrap_or("").to_lowercase();
+                let emoji = match subj.trim() {
+                    s if s.contains("like") => "\u{1f44d}",
+                    s if s.contains("heart") || s.contains("love") => "\u{2764}\u{fe0f}",
+                    s if s.contains("laugh") => "\u{1f604}",
+                    s if s.contains("surprised") || s.contains("wow") => "\u{1f62e}",
+                    s if s.contains("sad") => "\u{1f622}",
+                    s if s.contains("angry") => "\u{1f620}",
+                    _ => "\u{1f44d}",
+                };
+                Some(emoji.to_string())
+            });
+
             let flags: Vec<String> = fetch.flags().map(|f| flag_to_string(&f)).collect();
             let has_attach = fetch
                 .bodystructure()
@@ -731,6 +753,7 @@ async fn fetch_and_store_headers(
                 size,
                 has_attach,
                 "",
+                reaction.as_deref(),
             ) {
                 tracing::warn!(uid = uid, error = %e, "IDLE fetch: failed to upsert message");
             } else {

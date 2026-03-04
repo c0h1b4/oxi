@@ -16,3 +16,11 @@ export interface ContactsResponse {
   contacts: Contact[];
   total: number;
 }
+
+export interface ContactGroup {
+  id: string;
+  name: string;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}

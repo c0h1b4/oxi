@@ -40,6 +40,8 @@ function saveSettings(settings: Partial<PersistedSettings>) {
   }
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
 interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
@@ -47,18 +49,24 @@ interface UiState {
   messageListWidth: number;
   readingPaneVisible: boolean;
   density: "compact" | "comfortable";
+  theme: ThemeMode;
   searchQuery: string;
   searchActive: boolean;
   viewMode: "mail" | "contacts" | "settings";
   selectedMessageUids: number[];
   bulkSelectMode: boolean;
+  activeTagId: string | null;
+  shortcutsOpen: boolean;
+  commandPaletteOpen: boolean;
 
+  setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
   selectMessage: (uid: number | null) => void;
   setSidebarWidth: (width: number) => void;
   setMessageListWidth: (width: number) => void;
   setReadingPaneVisible: (visible: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
+  setTheme: (theme: ThemeMode) => void;
   setSearchQuery: (query: string) => void;
   setSearchActive: (active: boolean) => void;
   clearSearch: () => void;
@@ -67,6 +75,8 @@ interface UiState {
   selectAllMessages: (uids: number[]) => void;
   clearBulkSelection: () => void;
   setBulkSelectMode: (mode: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
 const initial = loadSettings();
@@ -78,14 +88,20 @@ export const useUiStore = create<UiState>((set) => ({
   messageListWidth: initial.messageListWidth,
   readingPaneVisible: true,
   density: "comfortable",
+  theme: "system",
   searchQuery: "",
   searchActive: false,
   viewMode: "mail",
   selectedMessageUids: [],
   bulkSelectMode: false,
+  activeTagId: null,
+  shortcutsOpen: false,
+  commandPaletteOpen: false,
 
+  setActiveTag: (tagId) =>
+    set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   setActiveFolder: (folder) =>
-    set({ activeFolder: folder, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
+    set({ activeFolder: folder, activeTagId: null, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   selectMessage: (uid) => set({ selectedMessageUid: uid }),
   setSidebarWidth: (width) => {
     saveSettings({ sidebarWidth: width });
@@ -97,6 +113,7 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
   setDensity: (density) => set({ density }),
+  setTheme: (theme) => set({ theme }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
   clearSearch: () => set({ searchQuery: "", searchActive: false }),
@@ -116,4 +133,6 @@ export const useUiStore = create<UiState>((set) => ({
   clearBulkSelection: () => set({ selectedMessageUids: [], bulkSelectMode: false }),
   setBulkSelectMode: (mode) =>
     set({ bulkSelectMode: mode, selectedMessageUids: mode ? [] : [] }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 }));

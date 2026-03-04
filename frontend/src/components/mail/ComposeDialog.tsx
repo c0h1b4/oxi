@@ -23,7 +23,6 @@ import {
   useDeleteAttachment,
   useDeleteDraft,
 } from "@/hooks/useCompose";
-import { RichTextEditor } from "@/components/mail/RichTextEditor";
 import { useIdentities } from "@/hooks/useIdentities";
 import { cn } from "@/lib/utils";
 import {
@@ -34,6 +33,13 @@ import {
   DiscardAlertDialog,
   AttachmentPreviewDialog,
 } from "./ComposeDialog/index";
+import { RecipientInput } from "./ComposeDialog/RecipientInput";
+import dynamic from "next/dynamic";
+
+const RichTextEditor = dynamic(
+  () => import("@/components/mail/RichTextEditor").then((mod) => mod.RichTextEditor),
+  { ssr: false }
+);
 
 export function ComposeDialog() {
   const {
@@ -553,13 +559,11 @@ export function ComposeDialog() {
                 <label className="w-12 shrink-0 text-xs text-muted-foreground">
                   To
                 </label>
-                <input
-                  ref={toInputRef}
-                  type="text"
+                <RecipientInput
+                  inputRef={toInputRef}
                   value={to}
-                  onChange={(e) => setField("to", e.target.value)}
+                  onChange={(v) => setField("to", v)}
                   placeholder="Recipients"
-                  className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
                 />
                 <button
                   className="ml-2 text-xs text-muted-foreground hover:text-foreground"
@@ -585,11 +589,9 @@ export function ComposeDialog() {
                   <label className="w-12 shrink-0 text-xs text-muted-foreground">
                     Cc
                   </label>
-                  <input
-                    type="text"
+                  <RecipientInput
                     value={cc}
-                    onChange={(e) => setField("cc", e.target.value)}
-                    className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
+                    onChange={(v) => setField("cc", v)}
                   />
                 </div>
               )}
@@ -599,11 +601,9 @@ export function ComposeDialog() {
                   <label className="w-12 shrink-0 text-xs text-muted-foreground">
                     Bcc
                   </label>
-                  <input
-                    type="text"
+                  <RecipientInput
                     value={bcc}
-                    onChange={(e) => setField("bcc", e.target.value)}
-                    className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
+                    onChange={(v) => setField("bcc", v)}
                   />
                 </div>
               )}

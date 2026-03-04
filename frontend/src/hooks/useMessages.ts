@@ -90,15 +90,25 @@ export function useMoveMessage() {
         uid,
       }),
     onMutate: async ({ fromFolder, toFolder, uid }) => {
-      // If the moved message is currently being read, deselect it.
+      // Auto-advance: if the moved message is selected, select the next (or previous) message.
       const { selectedMessageUid, selectMessage } = useUiStore.getState();
       if (selectedMessageUid === uid) {
-        selectMessage(null);
+        const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(["messages", fromFolder]);
+        if (prev) {
+          const allMessages = prev.pages.flatMap((p) => p.messages);
+          const idx = allMessages.findIndex((m) => m.uid === uid);
+          const nextMsg = allMessages[idx + 1] ?? allMessages[idx - 1] ?? null;
+          selectMessage(nextMsg?.uid ?? null);
+        } else {
+          selectMessage(null);
+        }
       }
 
       // Cancel in-flight fetches so they don't overwrite our optimistic update.
-      await queryClient.cancelQueries({ queryKey: ["messages", fromFolder] });
-      await queryClient.cancelQueries({ queryKey: ["messages", toFolder] });
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["messages", fromFolder] }),
+        queryClient.cancelQueries({ queryKey: ["messages", toFolder] })
+      ]);
 
       const prevFrom = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
         ["messages", fromFolder],
@@ -145,10 +155,10 @@ export function useMoveMessage() {
             pages: prevTo.pages.map((page, i) =>
               i === 0
                 ? {
-                    ...page,
-                    messages: [entry, ...page.messages],
-                    total_count: page.total_count + 1,
-                  }
+                  ...page,
+                  messages: [entry, ...page.messages],
+                  total_count: page.total_count + 1,
+                }
                 : { ...page, total_count: page.total_count + 1 },
             ),
           },
@@ -181,10 +191,18 @@ export function useDeleteMessage() {
     mutationFn: ({ folder, uid }: { folder: string; uid: number }) =>
       apiDelete(`/messages/${encodeURIComponent(folder)}/${uid}`),
     onMutate: async ({ folder, uid }) => {
-      // Clear reading pane / bulk selection if this message is active.
+      // Auto-advance: if the deleted message is selected, select the next (or previous) message.
       const { selectedMessageUid, selectMessage } = useUiStore.getState();
       if (selectedMessageUid === uid) {
-        selectMessage(null);
+        const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(["messages", folder]);
+        if (prev) {
+          const allMessages = prev.pages.flatMap((p) => p.messages);
+          const idx = allMessages.findIndex((m) => m.uid === uid);
+          const nextMsg = allMessages[idx + 1] ?? allMessages[idx - 1] ?? null;
+          selectMessage(nextMsg?.uid ?? null);
+        } else {
+          selectMessage(null);
+        }
       }
 
       // Optimistic removal from cache.
