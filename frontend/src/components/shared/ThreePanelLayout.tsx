@@ -73,6 +73,7 @@ export function ThreePanelLayout({
   const setMessageListWidth = useUiStore((s) => s.setMessageListWidth);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const searchActive = useUiStore((s) => s.searchActive);
+  const readingPaneVisible = useUiStore((s) => s.readingPaneVisible);
 
   const handleSidebarDrag = useCallback(
     (delta: number) => {
@@ -108,8 +109,12 @@ export function ThreePanelLayout({
 
       {/* Center panel — search bar + message list or search results */}
       <main
-        className="flex shrink-0 flex-col overflow-hidden border-x border-border"
-        style={{ width: messageListWidth }}
+        className={
+          readingPaneVisible
+            ? "flex shrink-0 flex-col overflow-hidden border-x border-border"
+            : "flex min-w-0 flex-1 flex-col overflow-hidden border-l border-border"
+        }
+        style={readingPaneVisible ? { width: messageListWidth } : undefined}
       >
         <SearchBar />
         {searchActive ? (
@@ -120,21 +125,23 @@ export function ThreePanelLayout({
       </main>
 
       {/* Resize handle: message list | reading pane */}
-      <ResizeHandle onDrag={handleMessageListDrag} />
+      {readingPaneVisible && <ResizeHandle onDrag={handleMessageListDrag} />}
 
       {/* Right panel — action bar + reading pane (fills remaining space) */}
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <MessageActionBar />
-        {selectedMessageUid !== null ? (
-          <div className="flex min-h-0 flex-1">{readingPane}</div>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
-              oxi<span className="text-primary/40">.email</span>
-            </span>
-          </div>
-        )}
-      </section>
+      {readingPaneVisible && (
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <MessageActionBar />
+          {selectedMessageUid !== null ? (
+            <div className="flex min-h-0 flex-1">{readingPane}</div>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
+                oxi<span className="text-primary/40">.email</span>
+              </span>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

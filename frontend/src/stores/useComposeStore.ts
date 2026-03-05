@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { useUiStore } from "@/stores/useUiStore";
 
 export interface ReplyParams {
   to: string;
@@ -10,11 +11,13 @@ export interface ReplyParams {
   inReplyTo: string | null;
   references: string | null;
   fromIdentityId?: number | null;
+  isHtml?: boolean;
 }
 
 export interface ForwardParams {
   subject: string;
   body: string;
+  isHtml?: boolean;
 }
 
 export interface DraftResumeParams {
@@ -27,6 +30,7 @@ export interface DraftResumeParams {
   inReplyTo: string | null;
   references: string | null;
   attachments: ComposeAttachment[];
+  isHtml?: boolean;
 }
 
 export interface ComposeAttachment {
@@ -50,6 +54,7 @@ interface ComposeState {
   showBcc: boolean;
   attachments: ComposeAttachment[];
   fromIdentityId: number | null;
+  isHtml: boolean;
 
   openCompose: () => void;
   openReply: (params: ReplyParams) => void;
@@ -61,6 +66,7 @@ interface ComposeState {
   setShowBcc: (show: boolean) => void;
   setDraftId: (id: string) => void;
   setFromIdentityId: (id: number | null) => void;
+  setIsHtml: (v: boolean) => void;
   addAttachments: (atts: ComposeAttachment[]) => void;
   removeAttachment: (id: string) => void;
   reset: () => void;
@@ -80,12 +86,17 @@ const initialState = {
   showBcc: false,
   attachments: [] as ComposeAttachment[],
   fromIdentityId: null as number | null,
+  isHtml: true,
 };
 
 export const useComposeStore = create<ComposeState>((set) => ({
   ...initialState,
 
-  openCompose: () => set({ ...initialState, isOpen: true }),
+  openCompose: () => set({
+    ...initialState,
+    isOpen: true,
+    isHtml: useUiStore.getState().composeFormat !== "text",
+  }),
 
   openReply: (params) =>
     set({
@@ -99,6 +110,7 @@ export const useComposeStore = create<ComposeState>((set) => ({
       references: params.references,
       showCc: params.cc.length > 0,
       fromIdentityId: params.fromIdentityId ?? null,
+      isHtml: params.isHtml ?? true,
     }),
 
   openForward: (params) =>
@@ -107,6 +119,7 @@ export const useComposeStore = create<ComposeState>((set) => ({
       isOpen: true,
       subject: params.subject,
       body: params.body,
+      isHtml: params.isHtml ?? true,
     }),
 
   openDraft: (params) =>
@@ -124,6 +137,7 @@ export const useComposeStore = create<ComposeState>((set) => ({
       showCc: params.cc.length > 0,
       showBcc: params.bcc.length > 0,
       attachments: params.attachments,
+      isHtml: params.isHtml ?? true,
     }),
 
   closeCompose: () => set({ isOpen: false }),
@@ -136,6 +150,8 @@ export const useComposeStore = create<ComposeState>((set) => ({
   setDraftId: (id) => set({ draftId: id }),
 
   setFromIdentityId: (id) => set({ fromIdentityId: id }),
+
+  setIsHtml: (v) => set({ isHtml: v }),
 
   addAttachments: (atts) =>
     set((state) => ({ attachments: [...state.attachments, ...atts] })),

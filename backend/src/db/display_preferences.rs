@@ -6,6 +6,7 @@ pub struct DisplayPreferences {
     pub density: String,
     pub theme: String,
     pub language: String,
+    pub compose_format: String,
     pub updated_at: String,
 }
 
@@ -14,20 +15,22 @@ pub struct UpdateDisplayPreferences {
     pub density: Option<String>,
     pub theme: Option<String>,
     pub language: Option<String>,
+    pub compose_format: Option<String>,
 }
 
 /// Retrieve the singleton display preferences row.
 /// Returns sensible defaults if the row does not yet exist.
 pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> {
     let result = conn.query_row(
-        "SELECT density, theme, language, updated_at FROM display_preferences WHERE id = 1",
+        "SELECT density, theme, language, compose_format, updated_at FROM display_preferences WHERE id = 1",
         [],
         |row| {
             Ok(DisplayPreferences {
                 density: row.get(0)?,
                 theme: row.get(1)?,
                 language: row.get(2)?,
-                updated_at: row.get(3)?,
+                compose_format: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         },
     );
@@ -38,6 +41,7 @@ pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> 
             density: "comfortable".to_string(),
             theme: "system".to_string(),
             language: "en".to_string(),
+            compose_format: "html".to_string(),
             updated_at: String::new(),
         }),
         Err(e) => Err(format!("Failed to get display preferences: {e}")),
@@ -82,6 +86,14 @@ pub fn update_preferences(
         values.push(Box::new(language.clone()));
         idx += 1;
     }
+    if let Some(ref compose_format) = data.compose_format {
+        if compose_format != "html" && compose_format != "text" {
+            return Err(format!("Invalid compose_format: {compose_format}"));
+        }
+        sets.push(format!("compose_format = ?{idx}"));
+        values.push(Box::new(compose_format.clone()));
+        idx += 1;
+    }
 
     if sets.is_empty() {
         return get_preferences(conn);
@@ -114,6 +126,7 @@ mod tests {
         assert_eq!(prefs.density, "comfortable");
         assert_eq!(prefs.theme, "system");
         assert_eq!(prefs.language, "en");
+        assert_eq!(prefs.compose_format, "html");
     }
 
     #[test]
@@ -126,6 +139,7 @@ mod tests {
                 density: Some("compact".to_string()),
                 theme: None,
                 language: None,
+                compose_format: None,
             },
         )
         .unwrap();
@@ -145,6 +159,7 @@ mod tests {
                 density: None,
                 theme: Some("dark".to_string()),
                 language: None,
+                compose_format: None,
             },
         )
         .unwrap();
@@ -163,6 +178,7 @@ mod tests {
                 density: Some("compact".to_string()),
                 theme: Some("light".to_string()),
                 language: Some("en".to_string()),
+                compose_format: None,
             },
         )
         .unwrap();
@@ -182,6 +198,7 @@ mod tests {
                 density: Some("invalid".to_string()),
                 theme: None,
                 language: None,
+                compose_format: None,
             },
         );
 
@@ -199,11 +216,49 @@ mod tests {
                 density: None,
                 theme: Some("rainbow".to_string()),
                 language: None,
+                compose_format: None,
             },
         );
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid theme"));
+    }
+
+    #[test]
+    fn test_update_compose_format() {
+        let conn = open_test_db();
+
+        let prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: Some("text".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(prefs.compose_format, "text");
+        assert_eq!(prefs.density, "comfortable");
+    }
+
+    #[test]
+    fn test_invalid_compose_format_rejected() {
+        let conn = open_test_db();
+
+        let result = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: Some("markdown".to_string()),
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid compose_format"));
     }
 
     #[test]
@@ -216,6 +271,7 @@ mod tests {
                 density: None,
                 theme: None,
                 language: None,
+                compose_format: None,
             },
         )
         .unwrap();

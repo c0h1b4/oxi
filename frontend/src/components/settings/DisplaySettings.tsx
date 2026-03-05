@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { Loader2, Monitor, Moon, Sun } from "lucide-react";
+import { Code2, FileText, Loader2, Monitor, Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 import {
   useDisplayPreferences,
@@ -56,6 +56,7 @@ export function DisplaySettings() {
   const updatePrefs = useUpdateDisplayPreferences();
   const setDensity = useUiStore((s) => s.setDensity);
   const setTheme = useUiStore((s) => s.setTheme);
+  const setComposeFormat = useUiStore((s) => s.setComposeFormat);
 
   const handleDensityChange = useCallback(
     (density: "compact" | "comfortable") => {
@@ -79,14 +80,26 @@ export function DisplaySettings() {
     [setTheme, updatePrefs],
   );
 
+  const handleComposeFormatChange = useCallback(
+    (compose_format: "html" | "text") => {
+      setComposeFormat(compose_format);
+      updatePrefs.mutate(
+        { compose_format },
+        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+      );
+    },
+    [setComposeFormat, updatePrefs],
+  );
+
   const handleReset = useCallback(() => {
     setDensity("comfortable");
     setTheme("system");
+    setComposeFormat("html");
     updatePrefs.mutate(
-      { density: "comfortable", theme: "system", language: "en" },
+      { density: "comfortable", theme: "system", language: "en", compose_format: "html" },
       { onError: (e) => toast.error(`Failed to reset: ${e.message}`) },
     );
-  }, [setDensity, setTheme, updatePrefs]);
+  }, [setDensity, setTheme, setComposeFormat, updatePrefs]);
 
   if (isLoading) {
     return (
@@ -130,6 +143,17 @@ export function DisplaySettings() {
             { value: "system", label: "System", icon: <Monitor className="size-3.5" /> },
           ]}
           onChange={handleThemeChange}
+        />
+
+        <SegmentedControl
+          label="Compose format"
+          description="Default format for new emails"
+          value={prefs.compose_format}
+          options={[
+            { value: "html", label: "HTML", icon: <Code2 className="size-3.5" /> },
+            { value: "text", label: "Plain text", icon: <FileText className="size-3.5" /> },
+          ]}
+          onChange={handleComposeFormatChange}
         />
 
         <div className="flex items-center justify-between rounded-lg border border-border p-4">
