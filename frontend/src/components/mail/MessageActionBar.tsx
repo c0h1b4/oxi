@@ -29,6 +29,8 @@ import {
   buildForwardSubject,
   buildReplyBody,
   buildForwardBody,
+  buildReplyBodyHtml,
+  buildForwardBodyHtml,
   buildReferences,
 } from "@/lib/email-utils";
 import type { EmailAddress } from "@/types/message";
@@ -89,14 +91,18 @@ export function MessageActionBar() {
     const messageId = extractHeader(data.raw_headers, "Message-ID");
     const refs = extractHeader(data.raw_headers, "References");
     const matchedId = findMatchingIdentity(identities, data.to_addresses, data.cc_addresses);
+    const hasHtml = !!(data.html && data.html.trim());
     useComposeStore.getState().openReply({
       to: data.from_address,
       cc: "",
       subject: buildReplySubject(data.subject),
-      body: buildReplyBody(data.text, data.from_address, data.date),
+      body: hasHtml
+        ? buildReplyBodyHtml(data.html!, data.from_address, data.date)
+        : buildReplyBody(data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
       fromIdentityId: matchedId,
+      isHtml: hasHtml,
     });
   };
 
@@ -116,29 +122,31 @@ export function MessageActionBar() {
     );
     const ccList = allRecipients.map((a) => a.address).join(", ");
     const matchedId = findMatchingIdentity(identities, data.to_addresses, data.cc_addresses);
+    const hasHtml = !!(data.html && data.html.trim());
     useComposeStore.getState().openReply({
       to: replyTo,
       cc: ccList,
       subject: buildReplySubject(data.subject),
-      body: buildReplyBody(data.text, data.from_address, data.date),
+      body: hasHtml
+        ? buildReplyBodyHtml(data.html!, data.from_address, data.date)
+        : buildReplyBody(data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
       fromIdentityId: matchedId,
+      isHtml: hasHtml,
     });
   };
 
   const handleForward = () => {
     if (!data) return;
     const toList = formatAddressList(data.to_addresses);
+    const hasHtml = !!(data.html && data.html.trim());
     useComposeStore.getState().openForward({
       subject: buildForwardSubject(data.subject),
-      body: buildForwardBody(
-        data.text,
-        data.from_address,
-        data.date,
-        data.subject,
-        toList,
-      ),
+      body: hasHtml
+        ? buildForwardBodyHtml(data.html!, data.from_address, data.date, data.subject, toList)
+        : buildForwardBody(data.text, data.from_address, data.date, data.subject, toList),
+      isHtml: hasHtml,
     });
   };
 

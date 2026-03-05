@@ -2,7 +2,7 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PenLine, X } from "lucide-react";
+import { PenLine, X, PanelRight } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
 import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
@@ -157,6 +157,25 @@ function DraftItems() {
   );
 }
 
+function ToggleReadingPaneButton() {
+  const visible = useUiStore((s) => s.readingPaneVisible);
+  const setVisible = useUiStore((s) => s.setReadingPaneVisible);
+
+  return (
+    <button
+      type="button"
+      aria-label={visible ? "Hide reading pane" : "Show reading pane"}
+      onClick={() => setVisible(!visible)}
+      className={cn(
+        "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent",
+        !visible && "text-primary",
+      )}
+    >
+      <PanelRight className="size-3.5" />
+    </button>
+  );
+}
+
 export function MessageList() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const activeTagId = useUiStore((s) => s.activeTagId);
@@ -166,6 +185,7 @@ export function MessageList() {
   const showDrafts = !activeTagId && isDraftsFolder(activeFolder);
   const selectedMessageUids = useUiStore((s) => s.selectedMessageUids);
   const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
+  const keyboardNav = useUiStore((s) => s.keyboardNav);
   const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
   const selectAllMessages = useUiStore((s) => s.selectAllMessages);
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
@@ -178,6 +198,7 @@ export function MessageList() {
   const isTagView = !!activeTagId;
   const data = isTagView ? undefined : folderQuery.data;
   const isLoading = isTagView ? tagQuery.isLoading : folderQuery.isLoading;
+  const isFetching = isTagView ? tagQuery.isFetching : folderQuery.isFetching;
   const isError = isTagView ? tagQuery.isError : folderQuery.isError;
   const refetch = isTagView ? tagQuery.refetch : folderQuery.refetch;
   const fetchNextPage = folderQuery.fetchNextPage;
@@ -191,6 +212,7 @@ export function MessageList() {
   const totalCount = isTagView
     ? (tagQuery.data?.total_count ?? 0)
     : (data?.pages[0]?.total_count ?? 0);
+  const isSyncing = data?.pages[0]?.syncing ?? false;
 
   // Resolve tag name for header display.
   const activeTagName = tagsData?.tags.find((t) => t.id === activeTagId)?.name;
@@ -205,6 +227,29 @@ export function MessageList() {
     estimateSize: () => rowHeight,
     overscan: 10,
   });
+
+  // Scroll the virtualizer to keep the keyboard-selected message visible
+  // with a 3-row buffer so the user can preview upcoming messages.
+  useEffect(() => {
+    if (selectedMessageUid == null) return;
+    const idx = messages.findIndex((m) => m.uid === selectedMessageUid);
+    if (idx < 0) return;
+
+    const scrollEl = parentRef.current;
+    if (!scrollEl) return;
+
+    const itemTop = idx * rowHeight;
+    const itemBottom = itemTop + rowHeight;
+    const viewTop = scrollEl.scrollTop;
+    const viewBottom = viewTop + scrollEl.clientHeight;
+    const buffer = rowHeight * 3;
+
+    if (itemTop < viewTop + buffer) {
+      scrollEl.scrollTop = Math.max(0, itemTop - buffer);
+    } else if (itemBottom > viewBottom - buffer) {
+      scrollEl.scrollTop = itemBottom - scrollEl.clientHeight + buffer;
+    }
+  }, [selectedMessageUid, messages, rowHeight]);
 
   // Fetch next page when scrolling near the bottom.
   const virtualItems = virtualizer.getVirtualItems();
@@ -308,16 +353,27 @@ export function MessageList() {
             {isTagView ? `Tag: ${activeTagName ?? "..."}` : formatFolderName(activeFolder)}
           </h2>
         </div>
-        <span className="text-xs text-muted-foreground">
-          {isLoading ? "\u2026" : `${totalCount} messages`}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">
+            {isLoading && !data ? "\u2026" : `${totalCount} messages`}
+          </span>
+          {isSyncing && (
+            <span className="animate-pulse text-xs text-primary">syncing…</span>
+          )}
+          <ToggleReadingPaneButton />
+        </div>
       </div>
 
       {/* Bulk action bar */}
       <BulkActionBar />
 
-      {/* Loading state */}
-      {isLoading && (
+      {/* Non-blocking refetch indicator */}
+      {isFetching && !isLoading && messages.length > 0 && (
+        <div className="h-0.5 shrink-0 animate-pulse bg-primary/30" />
+      )}
+
+      {/* Loading state (true initial load only) */}
+      {isLoading && !data && (
         <SkeletonRows count={8} height={rowHeight} />
       )}
 
@@ -342,7 +398,11 @@ export function MessageList() {
 
       {/* Scrollable content: drafts + virtualized message list */}
       {!isLoading && !isError && (showDrafts || messages.length > 0) && (
-        <div ref={parentRef} className="flex-1 overflow-y-auto">
+        <div
+          ref={parentRef}
+          className="flex-1 overflow-y-auto"
+          onMouseMove={keyboardNav ? () => useUiStore.getState().setKeyboardNav(false) : undefined}
+        >
           {/* Local drafts at top of the Drafts folder */}
           {showDrafts && <DraftItems />}
 
@@ -377,6 +437,7 @@ export function MessageList() {
                       bulkSelectMode={bulkSelectMode}
                       isBulkSelected={selectedMessageUids.includes(message.uid)}
                       onBulkToggle={toggleBulkSelect}
+                      suppressHover={keyboardNav}
                     />
                   </div>
                 );

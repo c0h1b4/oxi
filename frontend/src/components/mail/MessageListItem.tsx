@@ -31,6 +31,7 @@ interface MessageListItemProps {
   bulkSelectMode: boolean;
   isBulkSelected: boolean;
   onBulkToggle: (uid: number) => void;
+  suppressHover?: boolean;
 }
 
 function formatDate(dateStr: string): string {
@@ -102,6 +103,7 @@ export const MessageListItem = memo(function MessageListItem({
   bulkSelectMode,
   isBulkSelected,
   onBulkToggle,
+  suppressHover,
 }: MessageListItemProps) {
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
@@ -172,10 +174,10 @@ export const MessageListItem = memo(function MessageListItem({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={cn(
-          "flex h-9 cursor-pointer items-center gap-2 border-b border-border px-3 text-sm transition-colors",
-          "hover:bg-muted",
+          "flex h-9 cursor-pointer items-center gap-2 border-b border-border px-3 text-sm outline-none transition-colors",
+          !suppressHover && "hover:bg-muted",
           isUnread ? "bg-background font-semibold" : "bg-transparent font-normal",
-          isSelected && "bg-accent hover:bg-accent",
+          isSelected && "bg-primary/10 hover:bg-primary/10",
           isDragging && "opacity-50",
         )}
       >
@@ -279,10 +281,10 @@ export const MessageListItem = memo(function MessageListItem({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={cn(
-        "flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 transition-colors",
-        "hover:bg-muted",
+        "flex h-16 cursor-pointer flex-col justify-center border-b border-border px-3 py-1.5 outline-none transition-colors",
+        !suppressHover && "hover:bg-muted",
         isUnread ? "bg-background" : "bg-transparent",
-        isSelected && "bg-accent hover:bg-accent",
+        isSelected && "bg-primary/10 hover:bg-primary/10",
         isDragging && "opacity-50",
       )}
     >
