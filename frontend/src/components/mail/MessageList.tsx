@@ -166,6 +166,7 @@ export function MessageList() {
   const showDrafts = !activeTagId && isDraftsFolder(activeFolder);
   const selectedMessageUids = useUiStore((s) => s.selectedMessageUids);
   const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
+  const keyboardNav = useUiStore((s) => s.keyboardNav);
   const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
   const selectAllMessages = useUiStore((s) => s.selectAllMessages);
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
@@ -205,6 +206,29 @@ export function MessageList() {
     estimateSize: () => rowHeight,
     overscan: 10,
   });
+
+  // Scroll the virtualizer to keep the keyboard-selected message visible
+  // with a 3-row buffer so the user can preview upcoming messages.
+  useEffect(() => {
+    if (selectedMessageUid == null) return;
+    const idx = messages.findIndex((m) => m.uid === selectedMessageUid);
+    if (idx < 0) return;
+
+    const scrollEl = parentRef.current;
+    if (!scrollEl) return;
+
+    const itemTop = idx * rowHeight;
+    const itemBottom = itemTop + rowHeight;
+    const viewTop = scrollEl.scrollTop;
+    const viewBottom = viewTop + scrollEl.clientHeight;
+    const buffer = rowHeight * 3;
+
+    if (itemTop < viewTop + buffer) {
+      scrollEl.scrollTop = Math.max(0, itemTop - buffer);
+    } else if (itemBottom > viewBottom - buffer) {
+      scrollEl.scrollTop = itemBottom - scrollEl.clientHeight + buffer;
+    }
+  }, [selectedMessageUid, messages, rowHeight]);
 
   // Fetch next page when scrolling near the bottom.
   const virtualItems = virtualizer.getVirtualItems();
@@ -342,7 +366,11 @@ export function MessageList() {
 
       {/* Scrollable content: drafts + virtualized message list */}
       {!isLoading && !isError && (showDrafts || messages.length > 0) && (
-        <div ref={parentRef} className="flex-1 overflow-y-auto">
+        <div
+          ref={parentRef}
+          className="flex-1 overflow-y-auto"
+          onMouseMove={keyboardNav ? () => useUiStore.getState().setKeyboardNav(false) : undefined}
+        >
           {/* Local drafts at top of the Drafts folder */}
           {showDrafts && <DraftItems />}
 
@@ -377,6 +405,7 @@ export function MessageList() {
                       bulkSelectMode={bulkSelectMode}
                       isBulkSelected={selectedMessageUids.includes(message.uid)}
                       onBulkToggle={toggleBulkSelect}
+                      suppressHover={keyboardNav}
                     />
                   </div>
                 );

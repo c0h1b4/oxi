@@ -53,7 +53,7 @@ function ResizeHandle({
   return (
     <div
       onMouseDown={onMouseDown}
-      className="group relative z-10 w-0 cursor-col-resize"
+      className="group relative z-10 w-0 cursor-col-resize outline-none"
     >
       {/* Invisible wider hit area */}
       <div className="absolute inset-y-0 -left-1 w-2 group-hover:bg-primary/20 group-active:bg-primary/30" />
@@ -76,18 +76,18 @@ export function ThreePanelLayout({
 
   const handleSidebarDrag = useCallback(
     (delta: number) => {
-      setSidebarWidth(Math.max(140, Math.min(400, sidebarWidth + delta)));
+      const current = useUiStore.getState().sidebarWidth;
+      setSidebarWidth(Math.max(140, Math.min(400, current + delta)));
     },
-    [sidebarWidth, setSidebarWidth],
+    [setSidebarWidth],
   );
 
   const handleMessageListDrag = useCallback(
     (delta: number) => {
-      setMessageListWidth(
-        Math.max(280, Math.min(700, messageListWidth + delta)),
-      );
+      const current = useUiStore.getState().messageListWidth;
+      setMessageListWidth(Math.max(280, Math.min(700, current + delta)));
     },
-    [messageListWidth, setMessageListWidth],
+    [setMessageListWidth],
   );
 
   return (
