@@ -85,6 +85,45 @@ export function buildReferences(
   return `${existingReferences} ${messageId}`;
 }
 
+/**
+ * Build a quoted reply body in HTML from the original HTML content.
+ */
+export function buildReplyBodyHtml(
+  html: string,
+  from: string,
+  date: string,
+): string {
+  const formattedDate = formatQuoteDate(date);
+  return [
+    '<p><br></p>',
+    `<p>On ${formattedDate}, ${from} wrote:</p>`,
+    `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${html}</blockquote>`,
+  ].join("");
+}
+
+/**
+ * Build a forwarded message body in HTML from the original HTML content.
+ */
+export function buildForwardBodyHtml(
+  html: string,
+  from: string,
+  date: string,
+  subject: string,
+  to: string,
+): string {
+  const formattedDate = formatQuoteDate(date);
+  return [
+    '<p><br></p>',
+    '<p>---------- Forwarded message ----------</p>',
+    `<p>From: ${from}<br>`,
+    `Date: ${formattedDate}<br>`,
+    `Subject: ${subject}<br>`,
+    `To: ${to}</p>`,
+    '<hr>',
+    html,
+  ].join("");
+}
+
 // --- Internal helpers ---
 
 function quoteText(text: string): string {

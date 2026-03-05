@@ -26,6 +26,7 @@ export function PreferencesLoader() {
   const { data } = useDisplayPreferences();
   const setDensity = useUiStore((s) => s.setDensity);
   const setTheme = useUiStore((s) => s.setTheme);
+  const setComposeFormat = useUiStore((s) => s.setComposeFormat);
   const theme = useUiStore((s) => s.theme);
 
   // Sync server preferences into store when data arrives
@@ -33,7 +34,8 @@ export function PreferencesLoader() {
     if (!data) return;
     setDensity(data.density);
     setTheme(data.theme);
-  }, [data, setDensity, setTheme]);
+    if (data.compose_format) setComposeFormat(data.compose_format);
+  }, [data, setDensity, setTheme, setComposeFormat]);
 
   // Apply theme class whenever theme changes
   useEffect(() => {

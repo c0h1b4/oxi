@@ -13,6 +13,8 @@ import {
   Maximize2,
   Minimize2,
   Upload,
+  FileText,
+  Code,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useComposeStore } from "@/stores/useComposeStore";
@@ -56,12 +58,14 @@ export function ComposeDialog() {
     showBcc,
     attachments,
     fromIdentityId,
+    isHtml,
     closeCompose,
     setField,
     setShowCc,
     setShowBcc,
     setDraftId,
     setFromIdentityId,
+    setIsHtml,
     addAttachments,
     removeAttachment,
     reset,
@@ -143,8 +147,8 @@ export function ComposeDialog() {
           cc,
           bcc,
           subject,
-          textBody: stripHtml(body),
-          htmlBody: body,
+          textBody: isHtml ? stripHtml(body) : body,
+          htmlBody: isHtml ? body : null,
           inReplyTo: inReplyTo,
           references: references,
         },
@@ -165,6 +169,7 @@ export function ComposeDialog() {
       bcc,
       subject,
       body,
+      isHtml,
       draftId,
       setDraftId,
       inReplyTo,
@@ -190,12 +195,19 @@ export function ComposeDialog() {
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSend = useCallback(() => {
-    const plainText = stripHtml(body);
-    // Convert preview URLs back to cid: references for the email MIME body
-    const sendHtml = body.replace(
-      /\/api\/drafts\/[^/]+\/attachments\/([^/]+)\/content/g,
-      (_match, attId) => `cid:${attId}`
-    );
+    let plainText: string;
+    let sendHtml: string | null;
+    if (isHtml) {
+      plainText = stripHtml(body);
+      // Convert preview URLs back to cid: references for the email MIME body
+      sendHtml = body.replace(
+        /\/api\/drafts\/[^/]+\/attachments\/([^/]+)\/content/g,
+        (_match, attId) => `cid:${attId}`
+      );
+    } else {
+      plainText = body;
+      sendHtml = null;
+    }
     sendMutation.mutate(
       {
         to,
@@ -225,6 +237,7 @@ export function ComposeDialog() {
     bcc,
     subject,
     body,
+    isHtml,
     inReplyTo,
     references,
     draftId,
@@ -459,6 +472,21 @@ export function ComposeDialog() {
     [draftId, setDraftId, uploadMutation, addAttachments]
   );
 
+  const handleToggleHtml = useCallback(() => {
+    if (isHtml) {
+      // HTML → plain text: strip tags
+      setField("body", stripHtml(body));
+    } else {
+      // Plain text → HTML: wrap lines in <p> tags
+      const html = body
+        .split("\n")
+        .map((line) => `<p>${line || "<br>"}</p>`)
+        .join("");
+      setField("body", html);
+    }
+    setIsHtml(!isHtml);
+  }, [isHtml, body, setField, setIsHtml]);
+
   const previewAttachment = previewAttId
     ? attachments.find((a) => a.id === previewAttId)
     : null;
@@ -668,13 +696,22 @@ export function ComposeDialog() {
             )}
 
             {/* Body */}
-            <RichTextEditor
-              content={body}
-              onChange={(html) => setField("body", html)}
-              onImageUpload={handleImageUpload}
-              placeholder="Write your message..."
-              className="flex-1 overflow-auto"
-            />
+            {isHtml ? (
+              <RichTextEditor
+                content={body}
+                onChange={(html) => setField("body", html)}
+                onImageUpload={handleImageUpload}
+                placeholder="Write your message..."
+                className="flex-1 overflow-auto"
+              />
+            ) : (
+              <textarea
+                value={body}
+                onChange={(e) => setField("body", e.target.value)}
+                placeholder="Write your message..."
+                className="flex-1 resize-none overflow-auto bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50"
+              />
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-border px-4 py-3">
@@ -716,6 +753,20 @@ export function ComposeDialog() {
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <Save className="size-4" />
+                  )}
+                </button>
+                <button
+                  onClick={handleToggleHtml}
+                  className={cn(
+                    "rounded-lg p-2 hover:bg-accent hover:text-foreground",
+                    isHtml ? "text-muted-foreground" : "text-primary"
+                  )}
+                  title={isHtml ? "Switch to plain text" : "Switch to rich text"}
+                >
+                  {isHtml ? (
+                    <FileText className="size-4" />
+                  ) : (
+                    <Code className="size-4" />
                   )}
                 </button>
                 <input

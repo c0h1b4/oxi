@@ -2,7 +2,7 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PenLine, X } from "lucide-react";
+import { PenLine, X, PanelRight } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
 import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
@@ -154,6 +154,25 @@ function DraftItems() {
         </div>
       ))}
     </>
+  );
+}
+
+function ToggleReadingPaneButton() {
+  const visible = useUiStore((s) => s.readingPaneVisible);
+  const setVisible = useUiStore((s) => s.setReadingPaneVisible);
+
+  return (
+    <button
+      type="button"
+      aria-label={visible ? "Hide reading pane" : "Show reading pane"}
+      onClick={() => setVisible(!visible)}
+      className={cn(
+        "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent",
+        !visible && "text-primary",
+      )}
+    >
+      <PanelRight className="size-3.5" />
+    </button>
   );
 }
 
@@ -332,9 +351,12 @@ export function MessageList() {
             {isTagView ? `Tag: ${activeTagName ?? "..."}` : formatFolderName(activeFolder)}
           </h2>
         </div>
-        <span className="text-xs text-muted-foreground">
-          {isLoading ? "\u2026" : `${totalCount} messages`}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">
+            {isLoading ? "\u2026" : `${totalCount} messages`}
+          </span>
+          <ToggleReadingPaneButton />
+        </div>
       </div>
 
       {/* Bulk action bar */}
