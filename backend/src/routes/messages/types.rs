@@ -36,6 +36,7 @@ pub(crate) struct ListMessagesResponse {
     pub(crate) total_count: u32,
     pub(crate) page: u32,
     pub(crate) per_page: u32,
+    pub(crate) syncing: bool,
 }
 
 /// A message summary in the list response.

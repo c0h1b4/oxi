@@ -198,6 +198,7 @@ export function MessageList() {
   const isTagView = !!activeTagId;
   const data = isTagView ? undefined : folderQuery.data;
   const isLoading = isTagView ? tagQuery.isLoading : folderQuery.isLoading;
+  const isFetching = isTagView ? tagQuery.isFetching : folderQuery.isFetching;
   const isError = isTagView ? tagQuery.isError : folderQuery.isError;
   const refetch = isTagView ? tagQuery.refetch : folderQuery.refetch;
   const fetchNextPage = folderQuery.fetchNextPage;
@@ -211,6 +212,7 @@ export function MessageList() {
   const totalCount = isTagView
     ? (tagQuery.data?.total_count ?? 0)
     : (data?.pages[0]?.total_count ?? 0);
+  const isSyncing = data?.pages[0]?.syncing ?? false;
 
   // Resolve tag name for header display.
   const activeTagName = tagsData?.tags.find((t) => t.id === activeTagId)?.name;
@@ -353,8 +355,11 @@ export function MessageList() {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">
-            {isLoading ? "\u2026" : `${totalCount} messages`}
+            {isLoading && !data ? "\u2026" : `${totalCount} messages`}
           </span>
+          {isSyncing && (
+            <span className="animate-pulse text-xs text-primary">syncing…</span>
+          )}
           <ToggleReadingPaneButton />
         </div>
       </div>
@@ -362,8 +367,13 @@ export function MessageList() {
       {/* Bulk action bar */}
       <BulkActionBar />
 
-      {/* Loading state */}
-      {isLoading && (
+      {/* Non-blocking refetch indicator */}
+      {isFetching && !isLoading && messages.length > 0 && (
+        <div className="h-0.5 shrink-0 animate-pulse bg-primary/30" />
+      )}
+
+      {/* Loading state (true initial load only) */}
+      {isLoading && !data && (
         <SkeletonRows count={8} height={rowHeight} />
       )}
 
