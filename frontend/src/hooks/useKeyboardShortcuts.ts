@@ -144,6 +144,8 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           if (currentIndex >= 0 && currentIndex < messages.length - 1) {
             selectMessage(messages[currentIndex + 1].uid);
+            (document.activeElement as HTMLElement)?.blur?.();
+            useUiStore.getState().setKeyboardNav(true);
           }
           break;
 
@@ -152,6 +154,8 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           if (currentIndex > 0) {
             selectMessage(messages[currentIndex - 1].uid);
+            (document.activeElement as HTMLElement)?.blur?.();
+            useUiStore.getState().setKeyboardNav(true);
           }
           break;
       }
