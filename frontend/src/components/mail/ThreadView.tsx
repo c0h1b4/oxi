@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, ChevronUp, Paperclip } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import type { MessageHeader } from "@/types/message";
@@ -98,23 +98,37 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
     });
   }
 
+  const [threadExpanded, setThreadExpanded] = useState(true);
+
   // Determine the "main" subject so we can hide it on cards that share it.
   const mainSubject = thread[0]?.subject ?? "";
 
   return (
     <div className="shrink-0 border-b border-border">
       {/* Conversation header */}
-      <div className="flex items-center gap-2 px-4 py-2">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <span className="text-xs font-medium text-muted-foreground">
           Conversation
         </span>
         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
           {thread.length}
         </span>
+        <button
+          type="button"
+          onClick={() => setThreadExpanded((v) => !v)}
+          className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={threadExpanded ? "Collapse conversation" : "Expand conversation"}
+        >
+          {threadExpanded ? (
+            <ChevronDown className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+        </button>
       </div>
 
       {/* Message cards — scrollable with a max height */}
-      <div ref={scrollRef} className="flex max-h-60 flex-col gap-px overflow-y-auto bg-border">
+      {threadExpanded && <div ref={scrollRef} className="flex max-h-60 flex-col gap-px overflow-y-auto bg-border">
         {thread.map((msg) => {
           const isExpanded = expandedUids.has(msg.uid);
           const isCurrent = msg.uid === currentUid;
@@ -238,7 +252,7 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
             </button>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }
