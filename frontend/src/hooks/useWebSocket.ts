@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 export type WsStatus = "connected" | "connecting" | "disconnected";
@@ -36,6 +36,25 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
   const mountedRef = useRef(true);
   const connectRef = useRef<(() => void) | null>(null);
 
+  // Debounce WebSocket-driven cache invalidations (300ms quiet period).
+  const pendingInvalidationsRef = useRef<Set<string>>(new Set());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleInvalidation = useCallback(
+    (key: string) => {
+      pendingInvalidationsRef.current.add(key);
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(() => {
+        for (const k of pendingInvalidationsRef.current) {
+          queryClient.invalidateQueries({ queryKey: k === "folders" ? ["folders"] : ["messages", k] });
+        }
+        pendingInvalidationsRef.current.clear();
+        flushTimerRef.current = null;
+      }, 300);
+    },
+    [queryClient],
+  );
+
   useEffect(() => {
     mountedRef.current = true;
 
@@ -62,22 +81,18 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
           switch (mailEvent.type) {
             case "NewMessages":
               if (mailEvent.data?.folder) {
-                queryClient.invalidateQueries({
-                  queryKey: ["messages", mailEvent.data.folder],
-                });
+                scheduleInvalidation(mailEvent.data.folder);
               }
-              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              scheduleInvalidation("folders");
               break;
             case "FlagsChanged":
               if (mailEvent.data?.folder) {
-                queryClient.invalidateQueries({
-                  queryKey: ["messages", mailEvent.data.folder],
-                });
+                scheduleInvalidation(mailEvent.data.folder);
               }
-              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              scheduleInvalidation("folders");
               break;
             case "FolderUpdated":
-              queryClient.invalidateQueries({ queryKey: ["folders"] });
+              scheduleInvalidation("folders");
               break;
           }
         } catch {
@@ -110,12 +125,15 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
       }
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [queryClient]);
+  }, [queryClient, scheduleInvalidation]);
 
   return { status, failCount };
 }

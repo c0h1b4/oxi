@@ -7,6 +7,7 @@ export interface DisplayPreferences {
   density: "compact" | "comfortable";
   theme: "light" | "dark" | "system";
   language: string;
+  compose_format: "html" | "text";
   updated_at: string;
 }
 
@@ -14,6 +15,7 @@ interface UpdateDisplayPreferences {
   density?: "compact" | "comfortable";
   theme?: "light" | "dark" | "system";
   language?: string;
+  compose_format?: "html" | "text";
 }
 
 export function useDisplayPreferences() {

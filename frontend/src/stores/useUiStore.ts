@@ -58,6 +58,8 @@ interface UiState {
   activeTagId: string | null;
   shortcutsOpen: boolean;
   commandPaletteOpen: boolean;
+  keyboardNav: boolean;
+  composeFormat: "html" | "text";
 
   setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
@@ -77,6 +79,8 @@ interface UiState {
   setBulkSelectMode: (mode: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  setKeyboardNav: (active: boolean) => void;
+  setComposeFormat: (format: "html" | "text") => void;
 }
 
 const initial = loadSettings();
@@ -97,6 +101,8 @@ export const useUiStore = create<UiState>((set) => ({
   activeTagId: null,
   shortcutsOpen: false,
   commandPaletteOpen: false,
+  keyboardNav: false,
+  composeFormat: "html",
 
   setActiveTag: (tagId) =>
     set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -135,4 +141,6 @@ export const useUiStore = create<UiState>((set) => ({
     set({ bulkSelectMode: mode, selectedMessageUids: mode ? [] : [] }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+  setKeyboardNav: (active) => set({ keyboardNav: active }),
+  setComposeFormat: (format) => set({ composeFormat: format }),
 }));
