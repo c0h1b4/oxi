@@ -31,6 +31,7 @@ export function useMessages(folder: string) {
     },
     enabled: !!folder,
     refetchInterval: status === "connected" ? false : 60_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -263,9 +264,7 @@ export function usePrefetchAllFolders(folderNames: string[], activeFolder: strin
       });
     }
 
-    // Re-fetch folders after a delay so updated counts propagate.
-    setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-    }, 5000);
+    // Folder counts are updated by WebSocket events and background sync —
+    // no need for a timer-based invalidation.
   }, [folderNames, activeFolder, queryClient]);
 }

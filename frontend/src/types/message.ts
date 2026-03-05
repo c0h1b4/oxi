@@ -54,6 +54,7 @@ export interface MessagesResponse {
   total_count: number;
   page: number;
   per_page: number;
+  syncing?: boolean;
 }
 
 export interface SearchResultItem {
