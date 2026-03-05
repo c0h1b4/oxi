@@ -160,18 +160,18 @@ pub async fn list_messages(
                 // Spawn background task to fetch the remaining older headers.
                 if recent_start > 1 {
                     let remaining_range = format!("1:{}", recent_start - 1);
-                    tokio::spawn(sync_remaining_headers(
+                    tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
                         creds,
-                        folder.clone(),
-                        imap_client.clone(),
-                        config.clone(),
-                        session.user_hash.clone(),
-                        search_engine.clone(),
-                        event_bus.clone(),
-                        remaining_range,
-                        status.uid_validity,
-                        status.exists,
-                    ));
+                        folder: folder.clone(),
+                        imap_client: imap_client.clone(),
+                        config: config.clone(),
+                        user_hash: session.user_hash.clone(),
+                        search_engine: search_engine.clone(),
+                        event_bus: event_bus.clone(),
+                        uid_range: remaining_range,
+                        uid_validity: status.uid_validity,
+                        exists: status.exists,
+                    }));
                     syncing = true;
                 }
             } else {
@@ -188,18 +188,18 @@ pub async fn list_messages(
                 db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
                     .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-                tokio::spawn(sync_remaining_headers(
+                tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
                     creds,
-                    folder.clone(),
-                    imap_client.clone(),
-                    config.clone(),
-                    session.user_hash.clone(),
-                    search_engine.clone(),
-                    event_bus.clone(),
+                    folder: folder.clone(),
+                    imap_client: imap_client.clone(),
+                    config: config.clone(),
+                    user_hash: session.user_hash.clone(),
+                    search_engine: search_engine.clone(),
+                    event_bus: event_bus.clone(),
                     uid_range,
-                    status.uid_validity,
-                    status.exists,
-                ));
+                    uid_validity: status.uid_validity,
+                    exists: status.exists,
+                }));
                 syncing = true;
             }
         } else {
@@ -326,9 +326,8 @@ fn upsert_and_index_headers(
     Ok(())
 }
 
-/// Background task: fetch remaining headers for a folder and notify the
-/// frontend via EventBus when done. All errors are logged but non-fatal.
-async fn sync_remaining_headers(
+/// Parameters for a background sync task, bundled to avoid too-many-arguments.
+struct BackgroundSyncParams {
     creds: ImapCredentials,
     folder: String,
     imap_client: Arc<dyn ImapClient>,
@@ -339,7 +338,15 @@ async fn sync_remaining_headers(
     uid_range: String,
     uid_validity: u32,
     exists: u32,
-) {
+}
+
+/// Background task: fetch remaining headers for a folder and notify the
+/// frontend via EventBus when done. All errors are logged but non-fatal.
+async fn sync_remaining_headers(params: BackgroundSyncParams) {
+    let BackgroundSyncParams {
+        creds, folder, imap_client, config, user_hash,
+        search_engine, event_bus, uid_range, uid_validity, exists,
+    } = params;
     let result: Result<(), String> = (async {
         tracing::info!(folder = %folder, uid_range = %uid_range, "Background sync: fetching remaining headers");
 
@@ -378,31 +385,31 @@ async fn sync_remaining_headers(
         }
 
         // Index for search.
-        if !UserIndex::is_excluded_folder(&folder) {
-            if let Ok(user_index) = search_engine.open_user_index(&user_hash) {
-                let indexable: Vec<IndexableMessage> = headers
-                    .iter()
-                    .map(|h| {
-                        let from_address = h.from.first().map(|a| a.address.as_str()).unwrap_or("");
-                        let from_name = h.from.first().and_then(|a| a.name.as_deref()).unwrap_or("");
-                        let subject = h.subject.as_deref().unwrap_or("");
-                        let date = h.date.as_deref().unwrap_or("");
-                        let to_json = serde_json::to_string(&h.to).unwrap_or_else(|_| "[]".to_string());
-                        IndexableMessage {
-                            uid: h.uid,
-                            folder: folder.clone(),
-                            subject: subject.to_string(),
-                            from_address: from_address.to_string(),
-                            from_name: from_name.to_string(),
-                            to_addresses: to_json,
-                            body_text: String::new(),
-                            date_epoch: crate::db::messages::parse_date_to_epoch_public(date),
-                            has_attachments: h.has_attachments,
-                        }
-                    })
-                    .collect();
-                let _ = user_index.index_messages_batch(&indexable);
-            }
+        if !UserIndex::is_excluded_folder(&folder)
+            && let Ok(user_index) = search_engine.open_user_index(&user_hash)
+        {
+            let indexable: Vec<IndexableMessage> = headers
+                .iter()
+                .map(|h| {
+                    let from_address = h.from.first().map(|a| a.address.as_str()).unwrap_or("");
+                    let from_name = h.from.first().and_then(|a| a.name.as_deref()).unwrap_or("");
+                    let subject = h.subject.as_deref().unwrap_or("");
+                    let date = h.date.as_deref().unwrap_or("");
+                    let to_json = serde_json::to_string(&h.to).unwrap_or_else(|_| "[]".to_string());
+                    IndexableMessage {
+                        uid: h.uid,
+                        folder: folder.clone(),
+                        subject: subject.to_string(),
+                        from_address: from_address.to_string(),
+                        from_name: from_name.to_string(),
+                        to_addresses: to_json,
+                        body_text: String::new(),
+                        date_epoch: crate::db::messages::parse_date_to_epoch_public(date),
+                        has_attachments: h.has_attachments,
+                    }
+                })
+                .collect();
+            let _ = user_index.index_messages_batch(&indexable);
         }
 
         // Update folder status and unread count.
