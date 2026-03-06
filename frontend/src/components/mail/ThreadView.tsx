@@ -98,7 +98,7 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
     });
   }
 
-  const [threadExpanded, setThreadExpanded] = useState(true);
+  const [threadExpanded, setThreadExpanded] = useState(false);
 
   // Determine the "main" subject so we can hide it on cards that share it.
   const mainSubject = thread[0]?.subject ?? "";
