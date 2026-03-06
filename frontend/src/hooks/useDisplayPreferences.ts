@@ -8,6 +8,7 @@ export interface DisplayPreferences {
   theme: "light" | "dark" | "system";
   language: string;
   compose_format: "html" | "text";
+  deep_index: boolean;
   updated_at: string;
 }
 
@@ -16,6 +17,7 @@ interface UpdateDisplayPreferences {
   theme?: "light" | "dark" | "system";
   language?: string;
   compose_format?: "html" | "text";
+  deep_index?: boolean;
 }
 
 export function useDisplayPreferences() {

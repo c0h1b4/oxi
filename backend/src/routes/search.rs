@@ -38,10 +38,17 @@ pub struct SearchParams {
     /// Offset for pagination (default 0).
     #[serde(default)]
     pub offset: usize,
+    /// Sort order: "date_desc" (default) or "date_asc".
+    #[serde(default = "default_sort")]
+    pub sort: String,
+}
+
+fn default_sort() -> String {
+    "date_desc".to_string()
 }
 
 fn default_limit() -> usize {
-    50
+    10_000
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +112,8 @@ pub async fn search_messages(
         .open_user_index(&session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Search engine error: {e}")))?;
 
+    let sort_order = params.sort.clone();
+
     // Build SearchQuery from params.
     let search_query = SearchQuery {
         text: query_text.clone(),
@@ -119,7 +128,7 @@ pub async fn search_messages(
     };
 
     // Execute search.
-    let (search_results, total_count) = user_index
+    let (search_results, _total_count) = user_index
         .search(&search_query)
         .map_err(|e| AppError::InternalError(format!("Search error: {e}")))?;
 
@@ -128,12 +137,11 @@ pub async fn search_messages(
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Resolve each search result UID into a full SearchResultItem.
+    // Skip entries that no longer exist in SQLite (stale index entries).
     let mut results = Vec::with_capacity(search_results.len());
     for sr in &search_results {
-        let item = if let Ok(Some(msg)) =
-            db::messages::get_single_message(&conn, &sr.folder, sr.uid)
-        {
-            SearchResultItem {
+        if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
+            results.push(SearchResultItem {
                 uid: msg.uid,
                 folder: msg.folder,
                 score: sr.score,
@@ -149,29 +157,21 @@ pub async fn search_messages(
                 } else {
                     sr.snippet.clone()
                 },
-            }
-        } else {
-            // Message not in SQLite cache; return basic info from the index.
-            SearchResultItem {
-                uid: sr.uid,
-                folder: sr.folder.clone(),
-                score: sr.score,
-                subject: String::new(),
-                from_address: String::new(),
-                from_name: String::new(),
-                to_addresses: String::new(),
-                date: String::new(),
-                flags: String::new(),
-                has_attachments: false,
-                snippet: sr.snippet.clone(),
-            }
-        };
-        results.push(item);
+            });
+        }
     }
 
+    // Sort results by date.
+    let sort_asc = sort_order == "date_asc";
+    results.sort_by(|a, b| {
+        let da = crate::db::messages::parse_date_to_epoch_public(&a.date);
+        let db = crate::db::messages::parse_date_to_epoch_public(&b.date);
+        if sort_asc { da.cmp(&db) } else { db.cmp(&da) }
+    });
+
     Ok(Json(SearchResponse {
+        total_count: results.len(),
         results,
-        total_count,
         query: query_text,
     })
     .into_response())

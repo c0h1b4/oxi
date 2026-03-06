@@ -7,6 +7,7 @@ pub struct DisplayPreferences {
     pub theme: String,
     pub language: String,
     pub compose_format: String,
+    pub deep_index: bool,
     pub updated_at: String,
 }
 
@@ -16,21 +17,24 @@ pub struct UpdateDisplayPreferences {
     pub theme: Option<String>,
     pub language: Option<String>,
     pub compose_format: Option<String>,
+    pub deep_index: Option<bool>,
 }
 
 /// Retrieve the singleton display preferences row.
 /// Returns sensible defaults if the row does not yet exist.
 pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> {
     let result = conn.query_row(
-        "SELECT density, theme, language, compose_format, updated_at FROM display_preferences WHERE id = 1",
+        "SELECT density, theme, language, compose_format, deep_index, updated_at FROM display_preferences WHERE id = 1",
         [],
         |row| {
+            let deep_index_int: i32 = row.get(4)?;
             Ok(DisplayPreferences {
                 density: row.get(0)?,
                 theme: row.get(1)?,
                 language: row.get(2)?,
                 compose_format: row.get(3)?,
-                updated_at: row.get(4)?,
+                deep_index: deep_index_int != 0,
+                updated_at: row.get(5)?,
             })
         },
     );
@@ -42,6 +46,7 @@ pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> 
             theme: "system".to_string(),
             language: "en".to_string(),
             compose_format: "html".to_string(),
+            deep_index: false,
             updated_at: String::new(),
         }),
         Err(e) => Err(format!("Failed to get display preferences: {e}")),
@@ -94,6 +99,11 @@ pub fn update_preferences(
         values.push(Box::new(compose_format.clone()));
         idx += 1;
     }
+    if let Some(deep_index) = data.deep_index {
+        sets.push(format!("deep_index = ?{idx}"));
+        values.push(Box::new(deep_index as i32));
+        idx += 1;
+    }
 
     if sets.is_empty() {
         return get_preferences(conn);
@@ -140,6 +150,7 @@ mod tests {
                 theme: None,
                 language: None,
                 compose_format: None,
+                deep_index: None,
             },
         )
         .unwrap();
@@ -160,6 +171,7 @@ mod tests {
                 theme: Some("dark".to_string()),
                 language: None,
                 compose_format: None,
+                deep_index: None,
             },
         )
         .unwrap();
@@ -179,6 +191,7 @@ mod tests {
                 theme: Some("light".to_string()),
                 language: Some("en".to_string()),
                 compose_format: None,
+                deep_index: None,
             },
         )
         .unwrap();
@@ -199,6 +212,7 @@ mod tests {
                 theme: None,
                 language: None,
                 compose_format: None,
+                deep_index: None,
             },
         );
 
@@ -217,6 +231,7 @@ mod tests {
                 theme: Some("rainbow".to_string()),
                 language: None,
                 compose_format: None,
+                deep_index: None,
             },
         );
 
@@ -235,6 +250,7 @@ mod tests {
                 theme: None,
                 language: None,
                 compose_format: Some("text".to_string()),
+                deep_index: None,
             },
         )
         .unwrap();
@@ -254,6 +270,7 @@ mod tests {
                 theme: None,
                 language: None,
                 compose_format: Some("markdown".to_string()),
+                deep_index: None,
             },
         );
 
@@ -272,6 +289,7 @@ mod tests {
                 theme: None,
                 language: None,
                 compose_format: None,
+                deep_index: None,
             },
         )
         .unwrap();
