@@ -5,6 +5,8 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::{EventBus, MailEvent};
+use crate::search::engine::{IndexableMessage, SearchEngine};
+use crate::search::engine::UserIndex;
 
 /// How often to run a sync check (seconds).
 /// STATUS checks are cheap (no SELECT), so 30s is a tight safety net
@@ -23,6 +25,7 @@ pub async fn sync_loop(
     config: Arc<AppConfig>,
     imap_client: Arc<dyn ImapClient>,
     event_bus: Arc<EventBus>,
+    search_engine: Arc<SearchEngine>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(SYNC_INTERVAL_SECS));
     // Skip the first immediate tick — IDLE + initial list_messages handles that.
@@ -31,7 +34,7 @@ pub async fn sync_loop(
     loop {
         interval.tick().await;
 
-        if let Err(e) = run_sync(&user_hash, &creds, &config, imap_client.as_ref(), &event_bus).await {
+        if let Err(e) = run_sync(&user_hash, &creds, &config, imap_client.as_ref(), &event_bus, &search_engine).await {
             tracing::warn!(
                 user = %creds.email,
                 error = %e,
@@ -47,6 +50,7 @@ async fn run_sync(
     config: &AppConfig,
     imap_client: &dyn ImapClient,
     event_bus: &EventBus,
+    search_engine: &SearchEngine,
 ) -> Result<(), String> {
     // Collect folder metadata in a non-async block so `conn` is dropped before awaits.
     let folder_snapshots = {
@@ -140,6 +144,101 @@ async fn run_sync(
         event_bus.publish(user_hash, MailEvent::FolderUpdated).await;
     }
 
+    // ── Deep index phase: fetch & index bodies if enabled ────────────
+    if let Err(e) = index_message_bodies(user_hash, creds, config, imap_client, search_engine).await {
+        tracing::debug!(error = %e, "Deep index phase skipped or failed");
+    }
+
+    Ok(())
+}
+
+/// Batch size for deep indexing per sync cycle.
+const DEEP_INDEX_BATCH: u32 = 10;
+
+/// If the `deep_index` preference is enabled, fetch bodies for messages that
+/// don't have a cached body yet, cache them, and re-index with body text.
+async fn index_message_bodies(
+    user_hash: &str,
+    creds: &ImapCredentials,
+    config: &AppConfig,
+    imap_client: &dyn ImapClient,
+    search_engine: &SearchEngine,
+) -> Result<(), String> {
+    let unindexed = {
+        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
+            .map_err(|e| format!("DB error: {e}"))?;
+
+        // Check if deep_index is enabled.
+        let prefs = db::display_preferences::get_preferences(&conn)?;
+        if !prefs.deep_index {
+            return Ok(());
+        }
+
+        db::messages::get_unindexed_messages(&conn, DEEP_INDEX_BATCH)?
+    };
+
+    if unindexed.is_empty() {
+        return Ok(());
+    }
+
+    tracing::debug!(count = unindexed.len(), "Deep indexing message bodies");
+
+    let user_index = search_engine
+        .open_user_index(user_hash)
+        .map_err(|e| format!("Search index error: {e}"))?;
+
+    for (folder, uid) in &unindexed {
+        if UserIndex::is_excluded_folder(folder) {
+            continue;
+        }
+
+        let body = match imap_client.fetch_body(creds, folder, *uid).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::debug!(folder = %folder, uid = uid, error = %e, "Deep index: failed to fetch body");
+                continue;
+            }
+        };
+
+        // Cache the body in the DB.
+        {
+            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
+                .map_err(|e| format!("DB error: {e}"))?;
+
+            let att_json = serde_json::to_string(&body.attachments).ok();
+            db::messages::cache_message_body(
+                &conn,
+                folder,
+                *uid,
+                body.text_html.as_deref(),
+                body.text_plain.as_deref(),
+                att_json.as_deref(),
+                Some(&body.raw_headers),
+            )?;
+        }
+
+        // Re-index with body text.
+        if let Some(ref text) = body.text_plain {
+            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
+                .map_err(|e| format!("DB error: {e}"))?;
+            if let Some(msg) = db::messages::get_single_message(&conn, folder, *uid)? {
+                let indexable = IndexableMessage {
+                    uid: msg.uid,
+                    folder: msg.folder,
+                    subject: msg.subject,
+                    from_address: msg.from_address,
+                    from_name: msg.from_name,
+                    to_addresses: msg.to_addresses,
+                    body_text: text.clone(),
+                    date_epoch: db::messages::parse_date_to_epoch_public(&msg.date),
+                    has_attachments: msg.has_attachments,
+                };
+                let _ = user_index.index_message(&indexable);
+            }
+        }
+    }
+
+    tracing::debug!(count = unindexed.len(), "Deep index batch complete");
     Ok(())
 }
 

@@ -12,6 +12,7 @@ use crate::config::AppConfig;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
+use crate::search::engine::SearchEngine;
 
 /// Extract the session token from the `Cookie` header string.
 fn extract_session_token(cookie_header: &str) -> Option<String> {
@@ -32,6 +33,7 @@ fn extract_session_token(cookie_header: &str) -> Option<String> {
 /// Authenticates via the session cookie (extracted from the upgrade request
 /// headers) and then upgrades to a WebSocket connection that receives
 /// real-time mail events.
+#[allow(clippy::too_many_arguments)]
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
@@ -40,6 +42,7 @@ pub async fn ws_handler(
     Extension(event_bus): Extension<Arc<EventBus>>,
     Extension(idle_manager): Extension<Arc<IdleManager>>,
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
+    Extension(search_engine): Extension<Arc<SearchEngine>>,
 ) -> Response {
     // Authenticate from cookie.
     let session = headers
@@ -66,7 +69,7 @@ pub async fn ws_handler(
     });
 
     ws.on_upgrade(move |socket| {
-        handle_socket(socket, session, config, event_bus, idle_manager, imap_client, imap_creds)
+        handle_socket(socket, session, config, event_bus, idle_manager, imap_client, imap_creds, search_engine)
     })
 }
 
@@ -74,6 +77,7 @@ pub async fn ws_handler(
 ///
 /// Subscribes to the user's EventBus channel and forwards events as JSON.
 /// Also starts IMAP IDLE for INBOX when the connection is established.
+#[allow(clippy::too_many_arguments)]
 async fn handle_socket(
     socket: WebSocket,
     session: SessionState,
@@ -82,6 +86,7 @@ async fn handle_socket(
     idle_manager: Arc<IdleManager>,
     imap_client: Arc<dyn ImapClient>,
     imap_creds: Option<ImapCredentials>,
+    search_engine: Arc<SearchEngine>,
 ) {
     let user_hash = session.user_hash.clone();
 
@@ -109,6 +114,7 @@ async fn handle_socket(
             config,
             imap_client,
             event_bus.clone(),
+            search_engine,
         ));
         Some(handle)
     } else {

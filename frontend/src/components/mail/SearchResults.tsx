@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import { Loader2, Paperclip } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Loader2, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
@@ -136,11 +136,13 @@ export function SearchResults() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
 
+  const [sortOrder, setSortOrder] = useState<"date_desc" | "date_asc">("date_desc");
+
   const {
     data,
     isLoading,
     isError,
-  } = useSearch(searchQuery);
+  } = useSearch(searchQuery, undefined, sortOrder);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -190,6 +192,18 @@ export function SearchResults() {
                 ? `Showing ${results.length} of ${totalCount} results`
                 : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
             </span>
+            <button
+              onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
+            >
+              {sortOrder === "date_desc" ? (
+                <ArrowDown className="size-3" />
+              ) : (
+                <ArrowUp className="size-3" />
+              )}
+              Date
+            </button>
           </div>
 
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
