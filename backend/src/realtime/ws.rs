@@ -33,6 +33,7 @@ fn extract_session_token(cookie_header: &str) -> Option<String> {
 /// Authenticates via the session cookie (extracted from the upgrade request
 /// headers) and then upgrades to a WebSocket connection that receives
 /// real-time mail events.
+#[allow(clippy::too_many_arguments)]
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
@@ -76,6 +77,7 @@ pub async fn ws_handler(
 ///
 /// Subscribes to the user's EventBus channel and forwards events as JSON.
 /// Also starts IMAP IDLE for INBOX when the connection is established.
+#[allow(clippy::too_many_arguments)]
 async fn handle_socket(
     socket: WebSocket,
     session: SessionState,
