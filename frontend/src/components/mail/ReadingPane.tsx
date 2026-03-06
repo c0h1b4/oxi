@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Paperclip,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   FileCode,
   ShieldAlert,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
 import { useMessage, useUpdateFlags } from "@/hooks/useMessages";
 import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
@@ -40,12 +41,28 @@ export function ReadingPane() {
   );
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
-  const { data, isLoading, isError, isPlaceholderData, refetch } = useMessage(
+  const queryClient = useQueryClient();
+  const selectMessage = useUiStore((s) => s.selectMessage);
+
+  const { data, isLoading, isError, error, isPlaceholderData, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0
   );
 
   const updateFlags = useUpdateFlags();
+
+  // When a message is not found on the server (stale cache), deselect it and
+  // refresh the message list and search results so the ghost entry disappears.
+  const handledStaleRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isError || !error?.message?.includes("not found")) return;
+    if (handledStaleRef.current === selectedMessageUid) return;
+    handledStaleRef.current = selectedMessageUid;
+    selectMessage(null);
+    queryClient.invalidateQueries({ queryKey: ["messages", activeFolder] });
+    queryClient.invalidateQueries({ queryKey: ["folders"] });
+    queryClient.invalidateQueries({ queryKey: ["search"] });
+  }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
@@ -81,9 +98,12 @@ export function ReadingPane() {
 
   // Error
   if (isError || !data) {
+    const errMsg = error?.message ?? "Unknown error";
+    console.error(`[ReadingPane] Failed to load message uid=${selectedMessageUid} folder=${activeFolder}:`, errMsg);
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-8 text-center">
         <p className="text-sm text-muted-foreground">Failed to load message</p>
+        <p className="max-w-md text-xs text-muted-foreground/60">{errMsg}</p>
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           Retry
         </Button>
