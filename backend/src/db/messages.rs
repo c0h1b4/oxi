@@ -374,6 +374,32 @@ pub fn delete_message(conn: &Connection, folder: &str, uid: u32) -> Result<(), S
     Ok(())
 }
 
+/// Return `(folder, uid)` pairs for messages that don't have a cached body,
+/// ordered by date_epoch DESC (most recent first), limited to `limit`.
+/// Used by the deep-index background task to know which bodies to fetch.
+pub fn get_unindexed_messages(conn: &Connection, limit: u32) -> Result<Vec<(String, u32)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT folder, uid FROM messages
+             WHERE body_cached = 0
+             ORDER BY date_epoch DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| format!("Failed to prepare get_unindexed_messages: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(|e| format!("Failed to query unindexed messages: {e}"))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| format!("Failed to read unindexed row: {e}"))?);
+    }
+    Ok(result)
+}
+
 /// Return all (uid, flags_csv) pairs for a folder, for reconciliation.
 pub fn get_all_uids_and_flags(conn: &Connection, folder: &str) -> Result<Vec<(u32, String)>, String> {
     let mut stmt = conn

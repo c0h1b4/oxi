@@ -44,6 +44,11 @@ export function useMessage(folder: string, uid: number) {
       ),
     enabled: !!folder && uid > 0,
     placeholderData: keepPreviousData,
+    retry: (failureCount, error) => {
+      // Don't retry "not found" — the message was deleted from IMAP.
+      if (error instanceof Error && error.message.includes("not found")) return false;
+      return failureCount < 2;
+    },
   });
 }
 

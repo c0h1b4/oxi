@@ -473,10 +473,13 @@ pub async fn get_message(
             .map_err(|e| match e {
                 crate::imap::client::ImapError::MessageNotFound { .. } => {
                     // Message exists in local DB but not on IMAP server —
-                    // remove the stale cache entry and invalidate the folder
-                    // so the message list refreshes on the next fetch.
+                    // remove the stale cache entry, search index entry, and
+                    // invalidate the folder so the list refreshes.
                     let _ = db::messages::delete_message(&conn, &folder, uid);
                     let _ = db::folders::invalidate_folder_freshness(&conn, &folder);
+                    if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
+                        let _ = user_index.delete_message(uid, &folder);
+                    }
                     AppError::NotFound(format!("Message UID {uid} not found in folder {folder}"))
                 }
                 other => {
@@ -485,6 +488,9 @@ pub async fn get_message(
                     // disappears from the message list.
                     let _ = db::messages::delete_message(&conn, &folder, uid);
                     let _ = db::folders::invalidate_folder_freshness(&conn, &folder);
+                    if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
+                        let _ = user_index.delete_message(uid, &folder);
+                    }
                     AppError::ServiceUnavailable(format!("IMAP error: {other}"))
                 }
             })?;

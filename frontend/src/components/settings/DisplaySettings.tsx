@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { Code2, FileText, Loader2, Monitor, Moon, Sun } from "lucide-react";
+import { Code2, FileText, Loader2, Monitor, Moon, Search, Sun } from "lucide-react";
 import { toast } from "sonner";
 import {
   useDisplayPreferences,
@@ -96,7 +96,7 @@ export function DisplaySettings() {
     setTheme("system");
     setComposeFormat("html");
     updatePrefs.mutate(
-      { density: "comfortable", theme: "system", language: "en", compose_format: "html" },
+      { density: "comfortable", theme: "system", language: "en", compose_format: "html", deep_index: false },
       { onError: (e) => toast.error(`Failed to reset: ${e.message}`) },
     );
   }, [setDensity, setTheme, setComposeFormat, updatePrefs]);
@@ -154,6 +154,22 @@ export function DisplaySettings() {
             { value: "text", label: "Plain text", icon: <FileText className="size-3.5" /> },
           ]}
           onChange={handleComposeFormatChange}
+        />
+
+        <SegmentedControl
+          label="Search indexing"
+          description="Index message bodies for full-text search (uses more bandwidth)"
+          value={prefs.deep_index ? "on" : "off"}
+          options={[
+            { value: "off", label: "Headers only", icon: <Search className="size-3.5" /> },
+            { value: "on", label: "Full text", icon: <Search className="size-3.5" /> },
+          ]}
+          onChange={(v) =>
+            updatePrefs.mutate(
+              { deep_index: v === "on" },
+              { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+            )
+          }
         />
 
         <div className="flex items-center justify-between rounded-lg border border-border p-4">
