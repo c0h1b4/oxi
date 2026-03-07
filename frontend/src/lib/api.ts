@@ -1,4 +1,4 @@
-const API_BASE = "/api";
+const API_BASE = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api";
 
 export async function apiPost<T>(
   path: string,

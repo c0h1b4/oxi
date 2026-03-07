@@ -52,6 +52,10 @@ pub struct AppConfig {
     /// Environment the application is running in (development, production)
     #[serde(default = "default_environment")]
     pub environment: String,
+
+    /// Optional base path prefix (e.g. "/oxi") for serving behind a reverse proxy subpath.
+    #[serde(default)]
+    pub base_path: Option<String>,
 }
 
 fn default_host() -> String {

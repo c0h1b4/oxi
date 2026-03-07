@@ -375,7 +375,7 @@ export function ComposeDialog() {
                 // Return a preview URL that the browser can render.
                 // The send flow converts these back to cid: references.
                 resolve(
-                  `/api/drafts/${currentDraftId}/attachments/${att.id}/content`
+                  `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/drafts/${currentDraftId}/attachments/${att.id}/content`
                 );
               } else {
                 resolve(null);
@@ -810,7 +810,7 @@ export function ComposeDialog() {
             contentType: previewAttachment.contentType,
             size: previewAttachment.size,
           }}
-          previewUrl={`/api/drafts/${draftId}/attachments/${previewAttachment.id}/content`}
+          previewUrl={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/drafts/${draftId}/attachments/${previewAttachment.id}/content`}
           onClose={() => setPreviewAttId(null)}
         />
       )}

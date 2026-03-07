@@ -261,9 +261,17 @@ pub fn create_router(
     let index_path = Path::new(&config.static_dir).join("index.html");
     let static_service = ServeDir::new(&config.static_dir).fallback(ServeFile::new(index_path));
 
-    let router = Router::new()
+    let inner = Router::new()
         .nest("/api", api_router)
-        .fallback_service(static_service)
+        .fallback_service(static_service);
+
+    // If BASE_PATH is set (e.g. "/oxi"), nest the entire app under that prefix.
+    let router = match config.base_path.as_deref() {
+        Some(bp) if !bp.is_empty() => Router::new().nest(bp, inner),
+        _ => inner,
+    };
+
+    let router = router
         .layer(Extension(idle_manager))
         .layer(Extension(event_bus))
         .layer(Extension(smtp_client))
