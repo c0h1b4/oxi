@@ -28,6 +28,7 @@
             session_timeout_hours: 24,
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
+            base_path: None,
         })
     }
 
@@ -45,6 +46,7 @@
             session_timeout_hours: 24,
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
+            base_path: None,
         })
     }
 
@@ -62,6 +64,7 @@
             session_timeout_hours: 24,
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
+            base_path: None,
         })
     }
 

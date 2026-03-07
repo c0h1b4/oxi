@@ -140,7 +140,7 @@ export function ContactsPanel() {
   );
 
   const handleExport = useCallback(() => {
-    window.open("/api/contacts/export", "_blank");
+    window.open((process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/contacts/export", "_blank");
   }, []);
 
   return (

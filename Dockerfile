@@ -11,6 +11,9 @@
 # ---------------------------------------------------------------------------
 FROM oven/bun:1 AS frontend-build
 
+ARG NEXT_PUBLIC_BASE_PATH
+ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
+
 WORKDIR /app/frontend
 
 # Copy dependency manifests first for layer caching

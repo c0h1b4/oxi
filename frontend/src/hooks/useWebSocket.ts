@@ -64,7 +64,8 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
       setStatus("connecting");
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+      const ws = new WebSocket(`${protocol}//${window.location.host}${basePath}/api/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
