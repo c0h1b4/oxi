@@ -66,6 +66,41 @@ fn extract_active_account_header(req: &Request) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn extract_active_account_query(req: &Request) -> Option<String> {
+    let uri = req.uri();
+    let query = uri.query()?;
+    for pair in query.split('&') {
+        if let Some(value) = pair.strip_prefix("account_id=") {
+            let decoded = urlencoding_decode(value);
+            if !decoded.is_empty() {
+                return Some(decoded);
+            }
+        }
+    }
+    None
+}
+
+fn urlencoding_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            } else {
+                result.push('%');
+                result.push_str(&hex);
+            }
+        } else if c == '+' {
+            result.push(' ');
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 pub async fn auth_guard(mut req: Request, next: Next) -> Response {
     let store = match req.extensions().get::<Arc<SessionStore>>() {
         Some(s) => Arc::clone(s),
@@ -77,7 +112,7 @@ pub async fn auth_guard(mut req: Request, next: Next) -> Response {
         None => return unauthorized(),
     };
 
-    let account_id = match extract_active_account_header(&req) {
+    let account_id = match extract_active_account_header(&req).or_else(|| extract_active_account_query(&req)) {
         Some(a) => a,
         None => return unauthorized(),
     };
@@ -425,5 +460,76 @@ mod tests {
             .unwrap();
 
         assert_eq!(extract_active_account_header(&req), None);
+    }
+
+    #[tokio::test]
+    async fn extract_active_account_query_works() {
+        let req = Request::builder()
+            .uri("/protected?account_id=account-123")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(extract_active_account_query(&req), Some("account-123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn extract_active_account_query_with_encoding() {
+        let req = Request::builder()
+            .uri("/protected?account_id=abc%40example.com")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(extract_active_account_query(&req), Some("abc@example.com".to_string()));
+    }
+
+    #[tokio::test]
+    async fn extract_active_account_query_missing() {
+        let req = Request::builder()
+            .uri("/protected?other=value")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(extract_active_account_query(&req), None);
+    }
+
+    #[tokio::test]
+    async fn account_id_from_query_param_works() {
+        let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
+        let session = create_test_session(&store, "alice@example.com", "hunter2", "abc123");
+        let router = guarded_router(Arc::clone(&store));
+
+        let req = Request::builder()
+            .uri(format!("/protected?account_id={}", session.account_id))
+            .header("cookie", build_auth_headers(&session))
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, json) = send(router, req).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["email"], "alice@example.com");
+    }
+
+    #[tokio::test]
+    async fn header_takes_precedence_over_query_param() {
+        let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
+        let session1 = create_test_session(&store, "user1@example.com", "pass", "hash1");
+        let session2 = create_test_session(&store, "user2@example.com", "pass", "hash2");
+        let router = guarded_router(Arc::clone(&store));
+
+        let req = Request::builder()
+            .uri(format!("/protected?account_id={}", session2.account_id))
+            .header(ACTIVE_ACCOUNT_HEADER, &session1.account_id)
+            .header("cookie", format!(
+                "oxi_browser={}; oxi_session_{}={}",
+                session1.browser_id, session1.account_id, session1.token
+            ))
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, json) = send(router, req).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["email"], "user1@example.com");
     }
 }
