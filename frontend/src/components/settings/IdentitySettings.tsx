@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { Plus, Pencil, Trash2, Star, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import dynamic from "next/dynamic";
 import {
   useIdentities,
   useCreateIdentity,
@@ -11,6 +12,20 @@ import {
 } from "@/hooks/useIdentities";
 import type { Identity } from "@/types/identity";
 import { cn } from "@/lib/utils";
+
+const RichTextEditor = dynamic(
+  () => import("@/components/mail/RichTextEditor").then((mod) => mod.RichTextEditor),
+  { ssr: false }
+);
+
+const handleSignatureImageUpload = async (file: File): Promise<string | null> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+};
 
 interface IdentityFormData {
   email: string;
@@ -69,15 +84,28 @@ function IdentityForm({
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          Signature (HTML)
+          Signature
         </label>
-        <textarea
-          value={form.signature_html}
-          onChange={(e) => setForm({ ...form, signature_html: e.target.value })}
-          rows={4}
-          className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:ring-1 focus:ring-primary"
-          placeholder="<p>Best regards,<br>Your Name</p>"
-        />
+        <div className="rounded-md border border-border bg-background">
+          <RichTextEditor
+            content={form.signature_html}
+            onChange={(html) => setForm({ ...form, signature_html: html })}
+            onImageUpload={handleSignatureImageUpload}
+            placeholder="Best regards, Your Name"
+            compact
+          />
+        </div>
+        {form.signature_html && (
+          <div className="mt-2">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Preview
+            </label>
+            <div
+              className="rounded-md border border-border bg-background px-3 py-2 prose prose-sm dark:prose-invert max-w-none text-xs"
+              dangerouslySetInnerHTML={{ __html: form.signature_html }}
+            />
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <input

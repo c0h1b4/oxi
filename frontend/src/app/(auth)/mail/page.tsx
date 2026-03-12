@@ -7,6 +7,7 @@ import { FolderTree } from "@/components/mail/FolderTree";
 import { MessageList } from "@/components/mail/MessageList";
 import { ReadingPane } from "@/components/mail/ReadingPane";
 import { ComposeDialog } from "@/components/mail/ComposeDialog";
+import { CalendarPanel } from "@/components/calendar/CalendarPanel";
 import { ContactsPanel } from "@/components/contacts/ContactsPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { useUiStore } from "@/stores/useUiStore";
@@ -36,6 +37,13 @@ export default function MailPage() {
       <div className="flex h-screen w-full overflow-hidden">
         <NavRail />
         <ContactsPanel />
+      </div>
+    );
+  } else if (viewMode === "calendar") {
+    content = (
+      <div className="flex h-screen w-full overflow-hidden">
+        <NavRail />
+        <CalendarPanel />
       </div>
     );
   } else if (viewMode === "settings") {

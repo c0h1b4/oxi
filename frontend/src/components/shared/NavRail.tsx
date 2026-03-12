@@ -6,6 +6,7 @@ import {
   Mail,
   PenSquare,
   Users,
+  Calendar,
   Settings,
   Moon,
   Sun,
@@ -111,6 +112,12 @@ export function NavRail() {
           label="Contacts"
           active={viewMode === "contacts"}
           onClick={() => setViewMode(viewMode === "contacts" ? "mail" : "contacts")}
+        />
+        <NavButton
+          icon={<Calendar className="size-5" />}
+          label="Calendar"
+          active={viewMode === "calendar"}
+          onClick={() => setViewMode(viewMode === "calendar" ? "mail" : "calendar")}
         />
         <NavButton
           icon={<Settings className="size-5" />}
