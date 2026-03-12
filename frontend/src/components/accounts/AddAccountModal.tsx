@@ -6,7 +6,7 @@ import { X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 
 function getCookie(name: string): string | null {
@@ -30,7 +30,7 @@ interface AddAccountModalProps {
 }
 
 export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
-  const addAccount = useAuthStore((s) => s.addAccount);
+  const setAccounts = useAuthStore((s) => s.setAccounts);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -103,10 +103,14 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
     }
 
     try {
-      const response = await apiPost<{
+      await apiPost<{
         account: { id: string; email: string; imapHost: string; smtpHost: string };
       }>("/auth/login", payload);
-      addAccount(response.account);
+      
+      const accountsData = await apiGet<{
+        accounts: Array<{ id: string; email: string; imapHost: string; smtpHost: string }>;
+      }>("/auth/accounts");
+      setAccounts(accountsData.accounts);
       onClose();
     } catch (err) {
       setError(

@@ -4,17 +4,25 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AddAccountModal } from "./AddAccountModal";
 
 export function AccountSwitcher() {
   const accounts = useAuthStore((s) => s.accounts);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const setActiveAccount = useAuthStore((s) => s.setActiveAccount);
+  const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
 
   if (accounts.length === 0) {
     return null;
   }
+
+  const handleSwitchAccount = (accountId: string) => {
+    if (accountId === activeAccountId) return;
+    setActiveAccount(accountId);
+    queryClient.invalidateQueries();
+  };
 
   return (
     <div className="space-y-1">
@@ -22,7 +30,7 @@ export function AccountSwitcher() {
         <button
           key={account.id}
           type="button"
-          onClick={() => setActiveAccount(account.id)}
+          onClick={() => handleSwitchAccount(account.id)}
           className={cn(
             "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm transition-colors",
             account.id === activeAccountId

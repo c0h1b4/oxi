@@ -20,7 +20,7 @@ export function useNotifications() {
   });
 
   const { data: prefs } = useNotificationPreferences();
-  const userEmail = useAuthStore((s) => s.email);
+  const activeAccount = useAuthStore((s) => s.activeAccount());
   const setActiveFolder = useUiStore((s) => s.setActiveFolder);
 
   const showBanner = permission === "default" && !bannerDismissed;
@@ -58,7 +58,7 @@ export function useNotifications() {
       const subject = event.data?.latest_subject;
 
       // Title: user's own email (the mailbox) or fallback.
-      const title = userEmail ?? "New email";
+      const title = activeAccount?.email ?? "New email";
 
       // Body lines: sender + subject when available.
       const bodyLines: string[] = [];
@@ -105,7 +105,7 @@ export function useNotifications() {
         });
       }
     },
-    [permission, prefs, userEmail, setActiveFolder],
+    [permission, prefs, activeAccount, setActiveFolder],
   );
 
   return {

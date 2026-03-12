@@ -77,7 +77,7 @@ export function MessageActionBar() {
   // Reply All is redundant for 1-to-1 conversations (no other recipients besides sender + me)
   const isDirectConversation = (() => {
     if (!data) return false;
-    const myEmail = useAuthStore.getState().email ?? "";
+    const myEmail = useAuthStore.getState().activeAccount()?.email ?? "";
     const otherRecipients = [...data.to_addresses, ...data.cc_addresses].filter(
       (a) =>
         a.address.toLowerCase() !== myEmail.toLowerCase() &&
@@ -108,7 +108,7 @@ export function MessageActionBar() {
 
   const handleReplyAll = () => {
     if (!data) return;
-    const myEmail = useAuthStore.getState().email ?? "";
+    const myEmail = useAuthStore.getState().activeAccount()?.email ?? "";
     const messageId = extractHeader(data.raw_headers, "Message-ID");
     const refs = extractHeader(data.raw_headers, "References");
     const replyTo = data.from_address;

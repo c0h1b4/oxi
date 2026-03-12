@@ -32,7 +32,7 @@ interface ServerConfig {
 
 export default function Home() {
   const router = useRouter();
-  const addAccount = useAuthStore((s) => s.addAccount);
+  const setAccounts = useAuthStore((s) => s.setAccounts);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,9 +51,15 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    apiGet("/auth/session")
-      .then(() => {
-        if (!cancelled) router.replace("/mail");
+    apiGet<{ accounts: unknown[] }>("/auth/accounts")
+      .then((data) => {
+        if (!cancelled) {
+          if (data.accounts.length > 0) {
+            router.replace("/mail");
+          } else {
+            setChecking(false);
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setChecking(false);
@@ -98,10 +104,14 @@ export default function Home() {
     }
 
     try {
-      const response = await apiPost<{
+      await apiPost<{
         account: { id: string; email: string; imapHost: string; smtpHost: string };
       }>("/auth/login", payload);
-      addAccount(response.account);
+      
+      const accountsData = await apiGet<{
+        accounts: Array<{ id: string; email: string; imapHost: string; smtpHost: string }>;
+      }>("/auth/accounts");
+      setAccounts(accountsData.accounts);
       router.push("/mail");
     } catch (err) {
       setError(

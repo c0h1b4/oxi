@@ -5,6 +5,15 @@ import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 
+interface AccountsResponse {
+  accounts: Array<{
+    id: string;
+    email: string;
+    imapHost: string;
+    smtpHost: string;
+  }>;
+}
+
 export default function AuthLayout({
   children,
 }: {
@@ -12,14 +21,18 @@ export default function AuthLayout({
 }) {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
-  const setEmail = useAuthStore((s) => s.setEmail);
+  const setAccounts = useAuthStore((s) => s.setAccounts);
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<{ user: { email: string } }>("/auth/session")
+    apiGet<AccountsResponse>("/auth/accounts")
       .then((data) => {
         if (!cancelled) {
-          setEmail(data.user.email);
+          if (data.accounts.length === 0) {
+            router.replace("/");
+            return;
+          }
+          setAccounts(data.accounts);
           setAuthenticated(true);
         }
       })
@@ -29,7 +42,7 @@ export default function AuthLayout({
     return () => {
       cancelled = true;
     };
-  }, [router, setEmail]);
+  }, [router, setAccounts]);
 
   if (!authenticated) {
     return (

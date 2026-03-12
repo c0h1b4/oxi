@@ -7,7 +7,6 @@ use axum::{Extension, Json};
 use serde::Deserialize;
 
 use crate::auth::imap_auth::{self, AuthResult};
-use crate::auth::middleware::SESSION_COOKIE;
 use crate::auth::session::{SessionState, SessionStore};
 use crate::auth::user_data;
 use crate::config::AppConfig;
@@ -32,28 +31,8 @@ pub struct LoginRequest {
     pub smtp_tls: bool,
     pub browser_id: Option<String>,
 }
-
 fn default_tls() -> bool {
     true
-}
-
-
-/// Build a `Set-Cookie` header value for the session cookie.
-fn session_cookie(token: &str, max_age_secs: u64, secure: bool) -> String {
-    let secure_flag = if secure { " Secure;" } else { "" };
-    format!(
-        "{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        SESSION_COOKIE, token, secure_flag, max_age_secs
-    )
-}
-
-/// Build a `Set-Cookie` header value that clears the session cookie.
-fn clearing_cookie(secure: bool) -> String {
-    let secure_flag = if secure { " Secure;" } else { "" };
-    format!(
-        "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        SESSION_COOKIE, secure_flag
-    )
 }
 
 fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool) -> String {
@@ -86,25 +65,6 @@ fn clearing_account_cookie(account_id: &str, secure: bool) -> String {
         "oxi_session_{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         account_id, secure_flag
     )
-}
-
-/// Extract the session token from the `Cookie` header.
-fn extract_session_token(headers: &axum::http::HeaderMap) -> Option<String> {
-    for value in headers.get_all("cookie") {
-        let Ok(header_str) = value.to_str() else {
-            continue;
-        };
-        for segment in header_str.split(';') {
-            let trimmed = segment.trim();
-            if let Some(token) = trimmed.strip_prefix(&format!("{SESSION_COOKIE}=")) {
-                let token = token.trim();
-                if !token.is_empty() {
-                    return Some(token.to_string());
-                }
-            }
-        }
-    }
-    None
 }
 
 fn extract_browser_id(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -253,13 +213,9 @@ pub async fn login(
             let browser_cookie_header = browser_cookie(&browser_id, max_age, secure);
             let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure);
 
-            (
+            let response = (
                 StatusCode::CREATED,
-                [
-                    ("content-type", "application/json"),
-                    ("set-cookie", &browser_cookie_header),
-                    ("set-cookie", &session_cookie_header),
-                ],
+                [("content-type", "application/json")],
                 serde_json::json!({
                     "account": {
                         "id": account_id,
@@ -270,7 +226,18 @@ pub async fn login(
                 })
                 .to_string(),
             )
-                .into_response()
+                .into_response();
+
+            let mut response = response;
+            let headers = response.headers_mut();
+            if let Ok(header_value) = browser_cookie_header.parse() {
+                headers.append("set-cookie", header_value);
+            }
+            if let Ok(header_value) = session_cookie_header.parse() {
+                headers.append("set-cookie", header_value);
+            }
+
+            response
         }
         AuthResult::InvalidCredentials => (
             StatusCode::UNAUTHORIZED,
@@ -462,7 +429,6 @@ pub async fn logout(
 mod tests {
     use super::*;
     use serde::Serialize;
-    use std::time::Duration;
 
     #[derive(Serialize)]
     struct UserResponse {
@@ -478,81 +444,6 @@ mod tests {
     struct LogoutResponse {
         status: &'static str,
     }
-
-    #[test]
-    fn session_cookie_format_secure() {
-        let cookie = session_cookie("abc123", 86400, true);
-        assert!(cookie.contains("oxi_session=abc123"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("Secure"));
-        assert!(cookie.contains("SameSite=Strict"));
-        assert!(cookie.contains("Path=/"));
-        assert!(cookie.contains("Max-Age=86400"));
-    }
-
-    #[test]
-    fn session_cookie_format_no_secure() {
-        let cookie = session_cookie("abc123", 86400, false);
-        assert!(cookie.contains("oxi_session=abc123"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(!cookie.contains("Secure"));
-        assert!(cookie.contains("SameSite=Strict"));
-    }
-
-    #[test]
-    fn clearing_cookie_format() {
-        let cookie = clearing_cookie(true);
-        assert!(cookie.contains("oxi_session=;"));
-        assert!(cookie.contains("Max-Age=0"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("Secure"));
-        assert!(cookie.contains("SameSite=Strict"));
-        assert!(cookie.contains("Path=/"));
-    }
-
-    #[test]
-    fn clearing_cookie_format_no_secure() {
-        let cookie = clearing_cookie(false);
-        assert!(cookie.contains("oxi_session=;"));
-        assert!(!cookie.contains("Secure"));
-        assert!(cookie.contains("HttpOnly"));
-    }
-
-    #[test]
-    fn extract_token_from_cookie_header() {
-        let mut headers = axum::http::HeaderMap::new();
-        headers.insert("cookie", "oxi_session=mytoken123".parse().unwrap());
-        assert_eq!(
-            extract_session_token(&headers),
-            Some("mytoken123".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_token_among_multiple_cookies() {
-        let mut headers = axum::http::HeaderMap::new();
-        headers.insert(
-            "cookie",
-            "theme=dark; oxi_session=abc; lang=en".parse().unwrap(),
-        );
-        assert_eq!(extract_session_token(&headers), Some("abc".to_string()));
-    }
-
-    #[test]
-    fn extract_token_missing_returns_none() {
-        let headers = axum::http::HeaderMap::new();
-        assert_eq!(extract_session_token(&headers), None);
-    }
-
-    #[test]
-    fn extract_token_wrong_name_returns_none() {
-        let mut headers = axum::http::HeaderMap::new();
-        headers.insert("cookie", "other=value".parse().unwrap());
-        assert_eq!(extract_session_token(&headers), None);
-    }
-
-    // Integration-style tests for the handlers are covered via the router
-    // tests in routes/mod.rs, which mount the full middleware stack.
 
     #[test]
     fn user_response_serialization() {
@@ -572,20 +463,5 @@ mod tests {
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "logged_out");
-    }
-
-    // Verify the SessionStore is used correctly via helper test
-    #[test]
-    fn store_insert_and_remove_roundtrip() {
-        let store = SessionStore::new(Duration::from_secs(3600));
-        let token = store.insert(
-            "user@test.com".to_string(),
-            "pass".to_string(),
-            "hash".to_string(),
-            None,
-        );
-        assert!(store.get(&token).is_some());
-        store.remove(&token);
-        assert!(store.get(&token).is_none());
     }
 }

@@ -7,7 +7,6 @@ use axum::response::{IntoResponse, Response};
 
 use super::session::SessionStore;
 
-pub const SESSION_COOKIE: &str = "oxi_session";
 pub const BROWSER_COOKIE: &str = "oxi_browser";
 pub const ACTIVE_ACCOUNT_HEADER: &str = "X-Active-Account";
 

@@ -24,7 +24,9 @@ pub struct AccountSession {
     pub imap_port: u16,
     pub imap_tls: bool,
     pub smtp_host: String,
+    #[allow(dead_code)]
     pub smtp_port: u16,
+    #[allow(dead_code)]
     pub smtp_tls: bool,
     pub last_accessed: Instant,
     pub timeout_override: Option<Duration>,
@@ -179,6 +181,7 @@ impl SessionStore {
         }
     }
 
+    #[allow(dead_code)]
     pub fn insert(
         &self,
         email: String,
@@ -219,6 +222,7 @@ impl SessionStore {
         Some(entry.clone())
     }
 
+    #[allow(dead_code)]
     pub fn remove(&self, token: &str) -> bool {
         self.sessions.remove(token).is_some()
     }
