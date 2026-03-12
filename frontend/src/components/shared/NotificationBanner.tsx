@@ -10,7 +10,7 @@ interface NotificationBannerProps {
 
 export function NotificationBanner({ onEnable, onDismiss }: NotificationBannerProps) {
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-accent/50 px-4 py-2">
+    <div className="fixed top-0 left-0 right-0 z-50 flex items-center gap-3 border-b border-border bg-accent/50 px-4 py-2 backdrop-blur-sm">
       <Bell className="size-4 shrink-0 text-primary" />
       <p className="flex-1 text-sm text-foreground">
         Enable desktop notifications to get alerted about new emails.
