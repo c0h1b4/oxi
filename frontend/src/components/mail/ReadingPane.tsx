@@ -9,6 +9,9 @@ import {
   Type,
   FileCode,
   ShieldAlert,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
@@ -36,6 +39,7 @@ export function ReadingPane() {
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
   const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
+  const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
     new Set()
   );
@@ -71,6 +75,7 @@ export function ReadingPane() {
     } else {
       setBodyMode("html");
     }
+    setEmailTheme("auto");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.uid]);
 
@@ -223,6 +228,26 @@ export function ReadingPane() {
             <FileCode className="size-3" />
             Headers
           </button>
+
+          {/* Email Theme toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              if (emailTheme === "auto") setEmailTheme("light");
+              else if (emailTheme === "light") setEmailTheme("dark");
+              else setEmailTheme("auto");
+            }}
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
+              emailTheme !== "auto"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {emailTheme === "auto" && <Monitor className="size-3" />}
+            {emailTheme === "light" && <Sun className="size-3" />}
+            {emailTheme === "dark" && <Moon className="size-3" />}
+            {emailTheme === "auto" ? "Auto theme" : emailTheme === "light" ? "Light mode" : "Dark mode"}
+          </button>
         </div>
       </div>
 
@@ -303,6 +328,7 @@ export function ReadingPane() {
             html={data.html}
             text={data.text}
             blockRemoteResources={!remoteAllowed}
+            theme={emailTheme}
           />
         )}
       </div>
