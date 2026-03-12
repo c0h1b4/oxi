@@ -69,7 +69,6 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsSystemDark(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsSystemDark(e.matches);
     mq.addEventListener("change", handler);
@@ -96,13 +95,13 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
               } else {
                 const win = iframe.contentWindow;
                 if (!win) return;
-                
+
                 let dominantBg = win.getComputedStyle(body).backgroundColor;
                 const docW = doc.documentElement.clientWidth || body.clientWidth || win.innerWidth;
                 const docH = Math.max(
-                  body.scrollHeight, 
-                  body.offsetHeight, 
-                  doc.documentElement.clientHeight, 
+                  body.scrollHeight,
+                  body.offsetHeight,
+                  doc.documentElement.clientHeight,
                   doc.documentElement.scrollHeight
                 );
                 const bodyArea = docW * docH;
@@ -123,14 +122,14 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
                     }
                   }
                 }
-                
+
                 const match = dominantBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
                 if (match) {
                   const r = parseInt(match[1], 10);
                   const g = parseInt(match[2], 10);
                   const b = parseInt(match[3], 10);
                   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-                  
+
                   if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
                     isEmailDark = true;
                   }
@@ -157,7 +156,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
             docEl?.scrollHeight ?? 0,
             docEl?.offsetHeight ?? 0
           );
-          
+
           // Only update if height changed significantly to prevent resize loops
           if (Math.abs(height - lastHeight) > 2) {
             iframe.style.height = `${Math.max(height, 100)}px`;
@@ -204,7 +203,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         Helvetica, Arial, sans-serif;
       margin: 0;
-      padding: 16px;
+      padding: 0px;
       box-sizing: border-box;
       overflow-y: hidden !important;
       overflow-x: auto;
@@ -229,61 +228,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
 </head>
 <body>
   ${displayHtml}
-  ${isDark ? `
-  <script>
-    (function() {
-      try {
-        let isEmailDark = false;
-        
-        const metaColorScheme = document.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
-        if (metaColorScheme && metaColorScheme.getAttribute('content').toLowerCase().includes('dark')) {
-          isEmailDark = true;
-        } else {
-          let dominantBg = window.getComputedStyle(document.body).backgroundColor;
-          const docW = document.documentElement.clientWidth || document.body.clientWidth || window.innerWidth;
-          const docH = Math.max(document.body.scrollHeight, document.body.offsetHeight, document.documentElement.clientHeight, document.documentElement.scrollHeight);
-          const bodyArea = docW * docH;
-          let maxArea = bodyArea * 0.5; // Give descendants an edge if they cover at least 50% of the body
-          
-          const elems = document.body.querySelectorAll('*');
-          for (let i = 0; i < elems.length; i++) {
-            const el = elems[i];
-            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.style.display === 'none') continue;
-            const style = window.getComputedStyle(el);
-            const bg = style.backgroundColor;
-            if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-              const rect = el.getBoundingClientRect();
-              const area = rect.width * rect.height;
-              // If area is greater OR if it's identical/very close, we let the inner element win
-              if (area >= maxArea) {
-                maxArea = area;
-                dominantBg = bg;
-              }
-            }
-          }
-          
-          const match = dominantBg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-          if (match) {
-            const r = parseInt(match[1], 10);
-            const g = parseInt(match[2], 10);
-            const b = parseInt(match[3], 10);
-            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
-            if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
-              isEmailDark = true;
-            }
-          }
-        }
 
-        if (isEmailDark) {
-          document.documentElement.classList.remove('invert-enabled');
-        }
-      } catch (e) {
-        console.error("Error detecting email theme:", e);
-      }
-    })();
-  </script>
-  ` : ""}
 </body>
 </html>`;
 
