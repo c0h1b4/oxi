@@ -37,9 +37,9 @@ pub struct SearchResult {
 #[derive(Default)]
 pub struct SearchQuery {
     pub text: String,
+    pub subject_only: Option<String>,
     pub folder: Option<String>,
     pub from: Option<String>,
-    #[allow(dead_code)]
     pub to: Option<String>,
     pub date_from: Option<i64>,
     pub date_to: Option<i64>,
@@ -238,30 +238,50 @@ impl UserIndex {
     /// Search the index with a text query and optional filters.
     /// Returns matching results and total count.
     pub fn search(&self, query: &SearchQuery) -> Result<(Vec<SearchResult>, usize), String> {
-        if query.text.is_empty() {
+        if query.text.is_empty() && query.subject_only.is_none() {
             return Ok((Vec::new(), 0));
         }
 
         let searcher = self.reader.searcher();
 
-        // Build the text query across subject, body_text, from_name, to_addresses.
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![
-                self.fields.subject,
-                self.fields.body_text,
-                self.fields.from_name,
-                self.fields.to_addresses,
-            ],
-        );
-
-        let text_query = query_parser
-            .parse_query(&query.text)
-            .map_err(|e| format!("Failed to parse query: {e}"))?;
-
         // Collect all sub-queries into a BooleanQuery with Must clauses.
         let mut clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
-        clauses.push((Occur::Must, text_query));
+
+        // Build the full-text query across subject, body_text, from_name, to_addresses.
+        if !query.text.is_empty() {
+            let query_parser = QueryParser::for_index(
+                &self.index,
+                vec![
+                    self.fields.subject,
+                    self.fields.body_text,
+                    self.fields.from_name,
+                    self.fields.to_addresses,
+                ],
+            );
+
+            let text_query = query_parser
+                .parse_query(&query.text)
+                .map_err(|e| format!("Failed to parse query: {e}"))?;
+
+            clauses.push((Occur::Must, text_query));
+        }
+
+        // Optional subject-only search (searches only the subject field).
+        if let Some(ref subject_text) = query.subject_only {
+            let subject_parser = QueryParser::for_index(
+                &self.index,
+                vec![self.fields.subject],
+            );
+            let subject_query = subject_parser
+                .parse_query(subject_text)
+                .map_err(|e| format!("Failed to parse subject query: {e}"))?;
+            clauses.push((Occur::Must, subject_query));
+        }
+
+        // If no text clauses were added, use a match-all query so filters still work.
+        if clauses.is_empty() {
+            clauses.push((Occur::Must, Box::new(tantivy::query::AllQuery)));
+        }
 
         // Optional folder filter (STRING field -> TermQuery).
         if let Some(ref folder) = query.folder {
@@ -270,11 +290,35 @@ impl UserIndex {
             clauses.push((Occur::Must, Box::new(folder_query)));
         }
 
-        // Optional from filter (STRING field -> TermQuery on from_address).
+        // Optional from filter: if value contains '@', exact match on from_address;
+        // otherwise, text search on from_name.
         if let Some(ref from) = query.from {
-            let term = Term::from_field_text(self.fields.from_address, from);
-            let from_query = TermQuery::new(term, IndexRecordOption::Basic);
-            clauses.push((Occur::Must, Box::new(from_query)));
+            if from.contains('@') {
+                let term = Term::from_field_text(self.fields.from_address, from);
+                let from_query = TermQuery::new(term, IndexRecordOption::Basic);
+                clauses.push((Occur::Must, Box::new(from_query)));
+            } else {
+                let from_parser = QueryParser::for_index(
+                    &self.index,
+                    vec![self.fields.from_name],
+                );
+                let from_query = from_parser
+                    .parse_query(from)
+                    .map_err(|e| format!("Failed to parse from query: {e}"))?;
+                clauses.push((Occur::Must, from_query));
+            }
+        }
+
+        // Optional to filter (TEXT field -> text search on to_addresses).
+        if let Some(ref to) = query.to {
+            let to_parser = QueryParser::for_index(
+                &self.index,
+                vec![self.fields.to_addresses],
+            );
+            let to_query = to_parser
+                .parse_query(to)
+                .map_err(|e| format!("Failed to parse to query: {e}"))?;
+            clauses.push((Occur::Must, to_query));
         }
 
         // Optional date range filter.

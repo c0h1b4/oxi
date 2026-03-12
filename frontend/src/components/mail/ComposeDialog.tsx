@@ -15,9 +15,15 @@ import {
   Upload,
   FileText,
   Code,
+  PenLine,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useComposeStore } from "@/stores/useComposeStore";
+import {
+  useComposeStore,
+  replaceSignatureInBody,
+  removeSignatureFromBody,
+  injectSignature,
+} from "@/stores/useComposeStore";
 import {
   useSendMessage,
   useSaveDraft,
@@ -59,6 +65,8 @@ export function ComposeDialog() {
     attachments,
     fromIdentityId,
     isHtml,
+    signatureHtml,
+    signatureEnabled,
     closeCompose,
     setField,
     setShowCc,
@@ -66,6 +74,8 @@ export function ComposeDialog() {
     setDraftId,
     setFromIdentityId,
     setIsHtml,
+    setSignatureHtml,
+    setSignatureEnabled,
     addAttachments,
     removeAttachment,
     reset,
@@ -98,13 +108,19 @@ export function ComposeDialog() {
     );
   }, [to, cc, bcc, subject, body, attachments]);
 
-  // Auto-select the default identity when dialog opens and no identity is set
+  // Auto-select the default identity when dialog opens and no identity is set,
+  // and inject signature into body
   useEffect(() => {
     if (isOpen && fromIdentityId === null && identities && identities.length > 0) {
       const defaultIdentity = identities.find((i) => i.is_default) ?? identities[0];
       setFromIdentityId(defaultIdentity.id);
+      // Inject signature from the default identity
+      if (defaultIdentity.signature_html && signatureEnabled) {
+        setSignatureHtml(defaultIdentity.signature_html);
+        setField("body", injectSignature(body, defaultIdentity.signature_html));
+      }
     }
-  }, [isOpen, fromIdentityId, identities, setFromIdentityId]);
+  }, [isOpen, fromIdentityId, identities, setFromIdentityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
@@ -566,11 +582,17 @@ export function ComposeDialog() {
                   </label>
                   <select
                     value={fromIdentityId ?? ""}
-                    onChange={(e) =>
-                      setFromIdentityId(
-                        e.target.value ? Number(e.target.value) : null
-                      )
-                    }
+                    onChange={(e) => {
+                      const newId = e.target.value ? Number(e.target.value) : null;
+                      setFromIdentityId(newId);
+                      // Swap signature when identity changes
+                      if (identities && signatureEnabled) {
+                        const newIdentity = identities.find((i) => i.id === newId);
+                        const newSig = newIdentity?.signature_html || "";
+                        setSignatureHtml(newSig);
+                        setField("body", replaceSignatureInBody(body, newSig));
+                      }
+                    }}
                     className="flex-1 bg-transparent py-2 text-sm outline-none"
                   >
                     {identities.map((identity) => (
@@ -768,6 +790,28 @@ export function ComposeDialog() {
                   ) : (
                     <Code className="size-4" />
                   )}
+                </button>
+                <button
+                  onClick={() => {
+                    const newEnabled = !signatureEnabled;
+                    setSignatureEnabled(newEnabled);
+                    if (newEnabled) {
+                      // Re-inject signature
+                      if (signatureHtml) {
+                        setField("body", injectSignature(removeSignatureFromBody(body), signatureHtml));
+                      }
+                    } else {
+                      // Remove signature from body
+                      setField("body", removeSignatureFromBody(body));
+                    }
+                  }}
+                  className={cn(
+                    "rounded-lg p-2 hover:bg-accent hover:text-foreground",
+                    signatureEnabled ? "text-primary" : "text-muted-foreground"
+                  )}
+                  title={signatureEnabled ? "Remove signature" : "Add signature"}
+                >
+                  <PenLine className="size-4" />
                 </button>
                 <input
                   ref={fileInputRef}

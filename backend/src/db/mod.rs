@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod contact_groups;
 pub mod contacts;
 pub mod display_preferences;

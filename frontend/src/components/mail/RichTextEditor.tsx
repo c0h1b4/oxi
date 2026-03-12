@@ -26,6 +26,7 @@ interface RichTextEditorProps {
   onImageUpload?: (file: File) => Promise<string | null>;
   placeholder?: string;
   className?: string;
+  compact?: boolean;
 }
 
 function ToolbarButton({
@@ -66,6 +67,7 @@ export function RichTextEditor({
   onImageUpload,
   placeholder = "Write your message...",
   className,
+  compact = false,
 }: RichTextEditorProps) {
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,7 +98,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm dark:prose-invert max-w-none min-h-[200px] outline-none px-4 py-3",
+          `prose prose-sm dark:prose-invert max-w-none ${compact ? "min-h-[100px]" : "min-h-[200px]"} outline-none px-4 py-3`,
       },
     },
   });
@@ -147,7 +149,7 @@ export function RichTextEditor({
   return (
     <div className={cn("flex flex-col", className)}>
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 border-b border-border/50 px-3 py-1.5">
+      <div className={cn("flex items-center gap-0.5 border-b border-border/50 px-3", compact ? "py-1" : "py-1.5")}>
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive("bold")}

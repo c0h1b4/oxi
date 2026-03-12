@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod auth;
+pub mod calendar;
 pub mod contact_groups;
 pub mod contacts;
 pub mod display_preferences;
@@ -243,6 +244,34 @@ pub fn create_router(
             "/settings/notifications",
             get(notification_preferences::get_notification_preferences)
                 .put(notification_preferences::update_notification_preferences),
+        )
+        .route(
+            "/calendar/events",
+            get(calendar::list_events).post(calendar::create_event),
+        )
+        .route(
+            "/calendar/events/import-ics",
+            post(calendar::import_ics),
+        )
+        .route(
+            "/calendar/events/{id}",
+            get(calendar::get_event)
+                .put(calendar::update_event)
+                .delete(calendar::delete_event),
+        )
+        .route(
+            "/calendar/settings",
+            get(calendar::get_calendar_settings)
+                .put(calendar::update_calendar_settings),
+        )
+        .route(
+            "/calendar/meeting-templates",
+            get(calendar::list_meeting_templates)
+                .post(calendar::create_meeting_template),
+        )
+        .route(
+            "/calendar/meeting-templates/{id}",
+            delete(calendar::delete_meeting_template),
         )
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
