@@ -64,6 +64,16 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
+  // Auto-switch to plain text mode for plaintext-only emails
+  useEffect(() => {
+    if (data && !data.html && data.text) {
+      setBodyMode("plain");
+    } else {
+      setBodyMode("html");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.uid]);
+
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
     if (data && !data.flags.includes("\\Seen")) {
