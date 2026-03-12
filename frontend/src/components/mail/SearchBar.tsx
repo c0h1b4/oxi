@@ -31,7 +31,6 @@ export function SearchBar() {
   const [inputValue, setInputValue] = useState(searchQuery);
   const [showTips, setShowTips] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const tipsRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch results for displaying the count
@@ -112,22 +111,6 @@ export function SearchBar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  // Close tips when clicking outside
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        tipsRef.current &&
-        !tipsRef.current.contains(e.target as Node) &&
-        inputRef.current &&
-        !inputRef.current.contains(e.target as Node)
-      ) {
-        setShowTips(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   // Sync input value when the Zustand store is cleared externally (e.g. pressing
   // Escape or clicking the clear button).  This is an intentional synchronisation
   // between external state and local component state.
@@ -148,9 +131,6 @@ export function SearchBar() {
             value={inputValue}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            onFocus={() => {
-              if (!inputValue) setShowTips(true);
-            }}
             placeholder="Search mail... (Ctrl+K)"
             data-search-input
             className="h-8 w-full rounded-md border border-border bg-background py-1 pl-8 pr-14 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -168,8 +148,10 @@ export function SearchBar() {
             )}
             <button
               type="button"
-              onClick={() => setShowTips((prev) => !prev)}
-              aria-label="Search tips"
+              onMouseDown={() => setShowTips(true)}
+              onMouseUp={() => setShowTips(false)}
+              onMouseLeave={() => setShowTips(false)}
+              aria-label="Search tips (hold to show)"
               className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
             >
               <HelpCircle className="size-3.5" />
@@ -179,7 +161,6 @@ export function SearchBar() {
           {/* Search tips popover */}
           {showTips && (
             <div
-              ref={tipsRef}
               className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-border bg-popover p-2 shadow-md"
             >
               <p className="mb-1.5 text-xs font-medium text-foreground">
