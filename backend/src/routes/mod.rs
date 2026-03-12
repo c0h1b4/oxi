@@ -112,13 +112,13 @@ pub fn create_router(
     // Browser-bound routes (no auth_guard, no rate limit).
     // These routes only need the browser cookie, not full auth.
     let browser_routes = Router::new()
-        .route("/accounts", get(auth::list_accounts));
+        .route("/accounts", get(auth::list_accounts))
+        .route("/accounts/{id}", delete(auth::remove_account).layer(middleware::from_fn(csrf_protection)));
 
     // Protected auth routes (auth_guard + CSRF).
     let protected_auth = Router::new()
         .route("/session", get(auth::get_session))
         .route("/logout", post(auth::logout))
-        .route("/accounts/{id}", delete(auth::remove_account))
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 

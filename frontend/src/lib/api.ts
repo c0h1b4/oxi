@@ -19,6 +19,11 @@ function handleAccountSessionExpired(error: ApiError): void {
   if (error.code === "ACCOUNT_SESSION_EXPIRED" && error.accountId) {
     useAuthStore.getState().removeAccount(error.accountId);
     toast.error(error.message ?? "Account session expired");
+    fetch(`${API_BASE}/auth/accounts/${error.accountId}`, {
+      method: "DELETE",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      credentials: "same-origin",
+    }).catch(() => {});
   }
 }
 
