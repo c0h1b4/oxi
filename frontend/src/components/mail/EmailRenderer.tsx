@@ -1,11 +1,13 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
+import { useUiStore } from "@/stores/useUiStore";
 
 interface EmailRendererProps {
   html: string | null;
   text: string | null;
   blockRemoteResources?: boolean;
+  theme?: "light" | "dark" | "auto";
 }
 
 /**
@@ -56,8 +58,25 @@ export function hasRemoteResources(html: string | null): boolean {
     /url\(\s*["']?https?:\/\//i.test(html);
 }
 
-export function EmailRenderer({ html, text, blockRemoteResources = false }: EmailRendererProps) {
+export function EmailRenderer({ html, text, blockRemoteResources = false, theme = "auto" }: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const appTheme = useUiStore((state) => state.theme);
+  const resolvedTheme = theme === "auto" ? appTheme : theme;
+
+  const [isSystemDark, setIsSystemDark] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsSystemDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const isDark = resolvedTheme === "dark" || (resolvedTheme === "system" && isSystemDark);
 
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
@@ -109,13 +128,23 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
     }
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
+    ${isDark ? `
+    html, body {
+      background-color: white !important;
+      color: black !important;
+      filter: invert(1) hue-rotate(180deg);
+    }
+    img, picture, video {
+      filter: invert(1) hue-rotate(180deg);
+    }
+    ` : ""}
   </style>
 </head>
 <body>${displayHtml}</body>
 </html>`;
 
     return (
-      <div className="h-full w-full overflow-auto bg-white">
+      <div className="h-full w-full overflow-auto">
         <iframe
           ref={iframeRef}
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
