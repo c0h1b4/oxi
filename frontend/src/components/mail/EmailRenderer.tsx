@@ -86,6 +86,66 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       const doc = iframe.contentDocument;
       const body = doc?.body;
       if (body) {
+        if (isDark) {
+          setTimeout(() => {
+            try {
+              let isEmailDark = false;
+              const metaColorScheme = doc.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
+              if (metaColorScheme && metaColorScheme.getAttribute('content')?.toLowerCase().includes('dark')) {
+                isEmailDark = true;
+              } else {
+                const win = iframe.contentWindow;
+                if (!win) return;
+                
+                let dominantBg = win.getComputedStyle(body).backgroundColor;
+                const docW = doc.documentElement.clientWidth || body.clientWidth || win.innerWidth;
+                const docH = Math.max(
+                  body.scrollHeight, 
+                  body.offsetHeight, 
+                  doc.documentElement.clientHeight, 
+                  doc.documentElement.scrollHeight
+                );
+                const bodyArea = docW * docH;
+                let maxArea = bodyArea * 0.5;
+
+                const elems = body.querySelectorAll('*');
+                for (let i = 0; i < elems.length; i++) {
+                  const el = elems[i];
+                  if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || (el as HTMLElement).style.display === 'none') continue;
+                  const style = win.getComputedStyle(el);
+                  const bg = style.backgroundColor;
+                  if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                    const rect = el.getBoundingClientRect();
+                    const area = rect.width * rect.height;
+                    if (area >= maxArea) {
+                      maxArea = area;
+                      dominantBg = bg;
+                    }
+                  }
+                }
+                
+                const match = dominantBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                if (match) {
+                  const r = parseInt(match[1], 10);
+                  const g = parseInt(match[2], 10);
+                  const b = parseInt(match[3], 10);
+                  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                  
+                  if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
+                    isEmailDark = true;
+                  }
+                }
+              }
+
+              if (isEmailDark && doc.documentElement) {
+                doc.documentElement.classList.remove('invert-enabled');
+              }
+            } catch (e) {
+              console.error("Error detecting email theme:", e);
+            }
+          }, 50);
+        }
+
         let lastHeight = 0;
         const updateHeight = () => {
           const docEl = doc?.documentElement;
@@ -126,21 +186,21 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     } catch {
       iframe.style.height = "600px";
     }
-  }, []);
+  }, [isDark]);
 
   if (html) {
     const processedHtml = blockRemoteResources ? stripRemoteResources(html) : { cleaned: html, hasRemote: false };
     const displayHtml = processedHtml.cleaned;
 
     const wrappedHtml = `<!DOCTYPE html>
-<html>
+<html${isDark ? ' class="invert-enabled"' : ''}>
 <head>
   <meta charset="utf-8" />
   <style>
     html, body {
-      background-color: white !important;
-      color: black !important;
-      color-scheme: light !important;
+      background-color: white;
+      color: black;
+      color-scheme: light;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         Helvetica, Arial, sans-serif;
       margin: 0;
@@ -152,20 +212,79 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
     ${isDark ? `
-    html {
+    html.invert-enabled {
       filter: invert(1) hue-rotate(180deg);
     }
-    img, picture, video {
+    html.invert-enabled img,
+    html.invert-enabled picture,
+    html.invert-enabled video {
       filter: invert(1) hue-rotate(180deg);
     }
-    * {
+    html.invert-enabled * {
       box-shadow: none !important;
       text-shadow: none !important;
     }
     ` : ""}
   </style>
 </head>
-<body>${displayHtml}</body>
+<body>
+  ${displayHtml}
+  ${isDark ? `
+  <script>
+    (function() {
+      try {
+        let isEmailDark = false;
+        
+        const metaColorScheme = document.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
+        if (metaColorScheme && metaColorScheme.getAttribute('content').toLowerCase().includes('dark')) {
+          isEmailDark = true;
+        } else {
+          let dominantBg = window.getComputedStyle(document.body).backgroundColor;
+          const docW = document.documentElement.clientWidth || document.body.clientWidth || window.innerWidth;
+          const docH = Math.max(document.body.scrollHeight, document.body.offsetHeight, document.documentElement.clientHeight, document.documentElement.scrollHeight);
+          const bodyArea = docW * docH;
+          let maxArea = bodyArea * 0.5; // Give descendants an edge if they cover at least 50% of the body
+          
+          const elems = document.body.querySelectorAll('*');
+          for (let i = 0; i < elems.length; i++) {
+            const el = elems[i];
+            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.style.display === 'none') continue;
+            const style = window.getComputedStyle(el);
+            const bg = style.backgroundColor;
+            if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+              const rect = el.getBoundingClientRect();
+              const area = rect.width * rect.height;
+              // If area is greater OR if it's identical/very close, we let the inner element win
+              if (area >= maxArea) {
+                maxArea = area;
+                dominantBg = bg;
+              }
+            }
+          }
+          
+          const match = dominantBg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+          if (match) {
+            const r = parseInt(match[1], 10);
+            const g = parseInt(match[2], 10);
+            const b = parseInt(match[3], 10);
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            
+            if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
+              isEmailDark = true;
+            }
+          }
+        }
+
+        if (isEmailDark) {
+          document.documentElement.classList.remove('invert-enabled');
+        }
+      } catch (e) {
+        console.error("Error detecting email theme:", e);
+      }
+    })();
+  </script>
+  ` : ""}
+</body>
 </html>`;
 
     return (
