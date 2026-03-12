@@ -466,7 +466,15 @@ impl ImapClient for RealImapClient {
 
             let text_plain: Option<String> = parsed.body_text(0).map(|s| s.to_string());
 
-            let text_html: Option<String> = parsed.body_html(0).map(|s| s.to_string());
+            let has_html_part = parsed.parts.iter().any(|part| {
+                part.content_type().is_some_and(|ct| ct.ctype() == "text" && ct.subtype() == Some("html"))
+            });
+
+            let text_html: Option<String> = if has_html_part {
+                parsed.body_html(0).map(|s| s.to_string())
+            } else {
+                None
+            };
 
             tracing::debug!(
                 uid = uid,

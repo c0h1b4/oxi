@@ -104,6 +104,8 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
         Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 16px;
+      min-height: 100vh;
+      box-sizing: border-box;
     }
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
@@ -113,7 +115,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
 </html>`;
 
     return (
-      <div className="h-full w-full overflow-auto">
+      <div className="h-full w-full overflow-auto bg-white">
         <iframe
           ref={iframeRef}
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"

@@ -61,11 +61,10 @@ pub fn parse_ics(ics_text: &str) -> Result<Vec<CreateEvent>, String> {
                     "ATTENDEE" => {
                         attendees.push(extract_email_from_cal_address(value));
                     }
-                    "URL" => {
-                        if !value.is_empty() {
+                    "URL"
+                        if !value.is_empty() => {
                             url = Some(value.to_string());
                         }
-                    }
                     _ => {}
                 }
             }

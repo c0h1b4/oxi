@@ -179,6 +179,7 @@ export function ReadingPane() {
         <div className="flex gap-1 pt-1">
           {/* Details / Summary toggle */}
           <button
+            type="button"
             onClick={() =>
               setHeaderMode(headerMode === "details" ? "summary" : "details")
             }
@@ -194,6 +195,7 @@ export function ReadingPane() {
 
           {/* Plain text / HTML toggle */}
           <button
+            type="button"
             onClick={() => {
               setBodyMode(bodyMode === "html" ? "plain" : "html");
               setShowHeaders(false);
@@ -210,6 +212,7 @@ export function ReadingPane() {
 
           {/* Headers toggle (shows as selected when active) */}
           <button
+            type="button"
             onClick={() => setShowHeaders(!showHeaders)}
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
               showHeaders
@@ -229,6 +232,7 @@ export function ReadingPane() {
           {data.attachments.map((att, i) => (
             <button
               key={att.id}
+              type="button"
               onClick={() => setPreviewIndex(i)}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
             >
@@ -285,7 +289,7 @@ export function ReadingPane() {
       )}
 
       {/* Body area — fills remaining space */}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1" key={data.uid}>
         {showHeaders ? (
           <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-foreground">
             {data.raw_headers || "No headers available"}
