@@ -24,9 +24,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accounts: [],
   activeAccountId: null,
   
-  setAccounts: (accounts) => set({ 
-    accounts, 
-    activeAccountId: accounts.length > 0 ? accounts[0].id : null,
+  setAccounts: (accounts) => set((state) => { 
+    const currentActiveExists = accounts.some((a) => a.id === state.activeAccountId);
+    return {
+      accounts, 
+      activeAccountId: currentActiveExists 
+        ? state.activeAccountId 
+        : (accounts.length > 0 ? accounts[0].id : null),
+    };
   }),
   
   addAccount: (account) => set((state) => ({ 

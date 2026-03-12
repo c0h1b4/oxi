@@ -193,7 +193,14 @@ pub async fn login(
                 config.session_timeout_hours
             };
 
+            let provided_browser_id = body.browser_id.clone();
             let browser_id = body.browser_id.unwrap_or_else(|| store.create_browser());
+            tracing::debug!(
+                email = %body.email,
+                provided_browser_id = ?provided_browser_id,
+                effective_browser_id = %browser_id,
+                "login: creating session"
+            );
 
             let (token, account_id) = store.add_account_to_browser(
                 &browser_id,
@@ -289,6 +296,7 @@ pub async fn list_accounts(
     let browser_id = extract_browser_id(&headers);
 
     let Some(browser_id) = browser_id else {
+        tracing::debug!("list_accounts: no browser_id cookie found");
         let empty_accounts: Vec<serde_json::Value> = vec![];
         return (
             StatusCode::OK,
@@ -298,8 +306,15 @@ pub async fn list_accounts(
             .into_response();
     };
 
-    let accounts: Vec<serde_json::Value> = store
-        .get_browser_accounts(&browser_id)
+    let accounts_raw = store.get_browser_accounts(&browser_id);
+    tracing::debug!(
+        browser_id = %browser_id,
+        account_count = accounts_raw.len(),
+        accounts = ?accounts_raw.iter().map(|a| &a.email).collect::<Vec<_>>(),
+        "list_accounts: fetched accounts"
+    );
+
+    let accounts: Vec<serde_json::Value> = accounts_raw
         .into_iter()
         .map(|session| {
             serde_json::json!({

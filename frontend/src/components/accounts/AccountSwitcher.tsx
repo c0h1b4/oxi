@@ -21,7 +21,7 @@ export function AccountSwitcher() {
   const handleSwitchAccount = (accountId: string) => {
     if (accountId === activeAccountId) return;
     setActiveAccount(accountId);
-    queryClient.invalidateQueries();
+    queryClient.clear();
   };
 
   return (
