@@ -64,22 +64,17 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
     if (!iframe) return;
 
     try {
-      const body = iframe.contentDocument?.body;
+      const doc = iframe.contentDocument;
+      const body = doc?.body;
       if (body) {
-        // Set initial height, then observe for changes (e.g. images loading)
         const updateHeight = () => {
-          // Reset height first so it can shrink if needed, 
-          // but set a minimum so it doesn't collapse entirely
-          iframe.style.height = "100px"; 
-          // Use the html element's scrollHeight which is often more accurate 
-          // than body for full document height
-          const height = iframe.contentDocument?.documentElement.scrollHeight || body.scrollHeight;
-          iframe.style.height = `${Math.max(100, height)}px`;
+          const docEl = doc?.documentElement;
+          const height = docEl?.scrollHeight ?? body.scrollHeight;
+          iframe.style.height = `${Math.max(height, 100)}px`;
         };
 
         updateHeight();
 
-        // Re-measure after images and other resources finish loading
         const images = body.querySelectorAll("img");
         images.forEach((img) => {
           if (!img.complete) {
@@ -89,8 +84,6 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
         });
       }
     } catch {
-      // If we can't access contentDocument (shouldn't happen with srcDoc),
-      // fall back to a reasonable minimum height
       iframe.style.height = "600px";
     }
   }, []);
@@ -126,6 +119,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
           srcDoc={wrappedHtml}
           className="w-full border-none"
+          style={{ minHeight: "100px" }}
           title="Email content"
           onLoad={handleIframeLoad}
         />
