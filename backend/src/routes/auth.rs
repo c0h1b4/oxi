@@ -378,11 +378,15 @@ pub async fn list_accounts(
     let session_map: std::collections::HashMap<String, String> = session_cookies.into_iter().collect();
     
     let browser_accounts = store.get_browser_accounts(&browser_id);
+    let browser_account_ids: Vec<String> = browser_accounts
+        .iter()
+        .map(|s| s.account_id.clone())
+        .collect();
     
     let mut valid_accounts: Vec<serde_json::Value> = Vec::new();
     let mut clear_cookies: Vec<String> = Vec::new();
     
-    for session in browser_accounts {
+    for session in &browser_accounts {
         if let Some(token) = session_map.get(&session.account_id) {
             if let Some(valid_session) = store.get(token) {
                 valid_accounts.push(serde_json::json!({
@@ -392,8 +396,17 @@ pub async fn list_accounts(
                     "smtpHost": valid_session.smtp_host
                 }));
             } else {
+                store.remove_account(&session.account_id);
                 clear_cookies.push(clearing_account_cookie(&session.account_id, secure));
             }
+        } else {
+            store.remove_account(&session.account_id);
+        }
+    }
+    
+    for account_id in session_map.keys() {
+        if !browser_account_ids.contains(account_id) {
+            clear_cookies.push(clearing_account_cookie(account_id, secure));
         }
     }
 
