@@ -86,6 +86,27 @@ fn extract_browser_id(headers: &axum::http::HeaderMap) -> Option<String> {
         })
 }
 
+fn extract_session_cookies(headers: &axum::http::HeaderMap) -> Vec<(String, String)> {
+    let prefix = "oxi_session_";
+    let mut sessions = Vec::new();
+    
+    for cookie in headers.get_all("cookie").iter().filter_map(|v| v.to_str().ok()) {
+        for segment in cookie.split(';') {
+            let trimmed = segment.trim();
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                if let Some(eq_pos) = rest.find('=') {
+                    let account_id = &rest[..eq_pos];
+                    let token = &rest[eq_pos + 1..];
+                    if !account_id.is_empty() && !token.is_empty() {
+                        sessions.push((account_id.to_string(), token.to_string()));
+                    }
+                }
+            }
+        }
+    }
+    sessions
+}
+
 /// `POST /api/auth/login`
 ///
 /// Validates the user's credentials against the configured IMAP server.
@@ -148,6 +169,37 @@ pub async fn login(
 
     match result {
         AuthResult::Success => {
+            let provided_browser_id = body.browser_id.clone();
+            
+            if let Some(ref browser_id) = provided_browser_id {
+                let existing_accounts = store.get_browser_accounts(browser_id);
+                let duplicate = existing_accounts.iter().find(|a| {
+                    a.email == body.email && a.imap_host == imap_host
+                });
+                
+                if let Some(dup) = duplicate {
+                    tracing::debug!(
+                        email = %body.email,
+                        imap_host = %imap_host,
+                        existing_account_id = %dup.account_id,
+                        "login: duplicate account detected"
+                    );
+                    return (
+                        StatusCode::CONFLICT,
+                        [("content-type", "application/json")],
+                        serde_json::json!({
+                            "error": {
+                                "code": "DUPLICATE_ACCOUNT",
+                                "message": "This account is already logged in",
+                                "status": 409
+                            }
+                        })
+                        .to_string(),
+                    )
+                        .into_response();
+                }
+            }
+            
             let user_hash = user_data::hash_email(&body.email);
             if let Err(e) = user_data::provision_user_data(&config.data_dir, &user_hash) {
                 tracing::error!(error = %e, "failed to provision user data directory");
@@ -290,48 +342,109 @@ pub async fn get_session(Extension(session): Extension<SessionState>) -> Respons
 
 pub async fn list_accounts(
     Extension(store): Extension<Arc<SessionStore>>,
-    Extension(_config): Extension<Arc<AppConfig>>,
+    Extension(config): Extension<Arc<AppConfig>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
+    let secure = config.environment != "development";
+    
     let browser_id = extract_browser_id(&headers);
 
     let Some(browser_id) = browser_id else {
         tracing::debug!("list_accounts: no browser_id cookie found");
-        let empty_accounts: Vec<serde_json::Value> = vec![];
         return (
             StatusCode::OK,
             [("content-type", "application/json")],
-            serde_json::json!({ "accounts": empty_accounts }).to_string(),
+            serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string(),
         )
             .into_response();
     };
 
-    let accounts_raw = store.get_browser_accounts(&browser_id);
+    let browser_exists = store.browser_exists(&browser_id);
+    if !browser_exists {
+        tracing::debug!(browser_id = %browser_id, "list_accounts: browser_id not found on server");
+        let clear_browser = clearing_browser_cookie(secure);
+        return (
+            StatusCode::OK,
+            [
+                ("content-type", "application/json"),
+                ("set-cookie", &clear_browser),
+            ],
+            serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string(),
+        )
+            .into_response();
+    }
+
+    let session_cookies = extract_session_cookies(&headers);
+    let session_map: std::collections::HashMap<String, String> = session_cookies.into_iter().collect();
+    
+    let browser_accounts = store.get_browser_accounts(&browser_id);
+    
+    let mut valid_accounts: Vec<serde_json::Value> = Vec::new();
+    let mut clear_cookies: Vec<String> = Vec::new();
+    
+    for session in browser_accounts {
+        if let Some(token) = session_map.get(&session.account_id) {
+            if let Some(valid_session) = store.get(token) {
+                valid_accounts.push(serde_json::json!({
+                    "id": valid_session.account_id,
+                    "email": valid_session.email,
+                    "imapHost": valid_session.imap_host,
+                    "smtpHost": valid_session.smtp_host
+                }));
+            } else {
+                clear_cookies.push(clearing_account_cookie(&session.account_id, secure));
+            }
+        }
+    }
+
+    if valid_accounts.is_empty() {
+        tracing::debug!(
+            browser_id = %browser_id,
+            "list_accounts: no valid accounts found"
+        );
+        let clear_browser = clearing_browser_cookie(secure);
+        let body = serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string();
+        
+        let mut response = axum::response::Response::new(axum::body::Body::from(body));
+        *response.status_mut() = StatusCode::OK;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+        response.headers_mut().append(
+            axum::http::header::SET_COOKIE,
+            axum::http::HeaderValue::from_str(&clear_browser).unwrap(),
+        );
+        for cookie in clear_cookies {
+            response.headers_mut().append(
+                axum::http::header::SET_COOKIE,
+                axum::http::HeaderValue::from_str(&cookie).unwrap(),
+            );
+        }
+        return response;
+    }
+
     tracing::debug!(
         browser_id = %browser_id,
-        account_count = accounts_raw.len(),
-        accounts = ?accounts_raw.iter().map(|a| &a.email).collect::<Vec<_>>(),
-        "list_accounts: fetched accounts"
+        account_count = valid_accounts.len(),
+        accounts = ?valid_accounts.iter().filter_map(|a| a.get("email").and_then(|e| e.as_str())).collect::<Vec<_>>(),
+        "list_accounts: returning valid accounts"
     );
 
-    let accounts: Vec<serde_json::Value> = accounts_raw
-        .into_iter()
-        .map(|session| {
-            serde_json::json!({
-                "id": session.account_id,
-                "email": session.email,
-                "imapHost": session.imap_host,
-                "smtpHost": session.smtp_host
-            })
-        })
-        .collect();
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        serde_json::json!({ "accounts": accounts }).to_string(),
-    )
-        .into_response()
+    let body = serde_json::json!({ "accounts": valid_accounts }).to_string();
+    let mut response = axum::response::Response::new(axum::body::Body::from(body));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    for cookie in clear_cookies {
+        response.headers_mut().append(
+            axum::http::header::SET_COOKIE,
+            axum::http::HeaderValue::from_str(&cookie).unwrap(),
+        );
+    }
+    response
 }
 
 pub async fn remove_account(

@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiPost, fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 
 function getCookie(name: string): string | null {
@@ -33,6 +33,7 @@ interface ServerConfig {
 export default function Home() {
   const router = useRouter();
   const setAccounts = useAuthStore((s) => s.setAccounts);
+  const setActiveAccount = useAuthStore((s) => s.setActiveAccount);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,7 +52,7 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<{ accounts: unknown[] }>("/auth/accounts")
+    fetchAccounts()
       .then((data) => {
         if (!cancelled) {
           if (data.accounts.length > 0) {
@@ -104,14 +105,13 @@ export default function Home() {
     }
 
     try {
-      await apiPost<{
+      const response = await apiPost<{
         account: { id: string; email: string; imapHost: string; smtpHost: string };
       }>("/auth/login", payload);
       
-      const accountsData = await apiGet<{
-        accounts: Array<{ id: string; email: string; imapHost: string; smtpHost: string }>;
-      }>("/auth/accounts");
+      const accountsData = await fetchAccounts();
       setAccounts(accountsData.accounts);
+      setActiveAccount(response.account.id);
       router.push("/mail");
     } catch (err) {
       setError(

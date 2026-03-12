@@ -2,17 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet } from "@/lib/api";
+import { fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
-
-interface AccountsResponse {
-  accounts: Array<{
-    id: string;
-    email: string;
-    imapHost: string;
-    smtpHost: string;
-  }>;
-}
 
 export default function AuthLayout({
   children,
@@ -25,15 +16,15 @@ export default function AuthLayout({
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<AccountsResponse>("/auth/accounts")
+    fetchAccounts()
       .then((data) => {
         if (!cancelled) {
-          if (data.accounts.length === 0) {
+          if (data.accounts.length > 0) {
+            setAccounts(data.accounts);
+            setAuthenticated(true);
+          } else {
             router.replace("/");
-            return;
           }
-          setAccounts(data.accounts);
-          setAuthenticated(true);
         }
       })
       .catch(() => {

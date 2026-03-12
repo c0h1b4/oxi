@@ -15,6 +15,16 @@ interface ErrorResponse {
   error?: ApiError;
 }
 
+interface AccountsResponse {
+  accounts: Array<{
+    id: string;
+    email: string;
+    imapHost: string;
+    smtpHost: string;
+  }>;
+  browserSessionExpired?: boolean;
+}
+
 function handleAccountSessionExpired(error: ApiError): void {
   if (error.code === "ACCOUNT_SESSION_EXPIRED" && error.accountId) {
     useAuthStore.getState().removeAccount(error.accountId);
@@ -37,6 +47,24 @@ async function parseErrorResponse(res: Response): Promise<Error> {
 function getActiveAccountHeader(): Record<string, string> {
   const activeId = useAuthStore.getState().activeAccountId;
   return activeId ? { "X-Active-Account": activeId } : {};
+}
+
+export async function fetchAccounts(): Promise<AccountsResponse> {
+  const res = await fetch(`${API_BASE}/auth/accounts`, {
+    credentials: "same-origin",
+  });
+
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+
+  const data: AccountsResponse = await res.json();
+  
+  if (data.browserSessionExpired) {
+    useAuthStore.getState().setAccounts([]);
+  }
+  
+  return data;
 }
 
 export async function apiPost<T>(

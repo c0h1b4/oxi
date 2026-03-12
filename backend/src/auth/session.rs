@@ -134,6 +134,10 @@ impl SessionStore {
             .collect()
     }
 
+    pub fn browser_exists(&self, browser_id: &str) -> bool {
+        self.browsers.contains_key(browser_id)
+    }
+
     pub fn get_account_session(
         &self,
         browser_id: &str,
