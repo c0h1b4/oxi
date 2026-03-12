@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuthStore } from "@/stores/useAuthStore";
 
 export type WsStatus = "connected" | "connecting" | "disconnected";
 
@@ -13,6 +14,11 @@ export interface MailEvent {
     latest_sender?: string;
     latest_subject?: string;
   };
+}
+
+interface WebSocketMessage {
+  accountId: string;
+  event: MailEvent;
 }
 
 /**
@@ -77,8 +83,17 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
 
       ws.onmessage = (event) => {
         try {
-          const mailEvent: MailEvent = JSON.parse(event.data);
+          const message: WebSocketMessage = JSON.parse(event.data);
+          const mailEvent = message.event;
+          const accountId = message.accountId;
+
+          const activeAccountId = useAuthStore.getState().activeAccountId;
+          if (accountId !== activeAccountId) {
+            return;
+          }
+
           onEventRef.current?.(mailEvent);
+
           switch (mailEvent.type) {
             case "NewMessages":
               if (mailEvent.data?.folder) {

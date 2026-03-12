@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -12,6 +13,8 @@ use crate::auth::user_data;
 use crate::config::AppConfig;
 use crate::db;
 
+pub const BROWSER_COOKIE: &str = "oxi_browser";
+
 /// JSON body expected on `POST /api/auth/login`.
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -19,6 +22,19 @@ pub struct LoginRequest {
     pub password: String,
     #[serde(default)]
     pub remember: bool,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<u16>,
+    #[serde(default = "default_tls")]
+    pub imap_tls: bool,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    #[serde(default = "default_tls")]
+    pub smtp_tls: bool,
+    pub browser_id: Option<String>,
+}
+
+fn default_tls() -> bool {
+    true
 }
 
 
@@ -37,6 +53,38 @@ fn clearing_cookie(secure: bool) -> String {
     format!(
         "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
         SESSION_COOKIE, secure_flag
+    )
+}
+
+fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        BROWSER_COOKIE, browser_id, secure_flag, max_age_secs
+    )
+}
+
+fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "oxi_session_{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        account_id, token, secure_flag, max_age_secs
+    )
+}
+
+fn clearing_browser_cookie(secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        BROWSER_COOKIE, secure_flag
+    )
+}
+
+fn clearing_account_cookie(account_id: &str, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "oxi_session_{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        account_id, secure_flag
     )
 }
 
@@ -59,17 +107,35 @@ fn extract_session_token(headers: &axum::http::HeaderMap) -> Option<String> {
     None
 }
 
+fn extract_browser_id(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get_all("cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|cookie| {
+            for segment in cookie.split(';') {
+                let trimmed = segment.trim();
+                if let Some(id) = trimmed.strip_prefix("oxi_browser=") {
+                    let id = id.trim();
+                    if !id.is_empty() {
+                        return Some(id.to_string());
+                    }
+                }
+            }
+            None
+        })
+}
+
 /// `POST /api/auth/login`
 ///
 /// Validates the user's credentials against the configured IMAP server.
 /// On success, creates a session, provisions the user's data directory,
-/// and returns a session cookie.
+/// and returns session cookies.
 pub async fn login(
     Extension(store): Extension<Arc<SessionStore>>,
     Extension(config): Extension<Arc<AppConfig>>,
     Json(body): Json<LoginRequest>,
 ) -> Response {
-    // Validate fields not empty.
     if body.email.trim().is_empty() || body.password.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -86,31 +152,35 @@ pub async fn login(
             .into_response();
     }
 
-    // Check that IMAP host is configured.
-    let imap_host = match &config.imap_host {
-        Some(host) => host.clone(),
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                [("content-type", "application/json")],
-                serde_json::json!({
-                    "error": {
-                        "code": "SERVICE_UNAVAILABLE",
-                        "message": "Mail server not configured",
-                        "status": 503
-                    }
-                })
-                .to_string(),
-            )
-                .into_response();
-        }
+    let imap_host = body.imap_host.clone().or(config.imap_host.clone());
+    let Some(imap_host) = imap_host else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("content-type", "application/json")],
+            serde_json::json!({
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "IMAP server not configured",
+                    "status": 503
+                }
+            })
+            .to_string(),
+        )
+            .into_response();
     };
 
-    // Validate credentials against IMAP server.
+    let smtp_host = body.smtp_host.clone().or(config.smtp_host.clone());
+    let smtp_host = smtp_host.unwrap_or_else(|| imap_host.clone());
+
+    let imap_port = body.imap_port.unwrap_or(config.imap_port);
+    let imap_tls = body.imap_tls;
+    let smtp_port = body.smtp_port.unwrap_or(config.smtp_port);
+    let smtp_tls = body.smtp_tls;
+
     let result = imap_auth::validate_imap_credentials(
         &imap_host,
-        config.imap_port,
-        config.tls_enabled,
+        imap_port,
+        imap_tls,
         &body.email,
         &body.password,
     )
@@ -118,7 +188,6 @@ pub async fn login(
 
     match result {
         AuthResult::Success => {
-            // Hash email and provision user data directory.
             let user_hash = user_data::hash_email(&body.email);
             if let Err(e) = user_data::provision_user_data(&config.data_dir, &user_hash) {
                 tracing::error!(error = %e, "failed to provision user data directory");
@@ -137,7 +206,6 @@ pub async fn login(
                     .into_response();
             }
 
-            // Auto-create a default identity if the user doesn't have one yet.
             if let Ok(conn) = db::pool::open_user_db(&config.data_dir, &user_hash) {
                 match db::identities::has_identities(&conn) {
                     Ok(false) => {
@@ -154,34 +222,53 @@ pub async fn login(
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to check for existing identities");
                     }
-                    _ => {} // Already has identities, nothing to do.
+                    _ => {}
                 }
             }
 
-            // Create session.
-            const REMEMBER_ME_HOURS: u64 = 30 * 24; // 30 days
+            const REMEMBER_ME_HOURS: u64 = 30 * 24;
             let session_hours = if body.remember {
                 REMEMBER_ME_HOURS
             } else {
                 config.session_timeout_hours
             };
-            let timeout_override = if body.remember {
-                Some(std::time::Duration::from_secs(session_hours * 3600))
-            } else {
-                None
-            };
-            let token = store.insert(body.email.clone(), body.password, user_hash, timeout_override);
+
+            let browser_id = body.browser_id.unwrap_or_else(|| store.create_browser());
+
+            let (token, account_id) = store.add_account_to_browser(
+                &browser_id,
+                body.email.clone(),
+                body.password,
+                user_hash,
+                imap_host.clone(),
+                imap_port,
+                imap_tls,
+                smtp_host.clone(),
+                smtp_port,
+                smtp_tls,
+            );
+
             let max_age = session_hours * 3600;
             let secure = config.environment != "development";
-            let cookie = session_cookie(&token, max_age, secure);
+            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure);
+            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure);
 
             (
                 StatusCode::CREATED,
                 [
                     ("content-type", "application/json"),
-                    ("set-cookie", &cookie),
+                    ("set-cookie", &browser_cookie_header),
+                    ("set-cookie", &session_cookie_header),
                 ],
-                serde_json::json!({ "user": { "email": body.email } }).to_string(),
+                serde_json::json!({
+                    "account": {
+                        "id": account_id,
+                        "email": body.email,
+                        "imapHost": imap_host,
+                        "smtpHost": smtp_host
+                    }
+                })
+                .to_string(),
             )
                 .into_response()
         }
@@ -198,13 +285,13 @@ pub async fn login(
             .to_string(),
         )
             .into_response(),
-        AuthResult::ServerUnreachable(_) => (
+        AuthResult::ServerUnreachable(msg) => (
             StatusCode::SERVICE_UNAVAILABLE,
             [("content-type", "application/json")],
             serde_json::json!({
                 "error": {
-                    "code": "SERVICE_UNAVAILABLE",
-                    "message": "Cannot reach mail server",
+                    "code": "SERVER_UNREACHABLE",
+                    "message": msg,
                     "status": 503
                 }
             })
@@ -227,22 +314,93 @@ pub async fn get_session(Extension(session): Extension<SessionState>) -> Respons
         .into_response()
 }
 
-/// `POST /api/auth/logout`
-///
-/// Removes the current session from the store and clears the session cookie.
-/// Requires authentication.
-pub async fn logout(
+pub async fn list_accounts(
     Extension(store): Extension<Arc<SessionStore>>,
-    Extension(config): Extension<Arc<AppConfig>>,
+    Extension(_config): Extension<Arc<AppConfig>>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    // Extract token from cookie and remove from store.
-    if let Some(token) = extract_session_token(&headers) {
-        store.remove(&token);
+    let browser_id = extract_browser_id(&headers);
+
+    let Some(browser_id) = browser_id else {
+        let empty_accounts: Vec<serde_json::Value> = vec![];
+        return (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            serde_json::json!({ "accounts": empty_accounts }).to_string(),
+        )
+            .into_response();
+    };
+
+    let accounts: Vec<serde_json::Value> = store
+        .get_browser_accounts(&browser_id)
+        .into_iter()
+        .map(|session| {
+            serde_json::json!({
+                "id": session.account_id,
+                "email": session.email,
+                "imapHost": session.imap_host,
+                "smtpHost": session.smtp_host
+            })
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        serde_json::json!({ "accounts": accounts }).to_string(),
+    )
+        .into_response()
+}
+
+pub async fn remove_account(
+    Extension(store): Extension<Arc<SessionStore>>,
+    Extension(config): Extension<Arc<AppConfig>>,
+    Path(account_id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let browser_id = extract_browser_id(&headers);
+
+    let Some(browser_id) = browser_id else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [("content-type", "application/json")],
+            serde_json::json!({
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "No browser session",
+                    "status": 401
+                }
+            })
+            .to_string(),
+        )
+            .into_response();
+    };
+
+    let browser_accounts = store.get_browser_accounts(&browser_id);
+    let account_belongs_to_browser = browser_accounts
+        .iter()
+        .any(|s| s.account_id == account_id);
+
+    if !account_belongs_to_browser {
+        return (
+            StatusCode::FORBIDDEN,
+            [("content-type", "application/json")],
+            serde_json::json!({
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Account does not belong to this browser session",
+                    "status": 403
+                }
+            })
+            .to_string(),
+        )
+            .into_response();
     }
 
+    store.remove_account(&account_id);
+
     let secure = config.environment != "development";
-    let cookie = clearing_cookie(secure);
+    let cookie = clearing_account_cookie(&account_id, secure);
 
     (
         StatusCode::OK,
@@ -253,6 +411,51 @@ pub async fn logout(
         serde_json::json!({ "status": "logged_out" }).to_string(),
     )
         .into_response()
+}
+
+/// `POST /api/auth/logout`
+///
+/// Removes the current session from the store and clears the session cookie.
+/// Requires authentication.
+pub async fn logout(
+    Extension(store): Extension<Arc<SessionStore>>,
+    Extension(config): Extension<Arc<AppConfig>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let browser_id = extract_browser_id(&headers);
+
+    let mut cookies_to_clear: Vec<String> = Vec::new();
+
+    if let Some(ref browser_id) = browser_id {
+        let accounts = store.get_browser_accounts(browser_id);
+        for account in accounts {
+            cookies_to_clear.push(clearing_account_cookie(
+                &account.account_id,
+                config.environment != "development",
+            ));
+        }
+        store.remove_browser(browser_id);
+    }
+
+    let secure = config.environment != "development";
+    cookies_to_clear.push(clearing_browser_cookie(secure));
+
+    let response = (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        serde_json::json!({ "status": "logged_out" }).to_string(),
+    )
+        .into_response();
+
+    let mut response = response;
+    let headers = response.headers_mut();
+    for cookie in cookies_to_clear {
+        if let Ok(header_value) = cookie.parse() {
+            headers.append("set-cookie", header_value);
+        }
+    }
+
+    response
 }
 
 #[cfg(test)]

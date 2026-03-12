@@ -113,6 +113,8 @@ pub fn create_router(
     let protected_auth = Router::new()
         .route("/session", get(auth::get_session))
         .route("/logout", post(auth::logout))
+        .route("/accounts", get(auth::list_accounts))
+        .route("/accounts/{id}", delete(auth::remove_account))
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 

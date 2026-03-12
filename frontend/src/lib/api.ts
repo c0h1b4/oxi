@@ -1,4 +1,11 @@
+import { useAuthStore } from "@/stores/useAuthStore";
+
 const API_BASE = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api";
+
+function getActiveAccountHeader(): Record<string, string> {
+  const activeId = useAuthStore.getState().activeAccountId;
+  return activeId ? { "X-Active-Account": activeId } : {};
+}
 
 export async function apiPost<T>(
   path: string,
@@ -9,6 +16,7 @@ export async function apiPost<T>(
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
     },
     credentials: "same-origin",
     body: JSON.stringify(body),
@@ -24,6 +32,9 @@ export async function apiPost<T>(
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      ...getActiveAccountHeader(),
+    },
     credentials: "same-origin",
   });
 
@@ -44,6 +55,7 @@ export async function apiPatch<T>(
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
     },
     credentials: "same-origin",
     body: JSON.stringify(body),
@@ -65,6 +77,7 @@ export async function apiPostFormData<T>(
     method: "POST",
     headers: {
       "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
     },
     credentials: "same-origin",
     body: formData,
@@ -87,6 +100,7 @@ export async function apiPut<T>(
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
     },
     credentials: "same-origin",
     body: JSON.stringify(body),
@@ -105,6 +119,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
     method: "DELETE",
     headers: {
       "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
     },
     credentials: "same-origin",
   });
