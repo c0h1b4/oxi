@@ -68,8 +68,13 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
       if (body) {
         // Set initial height, then observe for changes (e.g. images loading)
         const updateHeight = () => {
-          const height = body.scrollHeight;
-          iframe.style.height = `${height}px`;
+          // Reset height first so it can shrink if needed, 
+          // but set a minimum so it doesn't collapse entirely
+          iframe.style.height = "100px"; 
+          // Use the html element's scrollHeight which is often more accurate 
+          // than body for full document height
+          const height = iframe.contentDocument?.documentElement.scrollHeight || body.scrollHeight;
+          iframe.style.height = `${Math.max(100, height)}px`;
         };
 
         updateHeight();
@@ -115,14 +120,16 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
 </html>`;
 
     return (
-      <iframe
-        ref={iframeRef}
-        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
-        srcDoc={wrappedHtml}
-        className="h-full w-full border-none"
-        title="Email content"
-        onLoad={handleIframeLoad}
-      />
+      <div className="h-full w-full overflow-auto">
+        <iframe
+          ref={iframeRef}
+          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+          srcDoc={wrappedHtml}
+          className="w-full border-none"
+          title="Email content"
+          onLoad={handleIframeLoad}
+        />
+      </div>
     );
   }
 
