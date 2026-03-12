@@ -12,16 +12,13 @@ function applyTheme(theme: ThemeMode) {
   } else if (theme === "light") {
     root.classList.remove("dark");
   } else {
-    // system
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     root.classList.toggle("dark", prefersDark);
   }
 }
 
-/**
- * Invisible component that loads display preferences from the server
- * and syncs them into the UI store + DOM (theme class).
- */
+const THEME_STORAGE_KEY = "oxi-theme";
+
 export function PreferencesLoader() {
   const { data } = useDisplayPreferences();
   const setDensity = useUiStore((s) => s.setDensity);
@@ -29,19 +26,17 @@ export function PreferencesLoader() {
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
   const theme = useUiStore((s) => s.theme);
 
-  // Sync server preferences into store when data arrives
   useEffect(() => {
     if (!data) return;
     setDensity(data.density);
     setTheme(data.theme);
     if (data.compose_format) setComposeFormat(data.compose_format);
+    localStorage.setItem(THEME_STORAGE_KEY, data.theme);
   }, [data, setDensity, setTheme, setComposeFormat]);
 
-  // Apply theme class whenever theme changes
   useEffect(() => {
     applyTheme(theme);
 
-    // Listen for system preference changes when in "system" mode
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => applyTheme("system");

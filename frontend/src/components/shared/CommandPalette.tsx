@@ -17,29 +17,36 @@ import {
 } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
+import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
+
+function useResolvedTheme() {
+  const theme = useUiStore((s) => s.theme);
+  if (theme === "system") {
+    if (typeof window === "undefined") return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return theme;
+}
+
+const THEME_STORAGE_KEY = "oxi-theme";
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.commandPaletteOpen);
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const setTheme = useUiStore((s) => s.setTheme);
+  const updatePrefs = useUpdateDisplayPreferences();
+  const resolvedTheme = useResolvedTheme();
 
   const runAndClose = (fn: () => void) => {
     fn();
     setOpen(false);
   };
 
-  const isDark =
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark");
-
   const toggleTheme = () => {
-    const next = !isDark;
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("oxi-theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("oxi-theme", "light");
-    }
+    const next = resolvedTheme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+    updatePrefs.mutate({ theme: next });
   };
 
   return (
@@ -81,7 +88,7 @@ export function CommandPalette() {
                   Search emails
                 </CommandItem>
                 <CommandItem
-                  icon={isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                  icon={resolvedTheme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
                   onSelect={() => runAndClose(toggleTheme)}
                 >
                   Toggle dark mode
