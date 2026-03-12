@@ -38,7 +38,7 @@ fn default_tls() -> bool {
 fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        "{}={};{} SameSite=Strict; Path=/; Max-Age={}",
         BROWSER_COOKIE, browser_id, secure_flag, max_age_secs
     )
 }
