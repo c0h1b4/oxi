@@ -119,6 +119,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     html, body {
       background-color: white !important;
       color: black !important;
+      color-scheme: light !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         Helvetica, Arial, sans-serif;
       margin: 0;
@@ -129,13 +130,15 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
     ${isDark ? `
-    html, body {
-      background-color: white !important;
-      color: black !important;
+    html {
       filter: invert(1) hue-rotate(180deg);
     }
     img, picture, video {
       filter: invert(1) hue-rotate(180deg);
+    }
+    * {
+      box-shadow: none !important;
+      text-shadow: none !important;
     }
     ` : ""}
   </style>
@@ -144,7 +147,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
 </html>`;
 
     return (
-      <div className="h-full w-full overflow-auto">
+      <div className={"h-full w-full overflow-auto " + (isDark ? "bg-black" : "bg-white")}>
         <iframe
           ref={iframeRef}
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
