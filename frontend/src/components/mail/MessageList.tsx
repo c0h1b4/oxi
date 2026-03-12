@@ -219,6 +219,7 @@ export function MessageList() {
 
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
+  const prevSelectedUidRef = useRef<number | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- useVirtualizer is designed for this usage
   const virtualizer = useVirtualizer({
@@ -230,8 +231,11 @@ export function MessageList() {
 
   // Scroll the virtualizer to keep the keyboard-selected message visible
   // with a 3-row buffer so the user can preview upcoming messages.
+  // Only runs when selectedMessageUid CHANGES (keyboard nav), not on every render.
   useEffect(() => {
-    if (selectedMessageUid == null) return;
+    if (selectedMessageUid == null || selectedMessageUid === prevSelectedUidRef.current) return;
+    prevSelectedUidRef.current = selectedMessageUid;
+
     const idx = messages.findIndex((m) => m.uid === selectedMessageUid);
     if (idx < 0) return;
 
