@@ -88,63 +88,79 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       const body = doc?.body;
       if (body) {
         if (isDark) {
-          setTimeout(() => {
-            try {
-              let isEmailDark = false;
-              const metaColorScheme = doc.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
-              if (metaColorScheme && metaColorScheme.getAttribute('content')?.toLowerCase().includes('dark')) {
-                isEmailDark = true;
-              } else {
-                const win = iframe.contentWindow;
-                if (!win) return;
+          try {
+            let isEmailDark = false;
+            const metaColorScheme = doc.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
+            if (metaColorScheme && metaColorScheme.getAttribute('content')?.toLowerCase().includes('dark')) {
+              isEmailDark = true;
+            } else {
+              const win = iframe.contentWindow;
+              if (!win) return;
 
-                let dominantBg = win.getComputedStyle(body).backgroundColor;
-                const docW = doc.documentElement.clientWidth || body.clientWidth || win.innerWidth;
-                const docH = Math.max(
-                  body.scrollHeight,
-                  body.offsetHeight,
-                  doc.documentElement.clientHeight,
-                  doc.documentElement.scrollHeight
-                );
-                const bodyArea = docW * docH;
-                let maxArea = bodyArea * 0.5;
+              let dominantBg = win.getComputedStyle(body).backgroundColor;
+              const docW = doc.documentElement.clientWidth || body.clientWidth || win.innerWidth;
+              const docH = Math.max(
+                body.scrollHeight,
+                body.offsetHeight,
+                doc.documentElement.clientHeight,
+                doc.documentElement.scrollHeight
+              );
+              const bodyArea = docW * docH;
+              let maxArea = bodyArea * 0.5;
 
-                const elems = body.querySelectorAll('*');
-                for (let i = 0; i < elems.length; i++) {
-                  const el = elems[i];
-                  if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || (el as HTMLElement).style.display === 'none') continue;
-                  const style = win.getComputedStyle(el);
-                  const bg = style.backgroundColor;
-                  if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-                    const rect = el.getBoundingClientRect();
-                    const area = rect.width * rect.height;
-                    if (area >= maxArea) {
-                      maxArea = area;
-                      dominantBg = bg;
-                    }
-                  }
-                }
-
-                const match = dominantBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-                if (match) {
-                  const r = parseInt(match[1], 10);
-                  const g = parseInt(match[2], 10);
-                  const b = parseInt(match[3], 10);
-                  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-                  if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
-                    isEmailDark = true;
+              const elems = body.querySelectorAll('*');
+              for (let i = 0; i < elems.length; i++) {
+                const el = elems[i];
+                if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || (el as HTMLElement).style.display === 'none') continue;
+                const style = win.getComputedStyle(el);
+                const bg = style.backgroundColor;
+                if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                  const rect = el.getBoundingClientRect();
+                  const area = rect.width * rect.height;
+                  if (area >= maxArea) {
+                    maxArea = area;
+                    dominantBg = bg;
                   }
                 }
               }
 
-              if (isEmailDark && doc.documentElement) {
-                doc.documentElement.classList.remove('invert-enabled');
+              const match = dominantBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+              if (match) {
+                const r = parseInt(match[1], 10);
+                const g = parseInt(match[2], 10);
+                const b = parseInt(match[3], 10);
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+                if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
+                  isEmailDark = true;
+                }
               }
-            } catch (e) {
-              console.error("Error detecting email theme:", e);
             }
-          }, 50);
+            if (doc.documentElement) {
+              if (isEmailDark && isDark) {
+                doc.documentElement.classList.remove('invert-enabled');
+                // set the background-color back to black since we're not inverting it anymore
+                doc.documentElement.style.backgroundColor = 'black';
+                doc.documentElement.style.color = 'white'; // same for text color
+                doc.documentElement.style.colorScheme = 'dark';
+              } else if (!isEmailDark && isDark) {
+                doc.documentElement.style.backgroundColor = 'white';
+                doc.documentElement.style.color = 'black';
+                doc.documentElement.style.colorScheme = 'light';
+              } else if (isEmailDark && !isDark) {
+                doc.documentElement.style.backgroundColor = 'black';
+                doc.documentElement.style.color = 'white';
+                doc.documentElement.style.colorScheme = 'dark';
+              } else if (!isEmailDark && !isDark) {
+                doc.documentElement.classList.remove('invert-enabled');
+                doc.documentElement.style.backgroundColor = 'white';
+                doc.documentElement.style.color = 'black';
+                doc.documentElement.style.colorScheme = 'light';
+              }
+            }
+          } catch (e) {
+            console.error("Error detecting email theme:", e);
+          }
         }
 
         let lastHeight = 0;
@@ -199,20 +215,16 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
   <meta charset="utf-8" />
   <style>
     html, body {
-      background-color: white;
-      color: black;
-      color-scheme: light;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         Helvetica, Arial, sans-serif;
       margin: 0;
-      padding: 0px;
+      padding: 16px;
       box-sizing: border-box;
       overflow-y: hidden !important;
       overflow-x: auto;
     }
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
-    ${isDark ? `
     html.invert-enabled {
       filter: invert(1) hue-rotate(180deg);
     }
@@ -225,7 +237,6 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       box-shadow: none !important;
       text-shadow: none !important;
     }
-    ` : ""}
   </style>
 </head>
 <body>
