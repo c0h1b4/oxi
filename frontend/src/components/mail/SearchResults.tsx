@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Loader2, Paperclip } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
+import {
+  getFilterLabel,
+  parseSearchQuery,
+  removeFilterFromQuery,
+} from "@/lib/search-parser";
 import type { SearchResultItem } from "@/types/message";
 
 function formatDate(dateStr: string): string {
@@ -131,6 +136,8 @@ function SearchResultRow({
 
 export function SearchResults() {
   const searchQuery = useUiStore((s) => s.searchQuery);
+  const setSearchQuery = useUiStore((s) => s.setSearchQuery);
+  const setSearchActive = useUiStore((s) => s.setSearchActive);
   const setActiveFolder = useUiStore((s) => s.setActiveFolder);
   const selectMessage = useUiStore((s) => s.selectMessage);
   const activeFolder = useUiStore((s) => s.activeFolder);
@@ -143,6 +150,18 @@ export function SearchResults() {
     isLoading,
     isError,
   } = useSearch(searchQuery, undefined, sortOrder);
+
+  // Parse filters for display in the results header
+  const parsed = parseSearchQuery(searchQuery);
+
+  const handleRemoveFilter = useCallback(
+    (filterRaw: string) => {
+      const newQuery = removeFilterFromQuery(searchQuery, filterRaw);
+      setSearchQuery(newQuery);
+      setSearchActive(newQuery.length >= 2);
+    },
+    [searchQuery, setSearchQuery, setSearchActive],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -186,24 +205,46 @@ export function SearchResults() {
       {!isLoading && !isError && results.length > 0 && (
         <>
           {/* Result count header */}
-          <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1">
-            <span className="text-xs text-muted-foreground">
-              {results.length < totalCount
-                ? `Showing ${results.length} of ${totalCount} results`
-                : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
-            </span>
-            <button
-              onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
-            >
-              {sortOrder === "date_desc" ? (
-                <ArrowDown className="size-3" />
-              ) : (
-                <ArrowUp className="size-3" />
-              )}
-              Date
-            </button>
+          <div className="shrink-0 border-b border-border px-3 py-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {results.length < totalCount
+                  ? `Showing ${results.length} of ${totalCount} results`
+                  : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+              </span>
+              <button
+                onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
+              >
+                {sortOrder === "date_desc" ? (
+                  <ArrowDown className="size-3" />
+                ) : (
+                  <ArrowUp className="size-3" />
+                )}
+                Date
+              </button>
+            </div>
+            {parsed.filters.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {parsed.filters.map((filter, idx) => (
+                  <span
+                    key={`${filter.operator}-${idx}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                  >
+                    {getFilterLabel(filter)}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFilter(filter.raw)}
+                      aria-label={`Remove ${filter.operator} filter`}
+                      className="flex size-3.5 items-center justify-center rounded-full transition-colors hover:bg-primary/20"
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
