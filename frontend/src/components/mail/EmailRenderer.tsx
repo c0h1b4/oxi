@@ -98,23 +98,17 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body {
+    html, body {
+      background-color: white !important;
+      color: black !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         Helvetica, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-      color: #1a1a1a;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
       margin: 0;
       padding: 16px;
     }
     img { max-width: 100%; height: auto; }
-    a { color: #2563eb; }
     pre { white-space: pre-wrap; word-break: break-word; }
-    table { max-width: 100%; }
   </style>
 </head>
 <body>${displayHtml}</body>
@@ -123,7 +117,7 @@ export function EmailRenderer({ html, text, blockRemoteResources = false }: Emai
     return (
       <iframe
         ref={iframeRef}
-        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
         srcDoc={wrappedHtml}
         className="h-full w-full border-none"
         title="Email content"

@@ -883,9 +883,9 @@
         assert_eq!(json["uid"], 42);
         assert_eq!(json["subject"], "Test Subject");
 
-        // Script tag should be stripped by ammonia.
+        // Script tag is preserved (frontend handles security via iframe sandbox).
         let html = json["html"].as_str().unwrap();
-        assert!(!html.contains("script"));
+        assert!(html.contains("script"));
         assert!(html.contains("<b>bold</b>"));
         assert!(html.contains("<p>Hello</p>"));
 

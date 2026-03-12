@@ -25,7 +25,6 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 refinery = { version = "0.9", features = ["rusqlite"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 async-trait = "0.1.89"
-ammonia = "4.1.2"
 mail-parser = "0.11.2"
 futures = "0.3.32"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }
