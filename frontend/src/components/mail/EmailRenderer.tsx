@@ -86,10 +86,23 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       const doc = iframe.contentDocument;
       const body = doc?.body;
       if (body) {
+        let lastHeight = 0;
         const updateHeight = () => {
           const docEl = doc?.documentElement;
-          const height = docEl?.scrollHeight ?? body.scrollHeight;
-          iframe.style.height = `${Math.max(height, 100)}px`;
+          // Calculate height with a small buffer for safety
+          const height = Math.max(
+            body.scrollHeight,
+            body.offsetHeight,
+            docEl?.clientHeight ?? 0,
+            docEl?.scrollHeight ?? 0,
+            docEl?.offsetHeight ?? 0
+          );
+          
+          // Only update if height changed significantly to prevent resize loops
+          if (Math.abs(height - lastHeight) > 2) {
+            iframe.style.height = `${Math.max(height, 100)}px`;
+            lastHeight = height;
+          }
         };
 
         updateHeight();
@@ -101,6 +114,14 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
             img.addEventListener("error", updateHeight);
           }
         });
+
+        // Add ResizeObserver to watch for dynamic content or window resize changes
+        if (typeof ResizeObserver !== "undefined") {
+          const resizeObserver = new ResizeObserver(() => {
+            updateHeight();
+          });
+          resizeObserver.observe(body);
+        }
       }
     } catch {
       iframe.style.height = "600px";
@@ -124,8 +145,9 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
         Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 16px;
-      min-height: 100vh;
       box-sizing: border-box;
+      overflow-y: hidden !important;
+      overflow-x: auto;
     }
     img { max-width: 100%; height: auto; }
     pre { white-space: pre-wrap; word-break: break-word; }
@@ -149,7 +171,9 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     return (
       <div className={"h-full w-full overflow-auto " + (isDark ? "bg-black" : "bg-white")}>
         <iframe
+          key={`${isDark ? "dark" : "light"}-${blockRemoteResources}`}
           ref={iframeRef}
+          scrolling="no"
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
           srcDoc={wrappedHtml}
           className="w-full border-none"
