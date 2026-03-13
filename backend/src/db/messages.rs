@@ -292,15 +292,30 @@ pub fn cache_message_body(
     text: Option<&str>,
     attachments_json: Option<&str>,
     raw_headers: Option<&str>,
+    email_theme: Option<i32>,
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE messages
          SET body_html = ?1, body_text = ?2, body_cached = 1,
-             attachments_json = ?3, raw_headers = ?4
-         WHERE folder = ?5 AND uid = ?6",
-        params![html, text, attachments_json, raw_headers, folder, uid],
+             attachments_json = ?3, raw_headers = ?4, email_theme = ?5
+         WHERE folder = ?6 AND uid = ?7",
+        params![html, text, attachments_json, raw_headers, email_theme, folder, uid],
     )
     .map_err(|e| format!("Failed to cache message body: {e}"))?;
+    Ok(())
+}
+
+pub fn update_email_theme(
+    conn: &Connection,
+    folder: &str,
+    uid: u32,
+    email_theme: i32,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE messages SET email_theme = ?1 WHERE folder = ?2 AND uid = ?3",
+        params![email_theme, folder, uid],
+    )
+    .map_err(|e| format!("Failed to update email theme: {e}"))?;
     Ok(())
 }
 
@@ -310,6 +325,7 @@ pub struct CachedBody {
     pub text: Option<String>,
     pub attachments_json: Option<String>,
     pub raw_headers: Option<String>,
+    pub email_theme: Option<i32>,
 }
 
 /// Return the cached body if `body_cached = 1`, otherwise `None`.
@@ -319,7 +335,7 @@ pub fn get_cached_body(
     uid: u32,
 ) -> Result<Option<CachedBody>, String> {
     let result = conn.query_row(
-        "SELECT body_cached, body_html, body_text, attachments_json, raw_headers
+        "SELECT body_cached, body_html, body_text, attachments_json, raw_headers, email_theme
          FROM messages
          WHERE folder = ?1 AND uid = ?2",
         params![folder, uid],
@@ -331,6 +347,7 @@ pub fn get_cached_body(
                     text: row.get(2)?,
                     attachments_json: row.get(3)?,
                     raw_headers: row.get(4)?,
+                    email_theme: row.get(5)?,
                 }))
             } else {
                 Ok(None)
@@ -685,6 +702,7 @@ mod tests {
             Some("<h1>Hello</h1>"), Some("Hello"),
             Some(r#"[{"id":"0","filename":"test.pdf","content_type":"application/pdf","size":1024,"content_id":null}]"#),
             Some("From: alice@example.com"),
+            Some(0),
         )
             .unwrap();
 
