@@ -2,6 +2,7 @@ mod calendar;
 mod config;
 mod error;
 mod db;
+mod email_theme;
 mod imap;
 mod smtp;
 mod auth;

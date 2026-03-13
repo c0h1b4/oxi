@@ -1665,6 +1665,7 @@ dependencies = [
  "mail-parser",
  "rand 0.9.2",
  "refinery",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
