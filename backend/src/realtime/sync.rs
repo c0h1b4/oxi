@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config::AppConfig;
 use crate::db;
+use crate::email_theme;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::{EventBus, MailEvent};
 use crate::search::engine::{IndexableMessage, SearchEngine};
@@ -206,6 +207,11 @@ async fn index_message_bodies(
                 .map_err(|e| format!("DB error: {e}"))?;
 
             let att_json = serde_json::to_string(&body.attachments).ok();
+            let detected_theme = body.text_html
+                .as_ref()
+                .and_then(|h| email_theme::detect_email_theme(h))
+                .map(|t| t.as_i32());
+
             db::messages::cache_message_body(
                 &conn,
                 folder,
@@ -214,7 +220,7 @@ async fn index_message_bodies(
                 body.text_plain.as_deref(),
                 att_json.as_deref(),
                 Some(&body.raw_headers),
-                None,
+                detected_theme,
             )?;
         }
 

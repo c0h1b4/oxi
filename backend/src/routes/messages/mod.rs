@@ -11,6 +11,7 @@ use types::*;
 use crate::auth::session::SessionState;
 use crate::config::AppConfig;
 use crate::db;
+use crate::email_theme;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::{EventBus, MailEvent};
@@ -439,13 +440,23 @@ pub async fn get_message(
     // Re-fetch from IMAP so attachments and inline images are properly resolved.
     let usable_cache = cached_body.filter(|c| c.attachments_json.is_some());
 
-    let (body_html, body_text, attachments, raw_headers) = if let Some(cached) = usable_cache {
+    let (body_html, body_text, attachments, raw_headers, email_theme) = if let Some(cached) = usable_cache {
         let attachments: Vec<AttachmentMeta> = cached
             .attachments_json
             .as_deref()
             .and_then(|j| serde_json::from_str(j).ok())
             .unwrap_or_default();
-        (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default())
+        let theme = cached.email_theme;
+        if theme.is_none() && cached.html.is_some() {
+            let detected = email_theme::detect_email_theme(cached.html.as_ref().unwrap())
+                .map(|t| t.as_i32());
+            if let Some(t) = detected {
+                let _ = db::messages::update_email_theme(&conn, &folder, uid, t);
+            }
+            (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default(), detected)
+        } else {
+            (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default(), theme)
+        }
     } else {
         // Fetch from IMAP.
         let body = imap_client
@@ -513,7 +524,11 @@ pub async fn get_message(
         // Serialize attachment metadata for caching.
         let att_json = serde_json::to_string(&attachment_meta).ok();
 
-        // Cache the body along with attachments and raw headers.
+        let detected_theme = resolved_html
+            .as_ref()
+            .and_then(|h| email_theme::detect_email_theme(h))
+            .map(|t| t.as_i32());
+
         db::messages::cache_message_body(
             &conn,
             &folder,
@@ -522,11 +537,11 @@ pub async fn get_message(
             body.text_plain.as_deref(),
             att_json.as_deref(),
             Some(&body.raw_headers),
-            None,
+            detected_theme,
         )
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-        (resolved_html, body.text_plain, attachment_meta, body.raw_headers)
+        (resolved_html, body.text_plain, attachment_meta, body.raw_headers, detected_theme)
     };
 
     // Get the message header from cache (use efficient single-message lookup).
@@ -650,7 +665,12 @@ pub async fn get_message(
         raw_headers,
         attachments,
         thread,
-        email_theme: None,
+        email_theme: email_theme.map(|t| match t {
+            0 => EmailTheme::Light,
+            1 => EmailTheme::Dark,
+            2 => EmailTheme::Transparent,
+            _ => EmailTheme::Light,
+        }),
     })
     .into_response())
 }
