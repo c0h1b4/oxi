@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useEffect, useState } from "react";
+import { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 
 interface EmailRendererProps {
@@ -8,6 +8,7 @@ interface EmailRendererProps {
   text: string | null;
   blockRemoteResources?: boolean;
   theme?: "light" | "dark" | "auto";
+  emailTheme?: 'light' | 'dark' | 'transparent';
 }
 
 /**
@@ -58,7 +59,13 @@ export function hasRemoteResources(html: string | null): boolean {
     /url\(\s*["']?https?:\/\//i.test(html);
 }
 
-export function EmailRenderer({ html, text, blockRemoteResources = false, theme = "auto" }: EmailRendererProps) {
+export function EmailRenderer({ 
+  html, 
+  text, 
+  blockRemoteResources = false, 
+  theme = "auto",
+  emailTheme 
+}: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const appTheme = useUiStore((state) => state.theme);
@@ -79,6 +86,14 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
 
   const isDark = resolvedTheme === "dark" || (resolvedTheme === "system" && isSystemDark);
 
+  const shouldInvert = useMemo(() => {
+    if (!emailTheme || emailTheme === 'transparent') return false;
+    
+    const isAppDark = resolvedTheme === "dark" || (resolvedTheme === "system" && isSystemDark);
+    
+    return (emailTheme === 'dark' && !isAppDark) || (emailTheme === 'light' && isAppDark);
+  }, [emailTheme, resolvedTheme, isSystemDark]);
+
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -87,86 +102,9 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
       const doc = iframe.contentDocument;
       const body = doc?.body;
       if (body) {
-        if (isDark) {
-          try {
-            let isEmailDark = false;
-            const metaColorScheme = doc.querySelector('meta[name="color-scheme"], meta[name="supported-color-schemes"]');
-            if (metaColorScheme && metaColorScheme.getAttribute('content')?.toLowerCase().includes('dark')) {
-              isEmailDark = true;
-            } else {
-              const win = iframe.contentWindow;
-              if (!win) return;
-
-              let dominantBg = win.getComputedStyle(body).backgroundColor;
-              const docW = doc.documentElement.clientWidth || body.clientWidth || win.innerWidth;
-              const docH = Math.max(
-                body.scrollHeight,
-                body.offsetHeight,
-                doc.documentElement.clientHeight,
-                doc.documentElement.scrollHeight
-              );
-              const bodyArea = docW * docH;
-              let maxArea = bodyArea * 0.5;
-
-              const elems = body.querySelectorAll('*');
-              for (let i = 0; i < elems.length; i++) {
-                const el = elems[i];
-                if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || (el as HTMLElement).style.display === 'none') continue;
-                const style = win.getComputedStyle(el);
-                const bg = style.backgroundColor;
-                if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-                  const rect = el.getBoundingClientRect();
-                  const area = rect.width * rect.height;
-                  if (area >= maxArea) {
-                    maxArea = area;
-                    dominantBg = bg;
-                  }
-                }
-              }
-
-              const match = dominantBg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-              if (match) {
-                const r = parseInt(match[1], 10);
-                const g = parseInt(match[2], 10);
-                const b = parseInt(match[3], 10);
-                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-                if (luminance < 0.5 && maxArea > bodyArea * 0.3) {
-                  isEmailDark = true;
-                }
-              }
-            }
-            if (doc.documentElement) {
-              if (isEmailDark && isDark) {
-                doc.documentElement.classList.remove('invert-enabled');
-                // set the background-color back to black since we're not inverting it anymore
-                doc.documentElement.style.backgroundColor = 'black';
-                doc.documentElement.style.color = 'white'; // same for text color
-                doc.documentElement.style.colorScheme = 'dark';
-              } else if (!isEmailDark && isDark) {
-                doc.documentElement.style.backgroundColor = 'white';
-                doc.documentElement.style.color = 'black';
-                doc.documentElement.style.colorScheme = 'light';
-              } else if (isEmailDark && !isDark) {
-                doc.documentElement.style.backgroundColor = 'black';
-                doc.documentElement.style.color = 'white';
-                doc.documentElement.style.colorScheme = 'dark';
-              } else if (!isEmailDark && !isDark) {
-                doc.documentElement.classList.remove('invert-enabled');
-                doc.documentElement.style.backgroundColor = 'white';
-                doc.documentElement.style.color = 'black';
-                doc.documentElement.style.colorScheme = 'light';
-              }
-            }
-          } catch (e) {
-            console.error("Error detecting email theme:", e);
-          }
-        }
-
         let lastHeight = 0;
         const updateHeight = () => {
           const docEl = doc?.documentElement;
-          // Calculate height with a small buffer for safety
           const height = Math.max(
             body.scrollHeight,
             body.offsetHeight,
@@ -175,7 +113,6 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
             docEl?.offsetHeight ?? 0
           );
 
-          // Only update if height changed significantly to prevent resize loops
           if (Math.abs(height - lastHeight) > 2) {
             iframe.style.height = `${Math.max(height, 100)}px`;
             lastHeight = height;
@@ -192,7 +129,6 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
           }
         });
 
-        // Add ResizeObserver to watch for dynamic content or window resize changes
         if (typeof ResizeObserver !== "undefined") {
           const resizeObserver = new ResizeObserver(() => {
             updateHeight();
@@ -203,14 +139,14 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
     } catch {
       iframe.style.height = "600px";
     }
-  }, [isDark]);
+  }, []);
 
   if (html) {
     const processedHtml = blockRemoteResources ? stripRemoteResources(html) : { cleaned: html, hasRemote: false };
     const displayHtml = processedHtml.cleaned;
 
     const wrappedHtml = `<!DOCTYPE html>
-<html${isDark ? ' class="invert-enabled"' : ''}>
+<html${shouldInvert ? ' class="invert-enabled"' : ''}>
 <head>
   <meta charset="utf-8" />
   <style>
@@ -246,9 +182,9 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
 </html>`;
 
     return (
-      <div className={"h-full w-full overflow-auto " + (isDark ? "bg-black" : "bg-white")}>
+      <div className={"h-full w-full overflow-auto " + (shouldInvert ? "bg-black" : (isDark ? "bg-black" : "bg-white"))}>
         <iframe
-          key={`${isDark ? "dark" : "light"}-${blockRemoteResources}`}
+          key={`${shouldInvert ? "inverted" : "normal"}-${blockRemoteResources}`}
           ref={iframeRef}
           scrolling="no"
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
