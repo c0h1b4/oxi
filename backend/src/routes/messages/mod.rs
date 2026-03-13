@@ -522,6 +522,7 @@ pub async fn get_message(
             body.text_plain.as_deref(),
             att_json.as_deref(),
             Some(&body.raw_headers),
+            None,
         )
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 

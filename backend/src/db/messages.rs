@@ -713,6 +713,30 @@ mod tests {
         assert_eq!(cached.text.unwrap(), "Hello");
         assert!(cached.attachments_json.unwrap().contains("test.pdf"));
         assert_eq!(cached.raw_headers.unwrap(), "From: alice@example.com");
+        assert_eq!(cached.email_theme, Some(0));
+    }
+
+    #[test]
+    fn test_update_email_theme() {
+        let conn = open_test_db();
+        ensure_folder(&conn, "INBOX");
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
+
+        update_email_theme(&conn, "INBOX", 1, 2).unwrap();
+
+        let body = get_cached_body(&conn, "INBOX", 1).unwrap();
+        assert!(body.is_none());
+
+        cache_message_body(
+            &conn, "INBOX", 1,
+            Some("<h1>Test</h1>"), Some("Test"),
+            None, None, Some(0),
+        ).unwrap();
+
+        update_email_theme(&conn, "INBOX", 1, 1).unwrap();
+
+        let cached = get_cached_body(&conn, "INBOX", 1).unwrap().unwrap();
+        assert_eq!(cached.email_theme, Some(1));
     }
 
     #[test]

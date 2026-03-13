@@ -21,6 +21,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (14, include_str!("../../migrations/V014__compose_format.sql")),
     (15, include_str!("../../migrations/V015__deep_index.sql")),
     (16, include_str!("../../migrations/V016__calendar.sql")),
+    (17, include_str!("../../migrations/V017__add_email_theme.sql")),
 ];
 
 /// Run any pending migrations based on SQLite's `user_version` PRAGMA.

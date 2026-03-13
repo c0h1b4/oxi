@@ -214,6 +214,7 @@ async fn index_message_bodies(
                 body.text_plain.as_deref(),
                 att_json.as_deref(),
                 Some(&body.raw_headers),
+                None,
             )?;
         }
 
