@@ -333,6 +333,7 @@ export function ReadingPane() {
             text={data.text}
             blockRemoteResources={!remoteAllowed}
             theme={emailTheme}
+            emailTheme={data.email_theme}
           />
         )}
       </div>
