@@ -1,4 +1,30 @@
+use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailTheme {
+    Light = 0,
+    Dark = 1,
+    Transparent = 2,
+}
+
+impl FromSql for EmailTheme {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_i64()? {
+            0 => Ok(EmailTheme::Light),
+            1 => Ok(EmailTheme::Dark),
+            2 => Ok(EmailTheme::Transparent),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
+    }
+}
+
+impl ToSql for EmailTheme {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(*self as i32))
+    }
+}
 
 /// Default page size for paginated list queries.
 pub fn default_per_page() -> u32 {
@@ -100,6 +126,7 @@ pub(crate) struct MessageDetailResponse {
     pub(crate) raw_headers: String,
     pub(crate) attachments: Vec<AttachmentMeta>,
     pub(crate) thread: Vec<ThreadMessage>,
+    pub(crate) email_theme: Option<EmailTheme>,
 }
 
 /// A message summary within a thread.

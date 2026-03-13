@@ -649,6 +649,7 @@ pub async fn get_message(
         raw_headers,
         attachments,
         thread,
+        email_theme: None,
     })
     .into_response())
 }
