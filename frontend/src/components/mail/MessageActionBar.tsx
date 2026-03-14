@@ -11,6 +11,7 @@ import {
   MailOpen,
   AlertCircle,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useUiStore } from "@/stores/useUiStore";
 import {
   useMessage,
@@ -36,6 +37,7 @@ import {
 import type { EmailAddress } from "@/types/message";
 import { useIdentities } from "@/hooks/useIdentities";
 import type { Identity } from "@/types/identity";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 
 /** Find the identity whose email matches one of the To/CC addresses. */
 function findMatchingIdentity(
@@ -70,6 +72,11 @@ export function MessageActionBar() {
   const { data: identities } = useIdentities();
 
   const disabled = !data;
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const feedbackMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ActionContainer = shouldAnimate ? motion.div : "div";
 
   const isSeen = data?.flags.includes("\\Seen") ?? false;
   const isFlagged = data?.flags.includes("\\Flagged") ?? false;
@@ -190,7 +197,19 @@ export function MessageActionBar() {
   };
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1">
+    <ActionContainer
+      {...(shouldAnimate
+        ? {
+            "data-testid": "message-action-bar-transition",
+            "data-motion-props": JSON.stringify(barMotionProps),
+            initial: "initial",
+            animate: "animate",
+            exit: "exit",
+            variants: barMotionProps,
+          }
+        : {})}
+      className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1"
+    >
       {/* Reply */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply}>
         <Reply className="size-4" />
@@ -245,7 +264,26 @@ export function MessageActionBar() {
 
       {/* Star/Unstar */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleStar}>
-        {isFlagged ? (
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={isFlagged ? "flagged" : "unflagged"}
+              data-testid="message-action-star-feedback-transition"
+              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={feedbackMotionProps}
+              className="inline-flex"
+            >
+              {isFlagged ? (
+                <Star className="size-4 fill-primary text-primary" />
+              ) : (
+                <Star className="size-4" />
+              )}
+            </motion.span>
+          </AnimatePresence>
+        ) : isFlagged ? (
           <Star className="size-4 fill-primary text-primary" />
         ) : (
           <Star className="size-4" />
@@ -255,7 +293,26 @@ export function MessageActionBar() {
 
       {/* Mark read/unread */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleRead}>
-        {isSeen ? (
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={isSeen ? "seen" : "unseen"}
+              data-testid="message-action-read-feedback-transition"
+              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={feedbackMotionProps}
+              className="inline-flex"
+            >
+              {isSeen ? (
+                <MailOpen className="size-4" />
+              ) : (
+                <Mail className="size-4" />
+              )}
+            </motion.span>
+          </AnimatePresence>
+        ) : isSeen ? (
           <MailOpen className="size-4" />
         ) : (
           <Mail className="size-4" />
@@ -267,6 +324,6 @@ export function MessageActionBar() {
       {data && (
         <TagPicker folder={activeFolder} uid={data.uid} />
       )}
-    </div>
+    </ActionContainer>
   );
 }
