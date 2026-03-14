@@ -447,8 +447,8 @@ pub async fn get_message(
             .and_then(|j| serde_json::from_str(j).ok())
             .unwrap_or_default();
         let theme = cached.email_theme;
-        if theme.is_none() && cached.html.is_some() {
-            let detected = email_theme::detect_email_theme(cached.html.as_ref().unwrap())
+        if theme.is_none() && let Some(ref html) = cached.html {
+            let detected = email_theme::detect_email_theme(html)
                 .map(|t| t.as_i32());
             if let Some(t) = detected {
                 let _ = db::messages::update_email_theme(&conn, &folder, uid, t);

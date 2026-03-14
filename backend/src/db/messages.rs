@@ -284,6 +284,7 @@ pub fn update_message_flags(
 
 /// Cache a message body (HTML and/or plain text) along with attachment
 /// metadata (as a JSON string) and the raw RFC-822 headers.
+#[allow(clippy::too_many_arguments)]
 pub fn cache_message_body(
     conn: &Connection,
     folder: &str,
