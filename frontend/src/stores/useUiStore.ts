@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 
+import type { AnimationMode } from "@/lib/motion/config";
+
 const STORAGE_KEY = "oxi-ui-settings";
 
 interface PersistedSettings {
@@ -42,6 +44,8 @@ function saveSettings(settings: Partial<PersistedSettings>) {
 
 export type ThemeMode = "light" | "dark" | "system";
 
+const DEFAULT_EFFECTIVE_ANIMATION_MODE: AnimationMode = "medium";
+
 interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
@@ -60,6 +64,8 @@ interface UiState {
   commandPaletteOpen: boolean;
   keyboardNav: boolean;
   composeFormat: "html" | "text";
+  storedAnimationMode: AnimationMode | null;
+  effectiveAnimationMode: AnimationMode;
 
   setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
@@ -81,6 +87,10 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setKeyboardNav: (active: boolean) => void;
   setComposeFormat: (format: "html" | "text") => void;
+  setStoredAnimationMode: (mode: AnimationMode | null) => void;
+  setEffectiveAnimationMode: (mode: AnimationMode) => void;
+  setAnimationModes: (storedMode: AnimationMode | null, effectiveMode: AnimationMode) => void;
+  isAnimationOff: () => boolean;
 }
 
 const initial = loadSettings();
@@ -103,6 +113,8 @@ export const useUiStore = create<UiState>((set) => ({
   commandPaletteOpen: false,
   keyboardNav: false,
   composeFormat: "html",
+  storedAnimationMode: null,
+  effectiveAnimationMode: DEFAULT_EFFECTIVE_ANIMATION_MODE,
 
   setActiveTag: (tagId) =>
     set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -143,4 +155,12 @@ export const useUiStore = create<UiState>((set) => ({
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setKeyboardNav: (active) => set({ keyboardNav: active }),
   setComposeFormat: (format) => set({ composeFormat: format }),
+  setStoredAnimationMode: (mode) => set({ storedAnimationMode: mode }),
+  setEffectiveAnimationMode: (mode) => set({ effectiveAnimationMode: mode }),
+  setAnimationModes: (storedMode, effectiveMode) =>
+    set({
+      storedAnimationMode: storedMode,
+      effectiveAnimationMode: effectiveMode,
+    }),
+  isAnimationOff: () => useUiStore.getState().effectiveAnimationMode === "off",
 }));
