@@ -8,6 +8,7 @@ pub struct DisplayPreferences {
     pub language: String,
     pub compose_format: String,
     pub deep_index: bool,
+    pub animation_mode: Option<String>,
     pub updated_at: String,
 }
 
@@ -18,13 +19,14 @@ pub struct UpdateDisplayPreferences {
     pub language: Option<String>,
     pub compose_format: Option<String>,
     pub deep_index: Option<bool>,
+    pub animation_mode: Option<String>,
 }
 
 /// Retrieve the singleton display preferences row.
 /// Returns sensible defaults if the row does not yet exist.
 pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> {
     let result = conn.query_row(
-        "SELECT density, theme, language, compose_format, deep_index, updated_at FROM display_preferences WHERE id = 1",
+        "SELECT density, theme, language, compose_format, deep_index, animation_mode, updated_at FROM display_preferences WHERE id = 1",
         [],
         |row| {
             let deep_index_int: i32 = row.get(4)?;
@@ -34,7 +36,8 @@ pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> 
                 language: row.get(2)?,
                 compose_format: row.get(3)?,
                 deep_index: deep_index_int != 0,
-                updated_at: row.get(5)?,
+                animation_mode: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         },
     );
@@ -47,6 +50,7 @@ pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> 
             language: "en".to_string(),
             compose_format: "html".to_string(),
             deep_index: false,
+            animation_mode: None,
             updated_at: String::new(),
         }),
         Err(e) => Err(format!("Failed to get display preferences: {e}")),
@@ -104,6 +108,18 @@ pub fn update_preferences(
         values.push(Box::new(deep_index as i32));
         idx += 1;
     }
+    if let Some(ref animation_mode) = data.animation_mode {
+        if animation_mode != "rich"
+            && animation_mode != "medium"
+            && animation_mode != "subtle"
+            && animation_mode != "off"
+        {
+            return Err(format!("Invalid animation_mode: {animation_mode}"));
+        }
+        sets.push(format!("animation_mode = ?{idx}"));
+        values.push(Box::new(animation_mode.clone()));
+        idx += 1;
+    }
 
     if sets.is_empty() {
         return get_preferences(conn);
@@ -114,8 +130,7 @@ pub fn update_preferences(
     let sql = format!("UPDATE display_preferences SET {set_clause} WHERE id = ?{idx}");
     values.push(Box::new(1_i32));
 
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        values.iter().map(|v| v.as_ref()).collect();
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
     conn.execute(&sql, params_refs.as_slice())
         .map_err(|e| format!("Failed to update display preferences: {e}"))?;
@@ -151,6 +166,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         )
         .unwrap();
@@ -172,6 +188,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         )
         .unwrap();
@@ -192,6 +209,7 @@ mod tests {
                 language: Some("en".to_string()),
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         )
         .unwrap();
@@ -213,6 +231,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         );
 
@@ -232,6 +251,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         );
 
@@ -251,6 +271,7 @@ mod tests {
                 language: None,
                 compose_format: Some("text".to_string()),
                 deep_index: None,
+                animation_mode: None,
             },
         )
         .unwrap();
@@ -271,6 +292,7 @@ mod tests {
                 language: None,
                 compose_format: Some("markdown".to_string()),
                 deep_index: None,
+                animation_mode: None,
             },
         );
 
@@ -290,11 +312,60 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
+                animation_mode: None,
             },
         )
         .unwrap();
 
         assert_eq!(prefs.density, "comfortable");
         assert_eq!(prefs.theme, "system");
+    }
+
+    #[test]
+    fn test_read_defaults_animation_mode_none() {
+        let conn = open_test_db();
+        let prefs = get_preferences(&conn).unwrap();
+
+        assert_eq!(prefs.animation_mode, None);
+    }
+
+    #[test]
+    fn test_update_animation_mode_valid() {
+        let conn = open_test_db();
+
+        let prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some("medium".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(prefs.animation_mode.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn test_update_animation_mode_invalid() {
+        let conn = open_test_db();
+
+        let result = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some("ultra".to_string()),
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid animation_mode"));
     }
 }
