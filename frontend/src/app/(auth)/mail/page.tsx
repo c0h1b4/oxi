@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { ThreePanelLayout } from "@/components/shared/ThreePanelLayout";
 import { NavRail } from "@/components/shared/NavRail";
 import { FolderTree } from "@/components/mail/FolderTree";
@@ -21,6 +22,7 @@ import { PreferencesLoader } from "@/components/PreferencesLoader";
 
 export default function MailPage() {
   const viewMode = useUiStore((s) => s.viewMode);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   useKeyboardShortcuts();
   const { showBanner, requestPermission, dismissBanner, handleEvent } = useNotifications();
   const { status: wsStatus, failCount: wsFailCount } = useWebSocket(handleEvent);
@@ -30,30 +32,32 @@ export default function MailPage() {
     [wsStatus, wsFailCount],
   );
 
-  let content: React.ReactNode;
+  const shouldAnimateViews = effectiveAnimationMode !== "off";
+
+  let viewContent: React.ReactNode;
   if (viewMode === "contacts") {
-    content = (
+    viewContent = (
       <div className="flex h-screen w-full overflow-hidden">
         <NavRail />
         <ContactsPanel />
       </div>
     );
   } else if (viewMode === "calendar") {
-    content = (
+    viewContent = (
       <div className="flex h-screen w-full overflow-hidden">
         <NavRail />
         <CalendarPanel />
       </div>
     );
   } else if (viewMode === "settings") {
-    content = (
+    viewContent = (
       <div className="flex h-screen w-full overflow-hidden">
         <NavRail />
         <SettingsPanel />
       </div>
     );
   } else {
-    content = (
+    viewContent = (
       <ThreePanelLayout
         navRail={<NavRail />}
         sidebar={<FolderTree />}
@@ -62,6 +66,22 @@ export default function MailPage() {
       />
     );
   }
+
+  const content = shouldAnimateViews ? (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={viewMode}
+        data-testid={`mail-view-transition-${viewMode}`}
+        initial={{ opacity: 0, x: 10 }}
+        animate={{ opacity: 1, x: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}
+        exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.2, 0, 0, 1] } }}
+      >
+        {viewContent}
+      </motion.div>
+    </AnimatePresence>
+  ) : (
+    <div data-testid={`mail-view-static-${viewMode}`}>{viewContent}</div>
+  );
 
   return (
     <WsContext.Provider value={wsContextValue}>

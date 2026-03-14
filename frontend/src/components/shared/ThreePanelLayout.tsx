@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useUiStore } from "@/stores/useUiStore";
 import { SearchBar } from "@/components/mail/SearchBar";
 import { SearchResults } from "@/components/mail/SearchResults";
@@ -51,13 +52,15 @@ function ResizeHandle({
   );
 
   return (
-    <div
+    <button
+      type="button"
+      aria-label="Resize panel"
       onMouseDown={onMouseDown}
       className="group relative z-10 w-0 cursor-col-resize outline-none"
     >
       {/* Invisible wider hit area */}
       <div className="absolute inset-y-0 -left-1 w-2 group-hover:bg-primary/20 group-active:bg-primary/30" />
-    </div>
+    </button>
   );
 }
 
@@ -74,6 +77,36 @@ export function ThreePanelLayout({
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const searchActive = useUiStore((s) => s.searchActive);
   const readingPaneVisible = useUiStore((s) => s.readingPaneVisible);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+
+  const centerTransition = {
+    initial: { opacity: 0, x: 8 },
+    animate: {
+      opacity: 1,
+      x: 0,
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] },
+    },
+    exit: {
+      opacity: 0,
+      x: -4,
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] },
+    },
+  };
+
+  const readingPaneTransition = {
+    initial: { opacity: 0, x: 12 },
+    animate: {
+      opacity: 1,
+      x: 0,
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] },
+    },
+    exit: {
+      opacity: 0,
+      x: 6,
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] },
+    },
+  };
 
   const handleSidebarDrag = useCallback(
     (delta: number) => {
@@ -117,7 +150,35 @@ export function ThreePanelLayout({
         style={readingPaneVisible ? { width: messageListWidth } : undefined}
       >
         <SearchBar />
-        {searchActive ? (
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            {searchActive ? (
+              <motion.div
+                key="search"
+                data-testid="three-panel-search-transition"
+                data-motion-props={JSON.stringify(centerTransition)}
+                initial={centerTransition.initial}
+                animate={centerTransition.animate}
+                exit={centerTransition.exit}
+                className="min-h-0 flex-1"
+              >
+                <SearchResults />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="list"
+                data-testid="three-panel-list-transition"
+                data-motion-props={JSON.stringify(centerTransition)}
+                initial={centerTransition.initial}
+                animate={centerTransition.animate}
+                exit={centerTransition.exit}
+                className="flex-1 overflow-y-auto"
+              >
+                {messageList}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        ) : searchActive ? (
           <SearchResults />
         ) : (
           <div className="flex-1 overflow-y-auto">{messageList}</div>
@@ -125,22 +186,52 @@ export function ThreePanelLayout({
       </main>
 
       {/* Resize handle: message list | reading pane */}
-      {readingPaneVisible && <ResizeHandle onDrag={handleMessageListDrag} />}
-
-      {/* Right panel — action bar + reading pane (fills remaining space) */}
-      {readingPaneVisible && (
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <MessageActionBar />
-          {selectedMessageUid !== null ? (
-            <div className="flex min-h-0 flex-1">{readingPane}</div>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
-                oxi<span className="text-primary/40">.email</span>
-              </span>
-            </div>
+      {shouldAnimate ? (
+        <AnimatePresence initial={false}>
+          {readingPaneVisible && (
+            <motion.div
+              key="reading-pane"
+              data-testid="three-panel-reading-pane-transition"
+              data-motion-props={JSON.stringify(readingPaneTransition)}
+              initial={readingPaneTransition.initial}
+              animate={readingPaneTransition.animate}
+              exit={readingPaneTransition.exit}
+              className="contents"
+            >
+              <ResizeHandle onDrag={handleMessageListDrag} />
+              <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <MessageActionBar />
+                {selectedMessageUid !== null ? (
+                  <div className="flex min-h-0 flex-1">{readingPane}</div>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center">
+                    <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
+                      oxi<span className="text-primary/40">.email</span>
+                    </span>
+                  </div>
+                )}
+              </section>
+            </motion.div>
           )}
-        </section>
+        </AnimatePresence>
+      ) : (
+        <>
+          {readingPaneVisible && <ResizeHandle onDrag={handleMessageListDrag} />}
+          {readingPaneVisible && (
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <MessageActionBar />
+              {selectedMessageUid !== null ? (
+                <div className="flex min-h-0 flex-1">{readingPane}</div>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
+                    oxi<span className="text-primary/40">.email</span>
+                  </span>
+                </div>
+              )}
+            </section>
+          )}
+        </>
       )}
     </div>
   );
