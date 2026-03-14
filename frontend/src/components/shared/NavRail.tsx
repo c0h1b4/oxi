@@ -39,6 +39,7 @@ function NavButton({
     <button
       type="button"
       onClick={onClick}
+      aria-label={disabled ? `${label} (coming soon)` : label}
       title={disabled ? `${label} (coming soon)` : label}
       className={cn(
         "flex size-10 items-center justify-center rounded-lg transition-colors",
