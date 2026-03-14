@@ -93,13 +93,13 @@ fn extract_session_cookies(headers: &axum::http::HeaderMap) -> Vec<(String, Stri
     for cookie in headers.get_all("cookie").iter().filter_map(|v| v.to_str().ok()) {
         for segment in cookie.split(';') {
             let trimmed = segment.trim();
-            if let Some(rest) = trimmed.strip_prefix(prefix) {
-                if let Some(eq_pos) = rest.find('=') {
-                    let account_id = &rest[..eq_pos];
-                    let token = &rest[eq_pos + 1..];
-                    if !account_id.is_empty() && !token.is_empty() {
-                        sessions.push((account_id.to_string(), token.to_string()));
-                    }
+            if let Some(rest) = trimmed.strip_prefix(prefix)
+                && let Some(eq_pos) = rest.find('=')
+            {
+                let account_id = &rest[..eq_pos];
+                let token = &rest[eq_pos + 1..];
+                if !account_id.is_empty() && !token.is_empty() {
+                    sessions.push((account_id.to_string(), token.to_string()));
                 }
             }
         }

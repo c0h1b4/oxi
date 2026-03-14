@@ -75,6 +75,7 @@ impl SessionStore {
         browser_id
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_account_to_browser(
         &self,
         browser_id: &str,

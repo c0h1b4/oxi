@@ -156,10 +156,10 @@ async fn handle_socket_multi_account(
                     "accountId": account_id,
                     "event": mail_event,
                 });
-                if let Ok(json) = serde_json::to_string(&msg) {
-                    if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                        break;
-                    }
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && ws_tx.send(Message::Text(json.into())).await.is_err()
+                {
+                    break;
                 }
             }
 
