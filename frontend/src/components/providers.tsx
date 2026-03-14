@@ -8,8 +8,6 @@ import { makeQueryClient } from "@/lib/query-client";
 const THEME_STORAGE_KEY = "oxi-theme";
 
 function ThemeInitializer() {
-  const [mounted, setMounted] = useState(false);
-
   useEffect(() => {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === "dark") {
@@ -20,7 +18,6 @@ function ThemeInitializer() {
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.classList.toggle("dark", prefersDark);
     }
-    setMounted(true);
   }, []);
 
   return null;
