@@ -56,7 +56,9 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    use axum::http::StatusCode;
     use axum::Extension;
+    use axum::response::IntoResponse;
     use tempfile::TempDir;
 
     fn test_config(data_dir: &str) -> Arc<AppConfig> {
@@ -108,7 +110,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
-                animation_mode: Some("ultra".to_string()),
+                animation_mode: Some(Some("ultra".to_string())),
             }),
         )
         .await;
@@ -131,5 +133,32 @@ mod tests {
             }
             other => panic!("expected BadRequest, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_preferences_map_to_http_400_response() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(tmp.path().to_str().unwrap());
+        let session = test_session();
+
+        let result = update_display_preferences(
+            Extension(session),
+            Extension(config),
+            Json(UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some(Some("ultra".to_string())),
+            }),
+        )
+        .await;
+
+        let response = result
+            .expect_err("invalid preferences should return an error")
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

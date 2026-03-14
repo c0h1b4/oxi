@@ -19,7 +19,7 @@ pub struct UpdateDisplayPreferences {
     pub language: Option<String>,
     pub compose_format: Option<String>,
     pub deep_index: Option<bool>,
-    pub animation_mode: Option<String>,
+    pub animation_mode: Option<Option<String>>,
 }
 
 /// Retrieve the singleton display preferences row.
@@ -109,12 +109,13 @@ pub fn update_preferences(
         idx += 1;
     }
     if let Some(ref animation_mode) = data.animation_mode {
-        if animation_mode != "rich"
-            && animation_mode != "medium"
-            && animation_mode != "subtle"
-            && animation_mode != "off"
+        if let Some(value) = animation_mode
+            && value != "rich"
+            && value != "medium"
+            && value != "subtle"
+            && value != "off"
         {
-            return Err(format!("Invalid animation_mode: {animation_mode}"));
+            return Err(format!("Invalid animation_mode: {value}"));
         }
         sets.push(format!("animation_mode = ?{idx}"));
         values.push(Box::new(animation_mode.clone()));
@@ -341,7 +342,7 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
-                animation_mode: Some("medium".to_string()),
+                animation_mode: Some(Some("medium".to_string())),
             },
         )
         .unwrap();
@@ -361,11 +362,80 @@ mod tests {
                 language: None,
                 compose_format: None,
                 deep_index: None,
-                animation_mode: Some("ultra".to_string()),
+                animation_mode: Some(Some("ultra".to_string())),
             },
         );
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid animation_mode"));
+    }
+
+    #[test]
+    fn test_update_animation_mode_null_clears_value() {
+        let conn = open_test_db();
+
+        let set_prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some(Some("medium".to_string())),
+            },
+        )
+        .unwrap();
+        assert_eq!(set_prefs.animation_mode.as_deref(), Some("medium"));
+
+        let cleared_prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some(None),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(cleared_prefs.animation_mode, None);
+    }
+
+    #[test]
+    fn test_update_animation_mode_omitted_keeps_existing_value() {
+        let conn = open_test_db();
+
+        let set_prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: Some(Some("subtle".to_string())),
+            },
+        )
+        .unwrap();
+        assert_eq!(set_prefs.animation_mode.as_deref(), Some("subtle"));
+
+        let updated_prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: Some("compact".to_string()),
+                theme: None,
+                language: None,
+                compose_format: None,
+                deep_index: None,
+                animation_mode: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated_prefs.density, "compact");
+        assert_eq!(updated_prefs.animation_mode.as_deref(), Some("subtle"));
     }
 }
