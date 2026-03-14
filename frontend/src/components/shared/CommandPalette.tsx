@@ -18,6 +18,7 @@ import {
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
+import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 
 function useResolvedTheme() {
   const theme = useUiStore((s) => s.theme);
@@ -34,6 +35,7 @@ export function CommandPalette() {
   const open = useUiStore((s) => s.commandPaletteOpen);
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const setTheme = useUiStore((s) => s.setTheme);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const updatePrefs = useUpdateDisplayPreferences();
   const resolvedTheme = useResolvedTheme();
 
@@ -44,6 +46,7 @@ export function CommandPalette() {
 
   const toggleTheme = () => {
     const next = resolvedTheme === "dark" ? "light" : "dark";
+    runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
     setTheme(next);
     localStorage.setItem(THEME_STORAGE_KEY, next);
     updatePrefs.mutate({ theme: next });

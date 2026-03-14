@@ -7,6 +7,7 @@ import {
   useDisplayPreferences,
   useUpdateDisplayPreferences,
 } from "@/hooks/useDisplayPreferences";
+import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
 import type { AnimationMode } from "@/lib/motion/config";
@@ -59,6 +60,7 @@ export function DisplaySettings() {
   const setDensity = useUiStore((s) => s.setDensity);
   const setTheme = useUiStore((s) => s.setTheme);
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
 
   const handleDensityChange = useCallback(
     (density: "compact" | "comfortable") => {
@@ -73,13 +75,14 @@ export function DisplaySettings() {
 
   const handleThemeChange = useCallback(
     (theme: ThemeMode) => {
+      runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
       setTheme(theme);
       updatePrefs.mutate(
         { theme },
         { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
       );
     },
-    [setTheme, updatePrefs],
+    [effectiveAnimationMode, setTheme, updatePrefs],
   );
 
   const handleComposeFormatChange = useCallback(

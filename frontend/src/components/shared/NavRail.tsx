@@ -14,6 +14,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { apiPost } from "@/lib/api";
+import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUiStore } from "@/stores/useUiStore";
@@ -36,6 +37,7 @@ function NavButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={disabled ? `${label} (coming soon)` : label}
       className={cn(
@@ -68,15 +70,17 @@ export function NavRail() {
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
   const setTheme = useUiStore((s) => s.setTheme);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const updatePrefs = useUpdateDisplayPreferences();
   const resolvedTheme = useResolvedTheme();
 
   const toggleTheme = useCallback(() => {
     const next = resolvedTheme === "dark" ? "light" : "dark";
+    runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
     setTheme(next);
     localStorage.setItem(THEME_STORAGE_KEY, next);
     updatePrefs.mutate({ theme: next });
-  }, [resolvedTheme, setTheme, updatePrefs]);
+  }, [effectiveAnimationMode, resolvedTheme, setTheme, updatePrefs]);
 
   const handleLogout = useCallback(async () => {
     try {

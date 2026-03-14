@@ -70,7 +70,11 @@ export function EmailRenderer({
   const [isReady, setIsReady] = useReducer((_: boolean, ready: boolean) => ready, false);
 
   const appTheme = useUiStore((state) => state.theme);
+  const effectiveAnimationMode = useUiStore((state) => state.effectiveAnimationMode);
   const resolvedTheme = theme === "auto" ? appTheme : theme;
+  const previousSurfaceRef = useRef<"html" | "text" | "empty" | null>(null);
+  const previousTextSignatureRef = useRef<string | null>(null);
+  const richStreamSessionRef = useRef(0);
 
   const [isSystemDark, setIsSystemDark] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -108,7 +112,7 @@ export function EmailRenderer({
       iframeKeyRef.current = iframeKey;
       setIsReady(false);
     }
-  }, [iframeKey, setIsReady]);
+  }, [iframeKey]);
 
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
@@ -441,6 +445,25 @@ export function EmailRenderer({
 </html>`;
   }, [html, blockRemoteResources, emailTheme, shouldInvert, isDark]);
 
+  const surface: "html" | "text" | "empty" = wrappedHtml ? "html" : text ? "text" : "empty";
+  const textSignature = text ? `${text.length}:${text}` : null;
+
+  const shouldStartRichStream =
+    surface === "text" &&
+    effectiveAnimationMode === "rich" &&
+    (
+      previousSurfaceRef.current == null ||
+      previousSurfaceRef.current === "html" ||
+      previousTextSignatureRef.current !== textSignature
+    );
+
+  if (shouldStartRichStream) {
+    richStreamSessionRef.current += 1;
+  }
+
+  previousSurfaceRef.current = surface;
+  previousTextSignatureRef.current = surface === "text" ? textSignature : null;
+
   if (wrappedHtml) {
     return (
       <div className="h-full w-full overflow-auto bg-background relative">
@@ -474,8 +497,61 @@ export function EmailRenderer({
   }
 
   if (text) {
+    if (effectiveAnimationMode === "off") {
+      return (
+        <pre
+          data-testid="email-renderer-plaintext-static"
+          className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground"
+        >
+          {text}
+        </pre>
+      );
+    }
+
+    if (effectiveAnimationMode === "rich") {
+      const lines = text.split(/\r?\n/);
+      const isLargeBody = text.length > 6000 || lines.length > 180;
+
+      if (isLargeBody) {
+        return (
+          <pre
+            data-testid="email-renderer-plaintext-large-reveal"
+            data-stream-session={String(richStreamSessionRef.current)}
+            className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-200"
+          >
+            {text}
+          </pre>
+        );
+      }
+
+      return (
+        <pre
+          data-testid="email-renderer-plaintext-rich-stream"
+          data-stream-session={String(richStreamSessionRef.current)}
+          className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground"
+        >
+          {lines.map((line, index) => (
+            <span
+              key={`${richStreamSessionRef.current}-${index}`}
+              data-testid="email-renderer-plaintext-line"
+              style={{
+                display: "inline",
+                animationDelay: `${Math.min(index * 18, 320)}ms`,
+              }}
+            >
+              {line}
+              {index < lines.length - 1 ? "\n" : ""}
+            </span>
+          ))}
+        </pre>
+      );
+    }
+
     return (
-      <pre className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground">
+      <pre
+        data-testid="email-renderer-plaintext-simple-transition"
+        className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-150"
+      >
         {text}
       </pre>
     );
