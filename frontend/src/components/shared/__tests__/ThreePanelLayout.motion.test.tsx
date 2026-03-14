@@ -56,6 +56,19 @@ describe("ThreePanelLayout motion transitions", () => {
     expect(screen.getByTestId("three-panel-reading-pane-transition")).toBeTruthy();
   });
 
+  it("uses a concrete wrapper for reading pane motion", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.readingPaneVisible = true;
+    mockUiState.searchActive = false;
+
+    renderLayout();
+
+    const readingPane = screen.getByTestId("three-panel-reading-pane-transition");
+
+    expect(readingPane.className.includes("contents")).toBe(false);
+    expect(readingPane.className.includes("flex")).toBe(true);
+  });
+
   it("animates search/list swap for non-off modes", async () => {
     mockUiState.effectiveAnimationMode = "medium";
     mockUiState.readingPaneVisible = true;

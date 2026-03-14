@@ -196,7 +196,7 @@ export function ThreePanelLayout({
               initial={readingPaneTransition.initial}
               animate={readingPaneTransition.animate}
               exit={readingPaneTransition.exit}
-              className="contents"
+              className="flex min-h-0 min-w-0 flex-1"
             >
               <ResizeHandle onDrag={handleMessageListDrag} />
               <section className="flex min-h-0 min-w-0 flex-1 flex-col">
