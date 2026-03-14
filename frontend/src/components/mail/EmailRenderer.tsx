@@ -64,12 +64,14 @@ export function EmailRenderer({ html, text, blockRemoteResources = false, theme 
   const appTheme = useUiStore((state) => state.theme);
   const resolvedTheme = theme === "auto" ? appTheme : theme;
 
-  const [isSystemDark, setIsSystemDark] = useState(false);
+  const [isSystemDark, setIsSystemDark] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsSystemDark(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsSystemDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
