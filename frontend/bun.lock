@@ -17,6 +17,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
+        "fuzzysort": "^3.1.0",
         "lucide-react": "^0.575.0",
         "next": "16.1.6",
         "radix-ui": "^1.4.3",
