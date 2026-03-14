@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, useEffect, useRef } from "react";
 import { Dialog } from "radix-ui";
+import { AnimatePresence, motion } from "framer-motion";
 import { X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { apiPost, fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useQueryClient } from "@tanstack/react-query";
+import { useUiStore } from "@/stores/useUiStore";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -40,6 +43,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ModalContainer = shouldAnimate ? motion.div : "div";
   const [serverConfig, setServerConfig] = useState<ServerConfig>({
     imapHost: "",
     imapPort: "993",
@@ -127,8 +135,47 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <AnimatePresence>
+          {open ? (
+            <>
+              <Dialog.Overlay asChild={shouldAnimate}>
+                {shouldAnimate ? (
+                  <motion.div
+                    key="add-account-overlay"
+                    data-testid="add-account-overlay-transition"
+                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    variants={overlayMotionProps}
+                    className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+                  />
+                ) : (
+                  <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+                )}
+              </Dialog.Overlay>
+              <Dialog.Content
+                asChild={shouldAnimate}
+                className={
+                  shouldAnimate
+                    ? undefined
+                    : "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+                }
+              >
+                <ModalContainer
+                  {...(shouldAnimate
+                    ? {
+                        "data-testid": "add-account-content-transition",
+                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        initial: "initial",
+                        animate: "animate",
+                        exit: "exit",
+                        variants: contentMotionProps,
+                        className:
+                          "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto",
+                      }
+                    : {})}
+                >
           <Dialog.Title className="text-lg font-semibold mb-1">
             Add account
           </Dialog.Title>
@@ -303,7 +350,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
               </Button>
             </div>
           </form>
-        </Dialog.Content>
+                </ModalContainer>
+              </Dialog.Content>
+            </>
+          ) : null}
+        </AnimatePresence>
       </Dialog.Portal>
     </Dialog.Root>
   );
