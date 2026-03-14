@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { FuzzySearcher, type SearchableItem, type SearchResult } from "@/lib/fuzzySearch";
@@ -49,7 +48,7 @@ export function useAutocomplete(
     staleTime: 30000,
   });
 
-  const results = useMemo(() => {
+  const results = (() => {
     if (debouncedQuery.length < MIN_QUERY_LENGTH) {
       return [];
     }
@@ -79,7 +78,7 @@ export function useAutocomplete(
     }
 
     return [];
-  }, [allContacts?.suggestions, serverResults?.suggestions, debouncedQuery]);
+  })();
 
   return {
     results,

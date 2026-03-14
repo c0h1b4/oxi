@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useEffect, useState, useMemo } from "react";
+import { useRef, useCallback, useEffect, useState, useReducer, useMemo } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 
 interface EmailRendererProps {
@@ -67,7 +67,7 @@ export function EmailRenderer({
   emailTheme
 }: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [isReady, setIsReady] = useState(false);
+  const [isReady, setIsReady] = useReducer((_: boolean, ready: boolean) => ready, false);
 
   const appTheme = useUiStore((state) => state.theme);
   const resolvedTheme = theme === "auto" ? appTheme : theme;
@@ -101,12 +101,14 @@ export function EmailRenderer({
   // Compute a stable key for the iframe — when this changes, React remounts the iframe
   const iframeKey = `${shouldInvert ? "inverted" : "normal"}-${isDark ? "dark" : "light"}-${blockRemoteResources}`;
 
-  // Track the current iframe key to detect when it changes and reset ready state
-  const prevKeyRef = useRef(iframeKey);
-  if (prevKeyRef.current !== iframeKey) {
-    prevKeyRef.current = iframeKey;
-    setIsReady(false);
-  }
+  // Track iframe key changes to reset ready state
+  const iframeKeyRef = useRef(iframeKey);
+  useEffect(() => {
+    if (iframeKeyRef.current !== iframeKey) {
+      iframeKeyRef.current = iframeKey;
+      setIsReady(false);
+    }
+  }, [iframeKey, setIsReady]);
 
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
