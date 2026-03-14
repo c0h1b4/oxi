@@ -11,6 +11,7 @@ import { apiPost, fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
+import type { UiState } from "@/stores/useUiStore";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 
 function getCookie(name: string): string | null {
@@ -43,7 +44,7 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
-  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
   const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);

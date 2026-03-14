@@ -1,4 +1,4 @@
-import type { Transition, Variants } from "framer-motion";
+import type { Transition, Variants, TargetAndTransition } from "framer-motion";
 
 import { getMotionTokens, type AnimationMode } from "./config";
 
@@ -16,11 +16,17 @@ function tween(duration: number): Transition {
   return {
     type: "tween",
     duration,
-    ease: [0.2, 0, 0, 1],
+    ease: [0.2, 0, 0, 1] as const,
   };
 }
 
-export function createFadeSlideVariants(mode: AnimationMode, axis: Axis = "y"): Variants {
+export type MotionVariants = Variants & {
+  initial: TargetAndTransition;
+  animate: TargetAndTransition;
+  exit: TargetAndTransition;
+};
+
+export function createFadeSlideVariants(mode: AnimationMode, axis: Axis = "y"): MotionVariants {
   const tokens = getMotionTokens(mode);
 
   return {
@@ -41,7 +47,7 @@ export function createFadeSlideVariants(mode: AnimationMode, axis: Axis = "y"): 
   };
 }
 
-export function createScaleFadeVariants(mode: AnimationMode): Variants {
+export function createScaleFadeVariants(mode: AnimationMode): MotionVariants {
   const tokens = getMotionTokens(mode);
 
   return {
