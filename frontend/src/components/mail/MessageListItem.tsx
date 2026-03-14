@@ -1,9 +1,12 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import { Star, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateFlags } from "@/hooks/useMessages";
+import { createScaleFadeVariants } from "@/lib/motion/variants";
+import { useUiStore } from "@/stores/useUiStore";
 import type { MessageTag } from "@/types/tag";
 import type { MessageHeader } from "@/types/message";
 
@@ -105,6 +108,7 @@ export const MessageListItem = memo(function MessageListItem({
   onBulkToggle,
   suppressHover,
 }: MessageListItemProps) {
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
   const sender = message.from_name || message.from_address;
@@ -134,6 +138,10 @@ export const MessageListItem = memo(function MessageListItem({
   };
 
   const [isDragging, setIsDragging] = useState(false);
+  const selectionVariants = createScaleFadeVariants(effectiveAnimationMode);
+  const shouldAnimateSelection =
+    isSelected &&
+    (effectiveAnimationMode === "medium" || effectiveAnimationMode === "rich");
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
@@ -156,7 +164,7 @@ export const MessageListItem = memo(function MessageListItem({
   }, []);
 
   if (density === "compact") {
-    return (
+    const compactRow = (
       <div
         role="row"
         aria-selected={isSelected}
@@ -260,10 +268,26 @@ export const MessageListItem = memo(function MessageListItem({
         </span>
       </div>
     );
+
+    if (!shouldAnimateSelection) {
+      return compactRow;
+    }
+
+    return (
+      <motion.div
+        data-testid="message-list-item-selection-transition"
+        data-motion-props={JSON.stringify(selectionVariants)}
+        initial={selectionVariants.initial}
+        animate={selectionVariants.animate}
+        exit={selectionVariants.exit}
+      >
+        {compactRow}
+      </motion.div>
+    );
   }
 
   // Comfortable layout
-  return (
+  const comfortableRow = (
     <div
       role="row"
       aria-selected={isSelected}
@@ -378,5 +402,21 @@ export const MessageListItem = memo(function MessageListItem({
         )}
       </div>
     </div>
+  );
+
+  if (!shouldAnimateSelection) {
+    return comfortableRow;
+  }
+
+  return (
+    <motion.div
+      data-testid="message-list-item-selection-transition"
+      data-motion-props={JSON.stringify(selectionVariants)}
+      initial={selectionVariants.initial}
+      animate={selectionVariants.animate}
+      exit={selectionVariants.exit}
+    >
+      {comfortableRow}
+    </motion.div>
   );
 });
