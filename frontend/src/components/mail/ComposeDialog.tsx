@@ -124,9 +124,12 @@ export function ComposeDialog() {
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
-    if (isOpen && toInputRef.current) {
-      const t = setTimeout(() => toInputRef.current?.focus(), 100);
-      return () => clearTimeout(t);
+    if (isOpen) {
+      const focusInput = () => toInputRef.current?.focus();
+      const rafId = requestAnimationFrame(() => {
+        requestAnimationFrame(focusInput);
+      });
+      return () => cancelAnimationFrame(rafId);
     }
   }, [isOpen]);
 
