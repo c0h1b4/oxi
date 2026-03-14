@@ -14,7 +14,6 @@ function clearThemeTransitionArtifacts() {
 }
 
 function applyTheme(theme: ThemeMode) {
-  clearThemeTransitionArtifacts();
   const root = document.documentElement;
   if (theme === "dark") {
     root.classList.add("dark");
@@ -35,6 +34,10 @@ export function PreferencesLoader() {
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
   const setAnimationModeState = useUiStore((s) => s.setAnimationModeState);
   const theme = useUiStore((s) => s.theme);
+
+  useEffect(() => {
+    clearThemeTransitionArtifacts();
+  }, []);
 
   useEffect(() => {
     if (!data) return;
