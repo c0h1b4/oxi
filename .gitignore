@@ -99,3 +99,6 @@ build/
 _bmad/
 _bmad-output/
 docs/
+
+# Debugging files
+debugging/
