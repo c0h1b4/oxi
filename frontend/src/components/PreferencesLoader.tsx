@@ -6,7 +6,15 @@ import { resolveMotionConfig } from "@/lib/motion/config";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
 
+function clearThemeTransitionArtifacts() {
+  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
+    node.remove();
+  });
+  document.documentElement.classList.remove("theme-transitioning");
+}
+
 function applyTheme(theme: ThemeMode) {
+  clearThemeTransitionArtifacts();
   const root = document.documentElement;
   if (theme === "dark") {
     root.classList.add("dark");

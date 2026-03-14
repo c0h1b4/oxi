@@ -9,8 +9,16 @@ import { makeQueryClient } from "@/lib/query-client";
 
 const THEME_STORAGE_KEY = "oxi-theme";
 
+function clearThemeTransitionArtifacts() {
+  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
+    node.remove();
+  });
+  document.documentElement.classList.remove("theme-transitioning");
+}
+
 function ThemeInitializer() {
   useEffect(() => {
+    clearThemeTransitionArtifacts();
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === "dark") {
       document.documentElement.classList.add("dark");
