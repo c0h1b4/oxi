@@ -669,6 +669,7 @@ pub async fn get_message(
             0 => EmailTheme::Light,
             1 => EmailTheme::Dark,
             2 => EmailTheme::Transparent,
+            3 => EmailTheme::Adaptive,
             _ => EmailTheme::Light,
         }),
     })

@@ -7,6 +7,7 @@ pub enum EmailTheme {
     Light = 0,
     Dark = 1,
     Transparent = 2,
+    Adaptive = 3,
 }
 
 impl FromSql for EmailTheme {
@@ -15,6 +16,7 @@ impl FromSql for EmailTheme {
             0 => Ok(EmailTheme::Light),
             1 => Ok(EmailTheme::Dark),
             2 => Ok(EmailTheme::Transparent),
+            3 => Ok(EmailTheme::Adaptive),
             _ => Err(rusqlite::types::FromSqlError::InvalidType),
         }
     }

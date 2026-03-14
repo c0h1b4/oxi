@@ -36,7 +36,7 @@ export interface MessageDetail {
   flags: string[];
   html: string | null;
   text: string | null;
-  email_theme?: 'light' | 'dark' | 'transparent';
+  email_theme?: 'light' | 'dark' | 'transparent' | 'adaptive';
   raw_headers: string;
   attachments: Attachment[];
   thread: MessageHeader[];
