@@ -59,6 +59,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::Extension;
     use axum::response::IntoResponse;
+    use serde_json::json;
     use tempfile::TempDir;
 
     fn test_config(data_dir: &str) -> Arc<AppConfig> {
@@ -160,5 +161,44 @@ mod tests {
             .into_response();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_animation_mode_deserialize_omitted_is_none() {
+        let payload = json!({
+            "theme": "dark"
+        });
+
+        let parsed: UpdateDisplayPreferences =
+            serde_json::from_value(payload).expect("payload should deserialize");
+
+        assert_eq!(parsed.animation_mode, None);
+    }
+
+    #[test]
+    fn test_animation_mode_deserialize_null_is_some_none() {
+        let payload = json!({
+            "animation_mode": null
+        });
+
+        let parsed: UpdateDisplayPreferences =
+            serde_json::from_value(payload).expect("payload should deserialize");
+
+        assert_eq!(parsed.animation_mode, Some(None));
+    }
+
+    #[test]
+    fn test_animation_mode_deserialize_value_is_some_some() {
+        let payload = json!({
+            "animation_mode": "medium"
+        });
+
+        let parsed: UpdateDisplayPreferences =
+            serde_json::from_value(payload).expect("payload should deserialize");
+
+        assert_eq!(
+            parsed.animation_mode,
+            Some(Some("medium".to_string()))
+        );
     }
 }

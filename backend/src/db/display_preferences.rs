@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DisplayPreferences {
@@ -19,7 +19,18 @@ pub struct UpdateDisplayPreferences {
     pub language: Option<String>,
     pub compose_format: Option<String>,
     pub deep_index: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_animation_mode_field")]
     pub animation_mode: Option<Option<String>>,
+}
+
+fn deserialize_animation_mode_field<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(Some(value))
 }
 
 /// Retrieve the singleton display preferences row.
