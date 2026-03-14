@@ -511,6 +511,7 @@ export function EmailRenderer({
     if (effectiveAnimationMode === "rich") {
       const lines = text.split(/\r?\n/);
       const isLargeBody = text.length > 6000 || lines.length > 180;
+      const shouldAnimateRich = shouldStartRichStream;
 
       if (isLargeBody) {
         return (
@@ -518,6 +519,12 @@ export function EmailRenderer({
             data-testid="email-renderer-plaintext-large-reveal"
             data-stream-session={String(richStreamSessionRef.current)}
             className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-200"
+            style={{
+              animationName: shouldAnimateRich ? "email-plaintext-container-reveal" : "none",
+              animationDuration: shouldAnimateRich ? "220ms" : "0ms",
+              animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+              animationFillMode: "both",
+            }}
           >
             {text}
           </pre>
@@ -535,8 +542,13 @@ export function EmailRenderer({
               key={`${richStreamSessionRef.current}-${index}`}
               data-testid="email-renderer-plaintext-line"
               style={{
-                display: "inline",
-                animationDelay: `${Math.min(index * 18, 320)}ms`,
+                display: "inline-block",
+                width: "100%",
+                animationName: shouldAnimateRich ? "email-plaintext-line-reveal" : "none",
+                animationDuration: shouldAnimateRich ? "260ms" : "0ms",
+                animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+                animationFillMode: "both",
+                animationDelay: shouldAnimateRich ? `${Math.min(index * 18, 320)}ms` : "0ms",
               }}
             >
               {line}
@@ -547,10 +559,22 @@ export function EmailRenderer({
       );
     }
 
+    const simpleAnimationName =
+      effectiveAnimationMode === "medium"
+        ? "email-plaintext-medium-reveal"
+        : "email-plaintext-subtle-reveal";
+    const simpleAnimationDuration = effectiveAnimationMode === "medium" ? "170ms" : "110ms";
+
     return (
       <pre
         data-testid="email-renderer-plaintext-simple-transition"
         className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-150"
+        style={{
+          animationName: simpleAnimationName,
+          animationDuration: simpleAnimationDuration,
+          animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+          animationFillMode: "both",
+        }}
       >
         {text}
       </pre>

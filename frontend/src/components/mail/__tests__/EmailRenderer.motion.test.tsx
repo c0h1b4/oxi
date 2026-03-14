@@ -14,6 +14,20 @@ vi.mock("@/stores/useUiStore", () => ({
 
 import { EmailRenderer } from "../EmailRenderer";
 
+function expectAnimationStyle(element: HTMLElement, expectedName?: string) {
+  const animationName = element.style.animationName;
+  const animationDuration = element.style.animationDuration;
+
+  expect(animationName).not.toBe("");
+  expect(animationName).not.toBe("none");
+  expect(animationDuration).not.toBe("");
+  expect(animationDuration).not.toBe("0ms");
+
+  if (expectedName) {
+    expect(animationName).toBe(expectedName);
+  }
+}
+
 describe("EmailRenderer plaintext motion", () => {
   beforeEach(() => {
     mockUiState.theme = "light";
@@ -36,8 +50,14 @@ describe("EmailRenderer plaintext motion", () => {
 
     render(<EmailRenderer html={null} text={"first\nsecond"} />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-rich-stream")).toBeTruthy();
-    expect(screen.getAllByTestId("email-renderer-plaintext-line")).toHaveLength(2);
+    const stream = screen.getByTestId("email-renderer-plaintext-rich-stream");
+    const lines = screen.getAllByTestId("email-renderer-plaintext-line");
+
+    expect(stream).toBeTruthy();
+    expect(lines).toHaveLength(2);
+    expectAnimationStyle(lines[0] as HTMLElement, "email-plaintext-line-reveal");
+    expect((lines[0] as HTMLElement).style.animationDelay).toBe("0ms");
+    expect((lines[1] as HTMLElement).style.animationDelay).toBe("18ms");
   });
 
   it("streams plaintext in rich mode when switching from html to plaintext", () => {
@@ -46,19 +66,28 @@ describe("EmailRenderer plaintext motion", () => {
     const { rerender } = render(<EmailRenderer html="<p>Hello</p>" text="hello" />);
     rerender(<EmailRenderer html={null} text={"hello\nagain"} />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-rich-stream")).toBeTruthy();
+    const stream = screen.getByTestId("email-renderer-plaintext-rich-stream");
+    const lines = screen.getAllByTestId("email-renderer-plaintext-line");
+
+    expect(stream).toBeTruthy();
+    expectAnimationStyle(lines[0] as HTMLElement, "email-plaintext-line-reveal");
   });
 
   it("uses simpler transition in medium and subtle modes", () => {
     mockUiState.effectiveAnimationMode = "medium";
     const { rerender } = render(<EmailRenderer html={null} text="medium" />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-simple-transition")).toBeTruthy();
+    const medium = screen.getByTestId("email-renderer-plaintext-simple-transition");
+    expectAnimationStyle(medium as HTMLElement, "email-plaintext-medium-reveal");
+
+    const mediumDuration = (medium as HTMLElement).style.animationDuration;
 
     mockUiState.effectiveAnimationMode = "subtle";
     rerender(<EmailRenderer html={null} text="subtle" />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-simple-transition")).toBeTruthy();
+    const subtle = screen.getByTestId("email-renderer-plaintext-simple-transition");
+    expectAnimationStyle(subtle as HTMLElement, "email-plaintext-subtle-reveal");
+    expect((subtle as HTMLElement).style.animationDuration).not.toBe(mediumDuration);
   });
 
   it("renders instantly in off mode", () => {
@@ -66,7 +95,10 @@ describe("EmailRenderer plaintext motion", () => {
 
     render(<EmailRenderer html={null} text="instant" />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-static")).toBeTruthy();
+    const instant = screen.getByTestId("email-renderer-plaintext-static");
+    expect(instant).toBeTruthy();
+    expect((instant as HTMLElement).style.animationName).toBe("");
+    expect((instant as HTMLElement).style.animationDuration).toBe("");
     expect(screen.queryByTestId("email-renderer-plaintext-rich-stream")).toBeNull();
     expect(screen.queryByTestId("email-renderer-plaintext-simple-transition")).toBeNull();
   });
@@ -77,7 +109,9 @@ describe("EmailRenderer plaintext motion", () => {
 
     render(<EmailRenderer html={null} text={largeText} />);
 
-    expect(screen.getByTestId("email-renderer-plaintext-large-reveal")).toBeTruthy();
+    const largeReveal = screen.getByTestId("email-renderer-plaintext-large-reveal");
+    expect(largeReveal).toBeTruthy();
+    expectAnimationStyle(largeReveal as HTMLElement, "email-plaintext-container-reveal");
     expect(screen.queryByTestId("email-renderer-plaintext-line")).toBeNull();
   });
 
@@ -102,5 +136,8 @@ describe("EmailRenderer plaintext motion", () => {
       .getAttribute("data-stream-session");
 
     expect(afterSurfaceChange).not.toBe(afterMessageChange);
+
+    const lines = screen.getAllByTestId("email-renderer-plaintext-line");
+    expectAnimationStyle(lines[0] as HTMLElement, "email-plaintext-line-reveal");
   });
 });
