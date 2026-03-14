@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Reply,
   ReplyAll,
@@ -10,6 +11,7 @@ import {
   Mail,
   MailOpen,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useUiStore } from "@/stores/useUiStore";
@@ -77,6 +79,7 @@ export function MessageActionBar() {
   const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
   const feedbackMotionProps = createScaleFadeVariants(effectiveAnimationMode);
   const ActionContainer = shouldAnimate ? motion.div : "div";
+  const [actionFeedback, setActionFeedback] = useState<"delete" | "archive" | "move" | null>(null);
 
   const isSeen = data?.flags.includes("\\Seen") ?? false;
   const isFlagged = data?.flags.includes("\\Flagged") ?? false;
@@ -159,16 +162,27 @@ export function MessageActionBar() {
 
   const handleDelete = () => {
     if (!data) return;
+    setActionFeedback("delete");
     if (activeFolder === "Trash") {
-      deleteMessage.mutate({ folder: activeFolder, uid: data.uid });
+      deleteMessage.mutate(
+        { folder: activeFolder, uid: data.uid },
+        { onSettled: () => setActionFeedback(null) },
+      );
     } else {
-      moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Trash", uid: data.uid });
+      moveMessage.mutate(
+        { fromFolder: activeFolder, toFolder: "Trash", uid: data.uid },
+        { onSettled: () => setActionFeedback(null) },
+      );
     }
   };
 
   const handleArchive = () => {
     if (!data) return;
-    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Archive", uid: data.uid });
+    setActionFeedback("archive");
+    moveMessage.mutate(
+      { fromFolder: activeFolder, toFolder: "Archive", uid: data.uid },
+      { onSettled: () => setActionFeedback(null) },
+    );
   };
 
   const handleJunk = () => {
@@ -232,18 +246,95 @@ export function MessageActionBar() {
 
       {/* Delete */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleDelete}>
-        <Trash2 className="size-4" />
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={actionFeedback === "delete" ? "delete-busy" : "delete-idle"}
+              data-testid="message-action-delete-feedback-transition"
+              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={feedbackMotionProps}
+              className="inline-flex"
+            >
+              {actionFeedback === "delete" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+            </motion.span>
+          </AnimatePresence>
+        ) : (
+          <Trash2 className="size-4" />
+        )}
         <span className="hidden xl:inline">{activeFolder === "Trash" ? "Delete" : "Delete"}</span>
       </Button>
 
       {/* Archive */}
       <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive}>
-        <Archive className="size-4" />
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={actionFeedback === "archive" ? "archive-busy" : "archive-idle"}
+              data-testid="message-action-archive-feedback-transition"
+              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={feedbackMotionProps}
+              className="inline-flex"
+            >
+              {actionFeedback === "archive" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Archive className="size-4" />
+              )}
+            </motion.span>
+          </AnimatePresence>
+        ) : (
+          <Archive className="size-4" />
+        )}
         <span className="hidden xl:inline">Archive</span>
       </Button>
 
       {/* Move to */}
-      {disabled ? (
+      {shouldAnimate ? (
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={actionFeedback === "move" ? "move-busy" : "move-idle"}
+            data-testid="message-action-move-feedback-transition"
+            data-motion-props={JSON.stringify(feedbackMotionProps)}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={feedbackMotionProps}
+            className="inline-flex"
+          >
+            {actionFeedback === "move" ? (
+              <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
+                <Loader2 className="size-4 animate-spin" />
+                <span className="hidden xl:inline">Move to...</span>
+              </Button>
+            ) : disabled ? (
+              <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
+                <span className="hidden xl:inline">Move to...</span>
+              </Button>
+            ) : (
+              <MoveToFolderMenu
+                currentFolder={activeFolder}
+                onMove={(toFolder) => {
+                  setActionFeedback("move");
+                  moveMessage.mutate(
+                    { fromFolder: activeFolder, toFolder, uid: data.uid },
+                    { onSettled: () => setActionFeedback(null) },
+                  );
+                }}
+              />
+            )}
+          </motion.span>
+        </AnimatePresence>
+      ) : disabled ? (
         <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
           <span className="hidden xl:inline">Move to...</span>
         </Button>

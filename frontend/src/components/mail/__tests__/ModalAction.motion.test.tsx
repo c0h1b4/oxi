@@ -267,6 +267,12 @@ import { MoveToFolderMenu } from "../MoveToFolderMenu";
 import { MessageActionBar } from "../MessageActionBar";
 import { BulkActionBar } from "../BulkActionBar";
 
+function latestByTestId(testId: string) {
+  const elements = screen.queryAllByTestId(testId);
+  if (elements.length === 0) return null;
+  return elements[elements.length - 1] ?? null;
+}
+
 function setMessage(flags: string[] = ["\\Seen"]) {
   mockUseMessage.mockReturnValue({
     data: {
@@ -295,13 +301,21 @@ describe("Modal and action motion transitions", () => {
     expect(screen.getByTestId("compose-dialog-overlay-transition")).toBeTruthy();
     expect(screen.getByTestId("compose-dialog-content-transition")).toBeTruthy();
     expect(screen.getByTestId("compose-send-feedback-transition")).toBeTruthy();
-    const serialized = screen.getByTestId("compose-dialog-content-transition").getAttribute("data-motion-props") ?? "";
-    expect(serialized.includes("repeat")).toBe(false);
+    const modalSerialized = [
+      screen.getByTestId("compose-dialog-overlay-transition").getAttribute("data-motion-props") ?? "",
+      screen.getByTestId("compose-dialog-content-transition").getAttribute("data-motion-props") ?? "",
+      screen.getByTestId("compose-send-feedback-transition").getAttribute("data-motion-props") ?? "",
+    ].join(" ");
+    expect(modalSerialized.includes("repeat")).toBe(false);
 
     mockComposeState.isOpen = false;
     rerender(<ComposeDialog />);
 
-    expect(screen.queryByTestId("compose-dialog-content-transition")).toBeNull();
+    expect(latestByTestId("compose-dialog-content-transition")).toBeNull();
+
+    mockComposeState.isOpen = true;
+    rerender(<ComposeDialog />);
+    expect(latestByTestId("compose-dialog-content-transition")).toBeTruthy();
   });
 
   it("uses static ComposeDialog path when animation mode is off", () => {
@@ -384,7 +398,7 @@ describe("Modal and action motion transitions", () => {
     expect(screen.queryByTestId("move-to-folder-menu-transition")).toBeNull();
   });
 
-  it("applies MessageActionBar feedback transitions and keeps static off-mode path", () => {
+  it("applies MessageActionBar feedback transitions for read/star/delete/archive/move actions", () => {
     mockUiState.effectiveAnimationMode = "medium";
     setMessage(["\\Seen", "\\Flagged"]);
     const { rerender } = render(<MessageActionBar />);
@@ -392,11 +406,30 @@ describe("Modal and action motion transitions", () => {
     expect(screen.getByTestId("message-action-bar-transition")).toBeTruthy();
     expect(screen.getByTestId("message-action-star-feedback-transition")).toBeTruthy();
     expect(screen.getByTestId("message-action-read-feedback-transition")).toBeTruthy();
+    expect(screen.getByTestId("message-action-delete-feedback-transition")).toBeTruthy();
+    expect(screen.getByTestId("message-action-archive-feedback-transition")).toBeTruthy();
+    expect(screen.getByTestId("message-action-move-feedback-transition")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Delete"));
+    fireEvent.click(screen.getByText("Archive"));
+    fireEvent.click(screen.getByText("Move to..."));
+
+    const actionSerialized = [
+      latestByTestId("message-action-star-feedback-transition")?.getAttribute("data-motion-props") ?? "",
+      latestByTestId("message-action-read-feedback-transition")?.getAttribute("data-motion-props") ?? "",
+      latestByTestId("message-action-delete-feedback-transition")?.getAttribute("data-motion-props") ?? "",
+      latestByTestId("message-action-archive-feedback-transition")?.getAttribute("data-motion-props") ?? "",
+      latestByTestId("message-action-move-feedback-transition")?.getAttribute("data-motion-props") ?? "",
+    ].join(" ");
+    expect(actionSerialized.includes("repeat")).toBe(false);
 
     mockUiState.effectiveAnimationMode = "off";
     rerender(<MessageActionBar />);
     expect(screen.queryByTestId("message-action-bar-transition")).toBeNull();
     expect(screen.queryByTestId("message-action-star-feedback-transition")).toBeNull();
+    expect(screen.queryByTestId("message-action-delete-feedback-transition")).toBeNull();
+    expect(screen.queryByTestId("message-action-archive-feedback-transition")).toBeNull();
+    expect(screen.queryByTestId("message-action-move-feedback-transition")).toBeNull();
   });
 
   it("applies BulkActionBar mount/unmount transitions and keeps static off-mode path", () => {

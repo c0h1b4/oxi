@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -530,62 +530,66 @@ export function ComposeDialog() {
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay asChild={shouldAnimate}>
-            {shouldAnimate ? (
-              <motion.div
-                data-testid="compose-dialog-overlay-transition"
-                data-motion-props={JSON.stringify(overlayMotionProps)}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                variants={overlayMotionProps}
-                className="fixed inset-0 z-40 bg-black/40"
-              />
-            ) : (
-              <div className="fixed inset-0 z-40 bg-black/40" />
-            )}
-          </Dialog.Overlay>
-          <Dialog.Content
-            asChild={shouldAnimate}
-            className={
-              shouldAnimate
-                ? undefined
-                : cn(
-                    "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
-                    expanded
-                      ? "inset-4 sm:left-20"
-                      : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
-                  )
-            }
-            onKeyDown={shouldAnimate ? undefined : handleKeyDown}
-            onDragEnter={shouldAnimate ? undefined : handleDragEnter}
-            onDragLeave={shouldAnimate ? undefined : handleDragLeave}
-            onDragOver={shouldAnimate ? undefined : handleDragOver}
-            onDrop={shouldAnimate ? undefined : handleDrop}
-          >
-            <ContentContainer
-              {...(shouldAnimate
-                ? {
-                    "data-testid": "compose-dialog-content-transition",
-                    "data-motion-props": JSON.stringify(contentMotionProps),
-                    initial: "initial",
-                    animate: "animate",
-                    exit: "exit",
-                    variants: contentMotionProps,
-                    className: cn(
-                      "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
-                      expanded
-                        ? "inset-4 sm:left-20"
-                        : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
-                    ),
-                    onKeyDown: handleKeyDown,
-                    onDragEnter: handleDragEnter,
-                    onDragLeave: handleDragLeave,
-                    onDragOver: handleDragOver,
-                    onDrop: handleDrop,
+          <AnimatePresence>
+            {isOpen ? (
+              <Fragment key="compose-dialog-open">
+                <Dialog.Overlay forceMount asChild={shouldAnimate}>
+                  {shouldAnimate ? (
+                    <motion.div
+                      data-testid="compose-dialog-overlay-transition"
+                      data-motion-props={JSON.stringify(overlayMotionProps)}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      variants={overlayMotionProps}
+                      className="fixed inset-0 z-40 bg-black/40"
+                    />
+                  ) : (
+                    <div className="fixed inset-0 z-40 bg-black/40" />
+                  )}
+                </Dialog.Overlay>
+                <Dialog.Content
+                  forceMount
+                  asChild={shouldAnimate}
+                  className={
+                    shouldAnimate
+                      ? undefined
+                      : cn(
+                          "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+                          expanded
+                            ? "inset-4 sm:left-20"
+                            : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
+                        )
                   }
-                : {})}
-            >
+                  onKeyDown={shouldAnimate ? undefined : handleKeyDown}
+                  onDragEnter={shouldAnimate ? undefined : handleDragEnter}
+                  onDragLeave={shouldAnimate ? undefined : handleDragLeave}
+                  onDragOver={shouldAnimate ? undefined : handleDragOver}
+                  onDrop={shouldAnimate ? undefined : handleDrop}
+                >
+                  <ContentContainer
+                    {...(shouldAnimate
+                      ? {
+                          "data-testid": "compose-dialog-content-transition",
+                          "data-motion-props": JSON.stringify(contentMotionProps),
+                          initial: "initial",
+                          animate: "animate",
+                          exit: "exit",
+                          variants: contentMotionProps,
+                          className: cn(
+                            "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+                            expanded
+                              ? "inset-4 sm:left-20"
+                              : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
+                          ),
+                          onKeyDown: handleKeyDown,
+                          onDragEnter: handleDragEnter,
+                          onDragLeave: handleDragLeave,
+                          onDragOver: handleDragOver,
+                          onDrop: handleDrop,
+                        }
+                      : {})}
+                  >
             {/* Drop overlay */}
             {isDragging && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-background/90 backdrop-blur-sm">
@@ -923,8 +927,11 @@ export function ComposeDialog() {
                 </button>
               </div>
             </div>
-            </ContentContainer>
-          </Dialog.Content>
+                  </ContentContainer>
+                </Dialog.Content>
+              </Fragment>
+            ) : null}
+          </AnimatePresence>
         </Dialog.Portal>
       </Dialog.Root>
 
