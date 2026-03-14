@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useDisplayPreferences } from "@/hooks/useDisplayPreferences";
+import { resolveMotionConfig } from "@/lib/motion/config";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
 
@@ -24,6 +25,7 @@ export function PreferencesLoader() {
   const setDensity = useUiStore((s) => s.setDensity);
   const setTheme = useUiStore((s) => s.setTheme);
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
+  const setAnimationModeState = useUiStore((s) => s.setAnimationModeState);
   const theme = useUiStore((s) => s.theme);
 
   useEffect(() => {
@@ -31,8 +33,17 @@ export function PreferencesLoader() {
     setDensity(data.density);
     setTheme(data.theme);
     if (data.compose_format) setComposeFormat(data.compose_format);
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionConfig = resolveMotionConfig(
+      data.animation_mode ?? null,
+      prefersReducedMotion,
+    );
+    setAnimationModeState({
+      storedMode: motionConfig.storedMode,
+      effectiveMode: motionConfig.effectiveMode,
+    });
     localStorage.setItem(THEME_STORAGE_KEY, data.theme);
-  }, [data, setDensity, setTheme, setComposeFormat]);
+  }, [data, setDensity, setTheme, setComposeFormat, setAnimationModeState]);
 
   useEffect(() => {
     applyTheme(theme);

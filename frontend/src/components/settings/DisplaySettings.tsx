@@ -9,6 +9,7 @@ import {
 } from "@/hooks/useDisplayPreferences";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
+import type { AnimationMode } from "@/lib/motion/config";
 import { cn } from "@/lib/utils";
 
 function SegmentedControl<T extends string>({
@@ -34,6 +35,7 @@ function SegmentedControl<T extends string>({
         {options.map((opt) => (
           <button
             key={opt.value}
+            type="button"
             onClick={() => onChange(opt.value)}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
@@ -91,12 +93,29 @@ export function DisplaySettings() {
     [setComposeFormat, updatePrefs],
   );
 
+  const handleAnimationModeChange = useCallback(
+    (animation_mode: AnimationMode) => {
+      updatePrefs.mutate(
+        { animation_mode },
+        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+      );
+    },
+    [updatePrefs],
+  );
+
   const handleReset = useCallback(() => {
     setDensity("comfortable");
     setTheme("system");
     setComposeFormat("html");
     updatePrefs.mutate(
-      { density: "comfortable", theme: "system", language: "en", compose_format: "html", deep_index: false },
+      {
+        density: "comfortable",
+        theme: "system",
+        language: "en",
+        compose_format: "html",
+        animation_mode: null,
+        deep_index: false,
+      },
       { onError: (e) => toast.error(`Failed to reset: ${e.message}`) },
     );
   }, [setDensity, setTheme, setComposeFormat, updatePrefs]);
@@ -157,6 +176,19 @@ export function DisplaySettings() {
         />
 
         <SegmentedControl
+          label="Animations"
+          description="Choose how much motion to use in the interface"
+          value={prefs.animation_mode ?? "medium"}
+          options={[
+            { value: "rich", label: "Rich" },
+            { value: "medium", label: "Medium" },
+            { value: "subtle", label: "Subtle" },
+            { value: "off", label: "Off" },
+          ]}
+          onChange={handleAnimationModeChange}
+        />
+
+        <SegmentedControl
           label="Search indexing"
           description="Index message bodies for full-text search (uses more bandwidth)"
           value={prefs.deep_index ? "on" : "off"}
@@ -189,6 +221,7 @@ export function DisplaySettings() {
       </div>
 
       <button
+        type="button"
         onClick={handleReset}
         className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
