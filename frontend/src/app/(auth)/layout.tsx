@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { ComposeDialog } from "@/components/mail/ComposeDialog";
 
 export default function AuthLayout({
   children,
@@ -46,5 +47,10 @@ export default function AuthLayout({
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <ComposeDialog />
+    </>
+  );
 }

@@ -6,7 +6,6 @@ import { NavRail } from "@/components/shared/NavRail";
 import { FolderTree } from "@/components/mail/FolderTree";
 import { MessageList } from "@/components/mail/MessageList";
 import { ReadingPane } from "@/components/mail/ReadingPane";
-import { ComposeDialog } from "@/components/mail/ComposeDialog";
 import { CalendarPanel } from "@/components/calendar/CalendarPanel";
 import { ContactsPanel } from "@/components/contacts/ContactsPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -31,7 +30,7 @@ export default function MailPage() {
     [wsStatus, wsFailCount],
   );
 
-  let content;
+  let content: React.ReactNode;
   if (viewMode === "contacts") {
     content = (
       <div className="flex h-screen w-full overflow-hidden">
@@ -55,15 +54,12 @@ export default function MailPage() {
     );
   } else {
     content = (
-      <>
-        <ThreePanelLayout
-          navRail={<NavRail />}
-          sidebar={<FolderTree />}
-          messageList={<MessageList />}
-          readingPane={<ReadingPane />}
-        />
-        <ComposeDialog />
-      </>
+      <ThreePanelLayout
+        navRail={<NavRail />}
+        sidebar={<FolderTree />}
+        messageList={<MessageList />}
+        readingPane={<ReadingPane />}
+      />
     );
   }
 
