@@ -226,101 +226,107 @@ export function SearchResults() {
       )}
 
       {/* Results list with infinite scroll */}
-      {!isLoading && !isError && results.length > 0 && (
+      {!isLoading && !isError && (
         <>
           {/* Result count header */}
-          <div className="shrink-0 border-b border-border px-3 py-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {results.length < totalCount
-                  ? `Showing ${results.length} of ${totalCount} results`
-                  : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
-              </span>
-              <button
-                type="button"
-                onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
-              >
-                {sortOrder === "date_desc" ? (
-                  <ArrowDown className="size-3" />
-                ) : (
-                  <ArrowUp className="size-3" />
-                )}
-                Date
-              </button>
-            </div>
-            {parsed.filters.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {parsed.filters.map((filter, idx) => (
-                  <span
-                    key={`${filter.operator}-${idx}`}
-                    className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                  >
-                    {getFilterLabel(filter)}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFilter(filter.raw)}
-                      aria-label={`Remove ${filter.operator} filter`}
-                      className="flex size-3.5 items-center justify-center rounded-full transition-colors hover:bg-primary/20"
-                    >
-                      <X className="size-2.5" />
-                    </button>
-                  </span>
-                ))}
+          {results.length > 0 && (
+            <div className="shrink-0 border-b border-border px-3 py-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {results.length < totalCount
+                    ? `Showing ${results.length} of ${totalCount} results`
+                    : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
+                >
+                  {sortOrder === "date_desc" ? (
+                    <ArrowDown className="size-3" />
+                  ) : (
+                    <ArrowUp className="size-3" />
+                  )}
+                  Date
+                </button>
               </div>
-            )}
-          </div>
+              {parsed.filters.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {parsed.filters.map((filter, idx) => (
+                    <span
+                      key={`${filter.operator}-${idx}`}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                    >
+                      {getFilterLabel(filter)}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFilter(filter.raw)}
+                        aria-label={`Remove ${filter.operator} filter`}
+                        className="flex size-3.5 items-center justify-center rounded-full transition-colors hover:bg-primary/20"
+                      >
+                        <X className="size-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {shouldAnimate ? (
             <AnimatePresence initial={false}>
-              <motion.div
-                key="search-results-list"
-                ref={scrollRef}
-                data-testid="search-results-list-transition"
-                data-motion-props={JSON.stringify(listTransition)}
-                initial={listTransition.initial}
-                animate={listTransition.animate}
-                exit={listTransition.exit}
-                className="min-h-0 flex-1 overflow-y-auto"
-              >
-                <AnimatePresence initial={false}>
-                  {results.map((result) => (
-                    <motion.div
-                      key={`${result.folder}-${result.uid}`}
-                      data-testid="search-results-item-transition"
-                      data-motion-props={JSON.stringify(itemTransition)}
-                      initial={itemTransition.initial}
-                      animate={itemTransition.animate}
-                      exit={itemTransition.exit}
-                    >
-                      <SearchResultRow
-                        result={result}
-                        isSelected={
-                          activeFolder === result.folder &&
-                          selectedMessageUid === result.uid
-                        }
-                        onClick={() => handleResultClick(result)}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </motion.div>
+              {results.length > 0 && (
+                <motion.div
+                  key="search-results-list"
+                  ref={scrollRef}
+                  data-testid="search-results-list-transition"
+                  data-motion-props={JSON.stringify(listTransition)}
+                  initial={listTransition.initial}
+                  animate={listTransition.animate}
+                  exit={listTransition.exit}
+                  className="min-h-0 flex-1 overflow-y-auto"
+                >
+                  <AnimatePresence initial={false}>
+                    {results.map((result) => (
+                      <motion.div
+                        key={`${result.folder}-${result.uid}`}
+                        data-testid="search-results-item-transition"
+                        data-motion-props={JSON.stringify(itemTransition)}
+                        initial={itemTransition.initial}
+                        animate={itemTransition.animate}
+                        exit={itemTransition.exit}
+                      >
+                        <SearchResultRow
+                          result={result}
+                          isSelected={
+                            activeFolder === result.folder &&
+                            selectedMessageUid === result.uid
+                          }
+                          onClick={() => handleResultClick(result)}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+              )}
             </AnimatePresence>
           ) : (
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-              {results.map((result) => (
-                <SearchResultRow
-                  key={`${result.folder}-${result.uid}`}
-                  result={result}
-                  isSelected={
-                    activeFolder === result.folder &&
-                    selectedMessageUid === result.uid
-                  }
-                  onClick={() => handleResultClick(result)}
-                />
-              ))}
-            </div>
+            results.length > 0 && (
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+                {results.map((result) => (
+                  <SearchResultRow
+                    key={`${result.folder}-${result.uid}`}
+                    result={result}
+                    isSelected={
+                      activeFolder === result.folder &&
+                      selectedMessageUid === result.uid
+                    }
+                    onClick={() => handleResultClick(result)}
+                  />
+                ))}
+              </div>
+            )
           )}
         </>
       )}

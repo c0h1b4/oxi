@@ -1,5 +1,45 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";
+
+vi.mock("framer-motion", async () => {
+  const React = await import("react");
+
+  function getKeyedChildren(children: ReactNode) {
+    return Children.toArray(children).filter(
+      (child): child is React.ReactElement => isValidElement(child) && child.key != null,
+    );
+  }
+
+  function AnimatePresence({ children }: { children: ReactNode }) {
+    const prevChildrenByKeyRef = useRef(new Map<Key, React.ReactElement>());
+    const prevKeysRef = useRef(new Set<Key>());
+
+    const keyedChildren = getKeyedChildren(children);
+    const currentKeys = new Set(keyedChildren.map((child) => child.key as Key));
+
+    const exitingChildren = Array.from(prevKeysRef.current)
+      .filter((key) => !currentKeys.has(key))
+      .map((key) => prevChildrenByKeyRef.current.get(key))
+      .filter((child): child is React.ReactElement => child != null);
+
+    for (const child of keyedChildren) {
+      prevChildrenByKeyRef.current.set(child.key as Key, child);
+    }
+    prevKeysRef.current = currentKeys;
+
+    return <>{[...keyedChildren, ...exitingChildren]}</>;
+  }
+
+  return {
+    AnimatePresence,
+    motion: {
+      div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+        <div {...props}>{children}</div>
+      ),
+    },
+  };
+});
 
 const { mockUiState, mockUseSearch } = vi.hoisted(() => ({
   mockUiState: {
@@ -26,7 +66,7 @@ vi.mock("@/hooks/useSearch", () => ({
 import { SearchResults } from "../SearchResults";
 
 describe("SearchResults motion transitions", () => {
-  it("animates results list mount/unmount in non-off modes", () => {
+  it("keeps the list mounted for exit when results become empty", () => {
     mockUiState.effectiveAnimationMode = "medium";
     mockUseSearch.mockReturnValue({
       isLoading: false,
@@ -58,7 +98,8 @@ describe("SearchResults motion transitions", () => {
       data: { total_count: 0, results: [] },
     });
     rerender(<SearchResults />);
-    expect(screen.queryByTestId("search-results-list-transition")).toBeNull();
+    expect(screen.getByText("No results found")).toBeTruthy();
+    expect(screen.queryByTestId("search-results-list-transition")).toBeTruthy();
   });
 
   it("animates individual result items in non-off modes", () => {
