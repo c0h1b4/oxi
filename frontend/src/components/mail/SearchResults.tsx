@@ -144,12 +144,12 @@ export function SearchResults() {
     animate: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
     },
     exit: {
       opacity: 0,
       y: 3,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
     },
   };
 
@@ -158,12 +158,12 @@ export function SearchResults() {
     animate: {
       opacity: 1,
       x: 0,
-      transition: { duration: 0.18, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
     },
     exit: {
       opacity: 0,
       x: -3,
-      transition: { duration: 0.1, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
     },
   };
 

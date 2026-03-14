@@ -11,6 +11,7 @@ import { CalendarPanel } from "@/components/calendar/CalendarPanel";
 import { ContactsPanel } from "@/components/contacts/ContactsPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { useUiStore } from "@/stores/useUiStore";
+import type { UiState } from "@/stores/useUiStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -21,8 +22,8 @@ import { CommandPalette } from "@/components/shared/CommandPalette";
 import { PreferencesLoader } from "@/components/PreferencesLoader";
 
 export default function MailPage() {
-  const viewMode = useUiStore((s) => s.viewMode);
-  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const viewMode = useUiStore((s: UiState) => s.viewMode);
+  const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
   useKeyboardShortcuts();
   const { showBanner, requestPermission, dismissBanner, handleEvent } = useNotifications();
   const { status: wsStatus, failCount: wsFailCount } = useWebSocket(handleEvent);
@@ -73,8 +74,8 @@ export default function MailPage() {
         key={viewMode}
         data-testid={`mail-view-transition-${viewMode}`}
         initial={{ opacity: 0, x: 10 }}
-        animate={{ opacity: 1, x: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] } }}
-        exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.2, 0, 0, 1] } }}
+        animate={{ opacity: 1, x: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const } }}
+        exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const } }}
       >
         {viewContent}
       </motion.div>

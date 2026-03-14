@@ -1,6 +1,6 @@
 "use client";
 
-import { create } from "zustand";
+import { create, type UseBoundStore, type StoreApi } from "zustand";
 
 import type { AnimationMode } from "@/lib/motion/config";
 
@@ -51,7 +51,7 @@ export interface AnimationModeState {
   effectiveMode: AnimationMode;
 }
 
-interface UiState {
+export interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
   sidebarWidth: number;
@@ -98,7 +98,7 @@ interface UiState {
 
 const initial = loadSettings();
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set) => ({
   activeFolder: "INBOX",
   selectedMessageUid: null,
   sidebarWidth: initial.sidebarWidth,

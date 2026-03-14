@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs, react/display-name */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";

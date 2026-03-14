@@ -1,9 +1,11 @@
+/* eslint-disable react-hooks/refs */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";
+import { Children, isValidElement, type Key, type ReactNode } from "react";
 
 vi.mock("framer-motion", async () => {
   const React = await import("react");
+  const { useRef, useEffect, useState } = React;
 
   function getKeyedChildren(children: ReactNode) {
     return Children.toArray(children).filter(
@@ -14,21 +16,27 @@ vi.mock("framer-motion", async () => {
   function AnimatePresence({ children }: { children: ReactNode }) {
     const prevChildrenByKeyRef = useRef(new Map<Key, React.ReactElement>());
     const prevKeysRef = useRef(new Set<Key>());
+    const [displayChildren, setDisplayChildren] = useState<React.ReactElement[]>([]);
 
-    const keyedChildren = getKeyedChildren(children);
-    const currentKeys = new Set(keyedChildren.map((child) => child.key as Key));
+    useEffect(() => {
+      const keyedChildren = getKeyedChildren(children);
+      const currentKeys = new Set(keyedChildren.map((child) => child.key as Key));
 
-    const exitingChildren = Array.from(prevKeysRef.current)
-      .filter((key) => !currentKeys.has(key))
-      .map((key) => prevChildrenByKeyRef.current.get(key))
-      .filter((child): child is React.ReactElement => child != null);
+      const exitingChildren = Array.from(prevKeysRef.current)
+        .filter((key) => !currentKeys.has(key))
+        .map((key) => prevChildrenByKeyRef.current.get(key))
+        .filter((child): child is React.ReactElement => child != null);
 
-    for (const child of keyedChildren) {
-      prevChildrenByKeyRef.current.set(child.key as Key, child);
-    }
-    prevKeysRef.current = currentKeys;
+      const nextChildren = [...keyedChildren, ...exitingChildren];
+      setDisplayChildren(nextChildren);
 
-    return <>{[...keyedChildren, ...exitingChildren]}</>;
+      for (const child of keyedChildren) {
+        prevChildrenByKeyRef.current.set(child.key as Key, child);
+      }
+      prevKeysRef.current = currentKeys;
+    }, [children]);
+
+    return <>{displayChildren}</>;
   }
 
   return {

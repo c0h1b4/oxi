@@ -85,12 +85,12 @@ export function ThreePanelLayout({
     animate: {
       opacity: 1,
       x: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
     },
     exit: {
       opacity: 0,
       x: -4,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
     },
   };
 
@@ -99,12 +99,12 @@ export function ThreePanelLayout({
     animate: {
       opacity: 1,
       x: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
     },
     exit: {
       opacity: 0,
       x: 6,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] },
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
     },
   };
 
