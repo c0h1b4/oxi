@@ -72,7 +72,7 @@ cd backend && cargo run
 
 # Tests
 cd backend && cargo test
-cd frontend && bun test  # Vitest
+cd frontend && bunx vitest run # Vitest
 
 # Lint
 cd backend && cargo clippy -- -D warnings
