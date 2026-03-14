@@ -221,6 +221,10 @@ pub fn create_router(
         .route("/contacts/export", get(contacts::export_contacts_handler))
         .route("/contacts/import", post(contacts::import_contacts_handler))
         .route(
+            "/contacts/autocomplete/all",
+            get(contacts::autocomplete_all_handler),
+        )
+        .route(
             "/contacts/autocomplete",
             get(contacts::autocomplete_handler),
         )

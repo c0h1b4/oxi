@@ -91,6 +91,7 @@ pub struct ListContactsResponse {
 pub struct AutocompleteSuggestion {
     pub email: String,
     pub name: String,
+    pub source: Option<String>,
 }
 
 /// Response envelope for `GET /api/contacts/autocomplete`.
@@ -184,7 +185,7 @@ pub async fn create_contact_handler(
 /// `GET /api/contacts/autocomplete?q=al&limit=10`
 ///
 /// Fast autocomplete endpoint. Returns matching contacts as lightweight
-/// suggestions with only email and name.
+/// suggestions with only email, name, and source.
 pub async fn autocomplete_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
@@ -209,16 +210,91 @@ pub async fn autocomplete_handler(
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
+    // Search contacts first
     let contacts = db::contacts::search_contacts(&conn, query, params.limit)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let suggestions: Vec<AutocompleteSuggestion> = contacts
-        .into_iter()
-        .map(|c| AutocompleteSuggestion {
-            email: c.email,
-            name: c.name,
-        })
-        .collect();
+    // Build suggestions from contacts with deduplication by email (lowercase)
+    let mut seen_emails = std::collections::HashSet::new();
+    let mut suggestions: Vec<AutocompleteSuggestion> = Vec::new();
+
+    for c in contacts {
+        let email_lower = c.email.to_lowercase();
+        if seen_emails.insert(email_lower) {
+            suggestions.push(AutocompleteSuggestion {
+                email: c.email,
+                name: c.name,
+                source: Some("contact".to_string()),
+            });
+        }
+    }
+
+    // If we haven't hit the limit, also search known addresses
+    if suggestions.len() < params.limit as usize {
+        let remaining = params.limit as usize - suggestions.len();
+        #[allow(dead_code)]
+        let known = db::contacts::search_known_addresses(&conn, query, remaining as u32)
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+        for k in known {
+            let email_lower = k.email.to_lowercase();
+            if seen_emails.insert(email_lower) {
+                suggestions.push(AutocompleteSuggestion {
+                    email: k.email,
+                    name: k.name,
+                    source: Some("known".to_string()),
+                });
+            }
+        }
+    }
+
+    // Truncate to limit in case we went over
+    suggestions.truncate(params.limit as usize);
+
+    Ok(Json(AutocompleteResponse { suggestions }).into_response())
+}
+
+/// `GET /api/contacts/autocomplete/all`
+///
+/// Returns all contacts and known addresses for client-side autocomplete.
+/// Used for prefetching to enable instant fuzzy search without network latency.
+pub async fn autocomplete_all_handler(
+    Extension(session): Extension<SessionState>,
+    Extension(config): Extension<Arc<AppConfig>>,
+) -> Result<Response, AppError> {
+    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    let contacts = db::contacts::list_contacts(&conn, None, 1000, 0)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    let known = db::contacts::search_known_addresses(&conn, "", 1000)
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    let mut seen_emails = std::collections::HashSet::new();
+    let mut suggestions: Vec<AutocompleteSuggestion> = Vec::new();
+
+    for c in contacts {
+        let email_lower = c.email.to_lowercase();
+        if seen_emails.insert(email_lower) {
+            suggestions.push(AutocompleteSuggestion {
+                email: c.email,
+                name: c.name,
+                source: Some("contact".to_string()),
+            });
+        }
+    }
+
+    for k in known {
+        let email_lower = k.email.to_lowercase();
+        if seen_emails.insert(email_lower) {
+            suggestions.push(AutocompleteSuggestion {
+                email: k.email,
+                name: k.name,
+                source: Some("known".to_string()),
+            });
+        }
+    }
 
     Ok(Json(AutocompleteResponse { suggestions }).into_response())
 }

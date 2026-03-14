@@ -2,6 +2,13 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use uuid::Uuid;
 
+/// A known address extracted from message headers (not necessarily a contact).
+#[derive(Debug, Clone, Serialize)]
+pub struct KnownAddress {
+    pub email: String,
+    pub name: String,
+}
+
 /// A contact record, mirroring the `contacts` table.
 #[derive(Debug, Clone, Serialize)]
 pub struct Contact {
@@ -78,9 +85,7 @@ pub fn upsert_contact(conn: &Connection, contact: &Contact) -> Result<(), String
 
 /// Get a contact by its primary key `id`. Returns `None` if not found.
 pub fn get_contact(conn: &Connection, id: &str) -> Result<Option<Contact>, String> {
-    let sql = format!(
-        "SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE id = ?1"
-    );
+    let sql = format!("SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE id = ?1");
     let result = conn.query_row(&sql, params![id], row_to_contact);
 
     match result {
@@ -92,9 +97,7 @@ pub fn get_contact(conn: &Connection, id: &str) -> Result<Option<Contact>, Strin
 
 /// Get a contact by email address. Returns `None` if not found.
 pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<Contact>, String> {
-    let sql = format!(
-        "SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE email = ?1"
-    );
+    let sql = format!("SELECT {CONTACT_SELECT_COLS} FROM contacts WHERE email = ?1");
     let result = conn.query_row(&sql, params![email], row_to_contact);
 
     match result {
@@ -178,11 +181,7 @@ pub fn delete_contact(conn: &Connection, id: &str) -> Result<bool, String> {
 
 /// Search contacts by name or email using LIKE with escaped wildcards.
 /// Results are ordered by name ascending.
-pub fn search_contacts(
-    conn: &Connection,
-    query: &str,
-    limit: u32,
-) -> Result<Vec<Contact>, String> {
+pub fn search_contacts(conn: &Connection, query: &str, limit: u32) -> Result<Vec<Contact>, String> {
     let escaped = escape_like(query);
     let pattern = format!("%{escaped}%");
 
@@ -205,6 +204,64 @@ pub fn search_contacts(
         contacts.push(row.map_err(|e| format!("Failed to read contact row: {e}"))?);
     }
     Ok(contacts)
+}
+
+/// Search known addresses from message headers (from, to, cc) that match the query.
+/// Excludes any addresses already present in the contacts table.
+/// Returns distinct addresses ordered by email ascending.
+pub fn search_known_addresses(
+    conn: &Connection,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<KnownAddress>, String> {
+    let escaped = escape_like(query);
+    let pattern = format!("%{escaped}%");
+
+    let sql = r#"
+        SELECT DISTINCT email, name FROM (
+            SELECT from_address AS email, COALESCE(from_name, '') AS name FROM messages
+            WHERE from_address LIKE ?1 ESCAPE '\'
+            AND from_address NOT IN (SELECT email FROM contacts)
+            
+            UNION
+            
+            SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
+            FROM messages, json_each(to_addresses)
+            WHERE json_valid(to_addresses)
+            AND value->>'address' LIKE ?1 ESCAPE '\'
+            AND value->>'address' NOT IN (SELECT email FROM contacts)
+            
+            UNION
+            
+            SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
+            FROM messages, json_each(cc_addresses)
+            WHERE json_valid(cc_addresses)
+            AND value->>'address' LIKE ?1 ESCAPE '\'
+            AND value->>'address' NOT IN (SELECT email FROM contacts)
+        )
+        WHERE email != ''
+        ORDER BY email ASC
+        LIMIT ?2
+    "#;
+
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| format!("Failed to prepare search_known_addresses: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![pattern, limit], |row| {
+            Ok(KnownAddress {
+                email: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query known addresses: {e}"))?;
+
+    let mut addresses = Vec::new();
+    for row in rows {
+        addresses.push(row.map_err(|e| format!("Failed to read known address row: {e}"))?);
+    }
+    Ok(addresses)
 }
 
 /// Increment the contact_count by 1 and set last_contacted to now for the
@@ -310,7 +367,11 @@ mod tests {
     #[test]
     fn test_search_contacts() {
         let conn = open_test_db();
-        upsert_contact(&conn, &sample_contact("c1", "alice@example.com", "Alice Smith")).unwrap();
+        upsert_contact(
+            &conn,
+            &sample_contact("c1", "alice@example.com", "Alice Smith"),
+        )
+        .unwrap();
         upsert_contact(&conn, &sample_contact("c2", "bob@example.com", "Bob Jones")).unwrap();
 
         // Search by name should find only Alice.
@@ -355,7 +416,9 @@ mod tests {
 
         // Auto-adding the same email again should be a no-op (INSERT OR IGNORE).
         auto_add_contact(&conn, "auto@example.com", "Different Name").unwrap();
-        let fetched2 = get_contact_by_email(&conn, "auto@example.com").unwrap().unwrap();
+        let fetched2 = get_contact_by_email(&conn, "auto@example.com")
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched2.name, "Auto User"); // Name should NOT change.
     }
 
@@ -368,8 +431,152 @@ mod tests {
         increment_contact_count(&conn, "alice@example.com").unwrap();
         increment_contact_count(&conn, "alice@example.com").unwrap();
 
-        let fetched = get_contact_by_email(&conn, "alice@example.com").unwrap().unwrap();
+        let fetched = get_contact_by_email(&conn, "alice@example.com")
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.contact_count, 2);
         assert!(fetched.last_contacted.is_some());
+    }
+
+    #[test]
+    fn test_search_known_addresses_basic() {
+        let conn = open_test_db();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (1, 'INBOX', '2024-01-01', 'alice@test.com', 'Alice From', '[]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (2, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
+                     '[{\"name\":\"Bob To\",\"address\":\"bob@test.com\"}]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (3, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', '[]',
+                     '[{\"name\":\"Charlie Cc\",\"address\":\"charlie@test.com\"}]')",
+            params![],
+        )
+        .unwrap();
+
+        let results = search_known_addresses(&conn, "test.com", 10).unwrap();
+        assert_eq!(results.len(), 3);
+
+        assert_eq!(results[0].email, "alice@test.com");
+        assert_eq!(results[0].name, "Alice From");
+        assert_eq!(results[1].email, "bob@test.com");
+        assert_eq!(results[1].name, "Bob To");
+        assert_eq!(results[2].email, "charlie@test.com");
+        assert_eq!(results[2].name, "Charlie Cc");
+    }
+
+    #[test]
+    fn test_search_known_addresses_excludes_contacts() {
+        let conn = open_test_db();
+
+        // Create a test folder.
+        conn.execute(
+            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
+            params![],
+        )
+        .unwrap();
+
+        // Add alice@test.com as a contact.
+        upsert_contact(
+            &conn,
+            &sample_contact("c1", "alice@test.com", "Alice Contact"),
+        )
+        .unwrap();
+
+        // Insert messages with addresses.
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (1, 'INBOX', '2024-01-01', 'alice@test.com', 'Alice From', '[]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (2, 'INBOX', '2024-01-01', 'bob@test.com', 'Bob From',
+                     '[{\"name\":\"Alice To\",\"address\":\"alice@test.com\"}]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (3, 'INBOX', '2024-01-01', 'charlie@test.com', 'Charlie', '[]',
+                     '[{\"name\":\"Alice Cc\",\"address\":\"alice@test.com\"}]')",
+            params![],
+        )
+        .unwrap();
+
+        // Search for "test.com" should exclude alice@test.com (she's a contact).
+        let results = search_known_addresses(&conn, "test.com", 10).unwrap();
+
+        // Should only have bob and charlie (alice excluded from all sources).
+        assert_eq!(results.len(), 2);
+        let emails: Vec<&str> = results.iter().map(|a| a.email.as_str()).collect();
+        assert!(emails.contains(&"bob@test.com"));
+        assert!(emails.contains(&"charlie@test.com"));
+        assert!(!emails.contains(&"alice@test.com"));
+    }
+
+    #[test]
+    fn test_search_known_addresses_handles_invalid_json() {
+        let conn = open_test_db();
+
+        conn.execute(
+            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (1, 'INBOX', '2024-01-01', 'valid@test.com', 'Valid User', 
+                     '[]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (2, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
+                     '[{\"name\":\"\",\"address\":\"emptyname@test.com\"}]',
+                     '[{\"name\":\"Cc Person\",\"address\":\"ccperson@test.com\"}]')",
+            params![],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
+             VALUES (3, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
+                     '[{\"name\":\"Json Person\",\"address\":\"json@test.com\"}]', '[]')",
+            params![],
+        )
+        .unwrap();
+
+        let results = search_known_addresses(&conn, "test.com", 10).unwrap();
+
+        assert_eq!(results.len(), 4);
+        let emails: Vec<&str> = results.iter().map(|a| a.email.as_str()).collect();
+        assert!(emails.contains(&"valid@test.com"));
+        assert!(emails.contains(&"emptyname@test.com"));
+        assert!(emails.contains(&"ccperson@test.com"));
+        assert!(emails.contains(&"json@test.com"));
     }
 }
