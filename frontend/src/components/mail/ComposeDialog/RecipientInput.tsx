@@ -1,13 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useAutocomplete } from "@/hooks/useContacts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAutocomplete } from "@/hooks/useAutocomplete";
 
 interface RecipientInputProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   inputRef?: React.Ref<HTMLInputElement>;
+}
+
+function HighlightedText({ html }: { html: string }) {
+  const parts = useMemo(() => {
+    if (!html) return [];
+    const result: Array<{ text: string; highlighted: boolean }> = [];
+    const regex = /<mark>(.*?)<\/mark>/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    match = regex.exec(html);
+    while (match !== null) {
+      if (match.index > lastIndex) {
+        result.push({ text: html.slice(lastIndex, match.index), highlighted: false });
+      }
+      result.push({ text: match[1], highlighted: true });
+      lastIndex = match.index + match[0].length;
+      match = regex.exec(html);
+    }
+
+    if (lastIndex < html.length) {
+      result.push({ text: html.slice(lastIndex), highlighted: false });
+    }
+
+    return result;
+  }, [html]);
+
+  if (parts.length === 0) return null;
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.highlighted ? (
+          <span key={`${i}-${part.text.slice(0, 10)}`} className="bg-primary/20 font-semibold">
+            {part.text}
+          </span>
+        ) : (
+          <span key={`${i}-${part.text.slice(0, 10)}`}>{part.text}</span>
+        )
+      )}
+    </>
+  );
 }
 
 export function RecipientInput({
@@ -24,17 +66,17 @@ export function RecipientInput({
 
   // Extract the text after the last comma as the autocomplete query
   const query = value.split(",").pop()?.trim() ?? "";
-  const { data: suggestions } = useAutocomplete(query);
+  const { results, isLoading } = useAutocomplete(query);
 
-  const hasSuggestions = !!suggestions && suggestions.length > 0 && query.length >= 2;
+  const hasResults = results.length > 0 && query.length >= 2;
 
-  // Dropdown shows when there are suggestions and the user hasn't dismissed this exact query
-  const showDropdown = hasSuggestions && dismissedQuery !== query;
+  // Dropdown shows when there are results and the user hasn't dismissed this exact query
+  const showDropdown = hasResults && dismissedQuery !== query;
 
   const selectSuggestion = useCallback(
-    (suggestion: { email: string; name: string }) => {
+    (suggestion: { email: string; name?: string }) => {
       const parts = value.split(",");
-      parts.pop(); // remove the partial text
+      parts.pop();
       const formatted = suggestion.name
         ? `${suggestion.name} <${suggestion.email}>`
         : suggestion.email;
@@ -47,24 +89,24 @@ export function RecipientInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (!showDropdown || !suggestions || suggestions.length === 0) return;
+      if (!showDropdown || results.length === 0) return;
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, suggestions.length - 1));
+        setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIndex((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter" || e.key === "Tab") {
-        if (showDropdown && suggestions.length > 0) {
+        if (showDropdown && results.length > 0) {
           e.preventDefault();
-          selectSuggestion(suggestions[selectedIndex]);
+          selectSuggestion(results[selectedIndex].item);
         }
       } else if (e.key === "Escape") {
         setDismissedQuery(query);
       }
     },
-    [showDropdown, suggestions, selectedIndex, selectSuggestion, query],
+    [showDropdown, results, selectedIndex, selectSuggestion, query],
   );
 
   // Close dropdown on outside click
@@ -93,11 +135,16 @@ export function RecipientInput({
         placeholder={placeholder}
         className="w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
       />
-      {showDropdown && suggestions && suggestions.length > 0 && (
+      {showDropdown && results.length > 0 && (
         <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover shadow-lg">
-          {suggestions.map((s, i) => (
+          {isLoading && (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              Searching...
+            </div>
+          )}
+          {results.map((result, i) => (
             <button
-              key={s.email}
+              key={`${result.item.email}-${result.item.source}`}
               type="button"
               className={`flex w-full flex-col px-3 py-2 text-left text-sm transition-colors ${
                 i === selectedIndex
@@ -107,13 +154,26 @@ export function RecipientInput({
               onMouseEnter={() => setSelectedIndex(i)}
               onMouseDown={(e) => {
                 e.preventDefault(); // prevent input blur
-                selectSuggestion(s);
+                selectSuggestion(result.item);
               }}
             >
-              {s.name && (
-                <span className="font-medium">{s.name}</span>
+              <span className="font-medium">
+                {result.item.name ? (
+                  <HighlightedText html={result.highlightedName ?? result.item.name} />
+                ) : (
+                  <HighlightedText html={result.highlightedEmail} />
+                )}
+              </span>
+              {result.item.name && (
+                <span className="text-xs text-muted-foreground">
+                  <HighlightedText html={result.highlightedEmail} />
+                </span>
               )}
-              <span className="text-xs text-muted-foreground">{s.email}</span>
+              {result.item.source === "known" && (
+                <span className="mt-0.5 text-xs text-muted-foreground/60">
+                  From email history
+                </span>
+              )}
             </button>
           ))}
         </div>
