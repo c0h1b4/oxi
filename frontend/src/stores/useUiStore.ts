@@ -46,6 +46,11 @@ export type ThemeMode = "light" | "dark" | "system";
 
 const DEFAULT_EFFECTIVE_ANIMATION_MODE: AnimationMode = "medium";
 
+export interface AnimationModeState {
+  storedMode: AnimationMode | null;
+  effectiveMode: AnimationMode;
+}
+
 interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
@@ -87,9 +92,7 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setKeyboardNav: (active: boolean) => void;
   setComposeFormat: (format: "html" | "text") => void;
-  setStoredAnimationMode: (mode: AnimationMode | null) => void;
-  setEffectiveAnimationMode: (mode: AnimationMode) => void;
-  setAnimationModes: (storedMode: AnimationMode | null, effectiveMode: AnimationMode) => void;
+  setAnimationModeState: (state: AnimationModeState) => void;
   isAnimationOff: () => boolean;
 }
 
@@ -155,9 +158,7 @@ export const useUiStore = create<UiState>((set) => ({
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setKeyboardNav: (active) => set({ keyboardNav: active }),
   setComposeFormat: (format) => set({ composeFormat: format }),
-  setStoredAnimationMode: (mode) => set({ storedAnimationMode: mode }),
-  setEffectiveAnimationMode: (mode) => set({ effectiveAnimationMode: mode }),
-  setAnimationModes: (storedMode, effectiveMode) =>
+  setAnimationModeState: ({ storedMode, effectiveMode }) =>
     set({
       storedAnimationMode: storedMode,
       effectiveAnimationMode: effectiveMode,

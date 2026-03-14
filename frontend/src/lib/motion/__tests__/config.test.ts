@@ -54,6 +54,16 @@ describe("motion token buckets", () => {
     expect(off.duration.slow).toBe(0);
     expect(off.distance.sm).toBe(0);
   });
+
+  it("returns isolated token objects so callers cannot mutate shared state", () => {
+    const firstRich = getMotionTokens("rich");
+    const originalNormal = firstRich.duration.normal;
+
+    firstRich.duration.normal = -1;
+
+    const secondRich = getMotionTokens("rich");
+    expect(secondRich.duration.normal).toBe(originalNormal);
+  });
 });
 
 describe("resolveMotionConfig", () => {

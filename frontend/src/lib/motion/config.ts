@@ -61,6 +61,15 @@ const TOKENS_BY_MODE: Record<AnimationMode, MotionTokens> = {
   },
 };
 
+function cloneTokens(tokens: MotionTokens): MotionTokens {
+  return {
+    duration: { ...tokens.duration },
+    distance: { ...tokens.distance },
+    spring: { ...tokens.spring },
+    stagger: { ...tokens.stagger },
+  };
+}
+
 export function isAnimationMode(value: unknown): value is AnimationMode {
   return typeof value === "string" && (ANIMATION_MODES as readonly string[]).includes(value);
 }
@@ -77,7 +86,7 @@ export function resolveAnimationMode(
 }
 
 export function getMotionTokens(mode: AnimationMode): MotionTokens {
-  return TOKENS_BY_MODE[mode];
+  return cloneTokens(TOKENS_BY_MODE[mode]);
 }
 
 export function resolveMotionConfig(
