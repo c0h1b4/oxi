@@ -220,7 +220,7 @@ export function ThreePanelLayout({
                 initial={centerTransition.initial}
                 animate={centerTransition.animate}
                 exit={centerTransition.exit}
-                className="min-h-0 flex-1"
+                className="flex min-h-0 flex-1 flex-col"
               >
                 <SearchResults />
               </motion.div>

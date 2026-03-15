@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -78,6 +78,8 @@ function SearchResultRow({
     <button
       type="button"
       onClick={onClick}
+      data-search-result-folder={result.folder}
+      data-search-result-uid={result.uid}
       className={cn(
         "flex w-full cursor-pointer flex-col gap-0.5 border-b border-border px-3 py-2 text-left transition-colors",
         "hover:bg-muted",
@@ -194,9 +196,41 @@ export function SearchResults() {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevSelectionKeyRef = useRef<string | null>(null);
 
   const results = data?.results ?? [];
   const totalCount = data?.total_count ?? 0;
+
+  useEffect(() => {
+    if (selectedMessageUid == null || results.length === 0) return;
+
+    const selectionKey = `${activeFolder}:${selectedMessageUid}`;
+    if (selectionKey === prevSelectionKeyRef.current) return;
+
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const selectedRow = scrollEl.querySelector(
+      `[data-search-result-folder="${activeFolder}"][data-search-result-uid="${selectedMessageUid}"]`,
+    ) as HTMLElement | null;
+    if (!selectedRow) return;
+
+    prevSelectionKeyRef.current = selectionKey;
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const rowRect = selectedRow.getBoundingClientRect();
+    const rowTop = rowRect.top - scrollRect.top + scrollEl.scrollTop;
+    const rowBottom = rowTop + rowRect.height;
+    const viewTop = scrollEl.scrollTop;
+    const viewBottom = viewTop + scrollEl.clientHeight;
+    const buffer = rowRect.height * 3;
+
+    if (rowTop < viewTop + buffer) {
+      scrollEl.scrollTop = Math.max(0, rowTop - buffer);
+    } else if (rowBottom > viewBottom - buffer) {
+      scrollEl.scrollTop = rowBottom - scrollEl.clientHeight + buffer;
+    }
+  }, [selectedMessageUid, activeFolder, results.length]);
 
   const handleResultClick = useCallback(
     (result: SearchResultItem) => {

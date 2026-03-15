@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/refs */
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
 
 vi.mock("framer-motion", async () => {
@@ -264,5 +264,285 @@ describe("SearchResults motion transitions", () => {
 
     expect(mockUiState.setSearchQuery).toHaveBeenCalledWith("report");
     expect(mockUiState.setSearchActive).toHaveBeenCalledWith(true);
+  });
+
+  describe("keyboard scroll-to-selected", () => {
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+
+    beforeEach(() => {
+      mockUiState.effectiveAnimationMode = "medium";
+      mockUiState.searchQuery = "test";
+      mockUiState.selectedMessageUid = null;
+      mockUiState.activeFolder = "INBOX";
+    });
+
+    afterEach(() => {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    });
+
+    it("scrolls selected row into view with buffer when selection changes", () => {
+      const rowHeight = 50;
+      const viewportHeight = 100;
+      const buffer = rowHeight * 3;
+
+      const results = Array.from({ length: 10 }, (_, i) => ({
+        uid: i + 1,
+        folder: "INBOX",
+        from_name: `User ${i + 1}`,
+        from_address: `user${i + 1}@test.com`,
+        subject: `Subject ${i + 1}`,
+        snippet: `Snippet ${i + 1}`,
+        date: "2026-03-14T00:00:00Z",
+        flags: [],
+        has_attachments: false,
+      }));
+
+      mockUseSearch.mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: { total_count: 10, results },
+      });
+
+      Element.prototype.getBoundingClientRect = function (
+        this: HTMLElement,
+      ): DOMRect {
+        if (this.dataset?.testid === "search-results-list-transition") {
+          return {
+            top: 0,
+            bottom: viewportHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        const folder = this.dataset?.searchResultFolder;
+        const uid = parseInt(this.dataset?.searchResultUid ?? "0", 10);
+        if (folder === "INBOX" && uid > 0) {
+          const top = (uid - 1) * rowHeight;
+          return {
+            top,
+            bottom: top + rowHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: rowHeight,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      };
+
+      mockUiState.selectedMessageUid = 1;
+      const { rerender } = render(<SearchResults />);
+
+      const listEl = screen.getByTestId("search-results-list-transition");
+      let scrollTopValue = 0;
+      Object.defineProperty(listEl, "scrollTop", {
+        get: () => scrollTopValue,
+        set: (v) => {
+          scrollTopValue = v;
+        },
+        configurable: true,
+      });
+      Object.defineProperty(listEl, "clientHeight", {
+        value: viewportHeight,
+        writable: false,
+        configurable: true,
+      });
+
+      mockUiState.selectedMessageUid = 8;
+      rerender(<SearchResults />);
+
+      const row8Top = (8 - 1) * rowHeight;
+      const row8Bottom = row8Top + rowHeight;
+      const expectedScrollTop = row8Bottom - viewportHeight + buffer;
+
+      expect(scrollTopValue).toBe(expectedScrollTop);
+      expect(scrollTopValue).toBeGreaterThan(0);
+    });
+
+    it("does not scroll when same selection is re-selected", () => {
+      const rowHeight = 50;
+      const viewportHeight = 100;
+
+      mockUseSearch.mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: {
+          total_count: 1,
+          results: [
+            {
+              uid: 10,
+              folder: "INBOX",
+              from_name: "Alice",
+              from_address: "alice@example.com",
+              subject: "Hello",
+              snippet: "Snippet",
+              date: "2026-03-14T00:00:00Z",
+              flags: [],
+              has_attachments: false,
+            },
+          ],
+        },
+      });
+
+      Element.prototype.getBoundingClientRect = function (
+        this: HTMLElement,
+      ): DOMRect {
+        if (this.dataset?.testid === "search-results-list-transition") {
+          return {
+            top: 0,
+            bottom: viewportHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        const folder = this.dataset?.searchResultFolder;
+        const uid = parseInt(this.dataset?.searchResultUid ?? "0", 10);
+        if (folder === "INBOX" && uid === 10) {
+          return {
+            top: 0,
+            bottom: rowHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: rowHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      };
+
+      mockUiState.selectedMessageUid = 10;
+      const { rerender } = render(<SearchResults />);
+
+      const listEl = screen.getByTestId("search-results-list-transition");
+      let scrollTopValue = 42;
+      let scrollSetCount = 0;
+      Object.defineProperty(listEl, "scrollTop", {
+        get: () => scrollTopValue,
+        set: (v) => {
+          scrollTopValue = v;
+          scrollSetCount++;
+        },
+        configurable: true,
+      });
+
+      const initialScrollSetCount = scrollSetCount;
+      const initialScrollTopValue = scrollTopValue;
+
+      mockUiState.selectedMessageUid = 10;
+      rerender(<SearchResults />);
+
+      expect(scrollSetCount).toBe(initialScrollSetCount);
+      expect(scrollTopValue).toBe(initialScrollTopValue);
+    });
+
+    it("scrolls when navigating between results with same uid in different folders", () => {
+      const rowHeight = 50;
+      const viewportHeight = 100;
+      const results = [
+        {
+          uid: 10,
+          folder: "INBOX",
+          from_name: "Inbox Message",
+          from_address: "inbox@test.com",
+          subject: "Inbox Subject",
+          snippet: "Inbox snippet",
+          date: "2026-03-14T00:00:00Z",
+          flags: [],
+          has_attachments: false,
+        },
+        {
+          uid: 10,
+          folder: "Sent",
+          from_name: "Sent Message",
+          from_address: "sent@test.com",
+          subject: "Sent Subject",
+          snippet: "Sent snippet",
+          date: "2026-03-14T00:00:00Z",
+          flags: [],
+          has_attachments: false,
+        },
+      ];
+
+      mockUseSearch.mockReturnValue({
+        isLoading: false,
+        isError: false,
+        data: { total_count: 2, results },
+      });
+
+      Element.prototype.getBoundingClientRect = function (
+        this: HTMLElement,
+      ): DOMRect {
+        if (this.dataset?.testid === "search-results-list-transition") {
+          return {
+            top: 0,
+            bottom: viewportHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        const folder = this.dataset?.searchResultFolder;
+        const uid = parseInt(this.dataset?.searchResultUid ?? "0", 10);
+        if (uid === 10) {
+          const idx = folder === "INBOX" ? 0 : 9;
+          const top = idx * rowHeight;
+          return {
+            top,
+            bottom: top + rowHeight,
+            left: 0,
+            right: 200,
+            width: 200,
+            height: rowHeight,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      };
+
+      mockUiState.selectedMessageUid = 10;
+      mockUiState.activeFolder = "INBOX";
+      const { rerender } = render(<SearchResults />);
+
+      const listEl = screen.getByTestId("search-results-list-transition");
+      let scrollTopValue = 0;
+      let scrollSetCount = 0;
+      Object.defineProperty(listEl, "scrollTop", {
+        get: () => scrollTopValue,
+        set: (v) => {
+          scrollTopValue = v;
+          scrollSetCount++;
+        },
+        configurable: true,
+      });
+
+      mockUiState.selectedMessageUid = 10;
+      mockUiState.activeFolder = "Sent";
+      rerender(<SearchResults />);
+
+      expect(scrollSetCount).toBeGreaterThan(0);
+      expect(scrollTopValue).toBeGreaterThan(0);
+    });
   });
 });

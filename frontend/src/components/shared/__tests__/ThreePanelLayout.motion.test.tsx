@@ -141,4 +141,37 @@ describe("ThreePanelLayout motion transitions", () => {
       expect(serialized.includes(forbidden)).toBe(false);
     }
   });
+
+  it("animated search wrapper has flex layout for scroll containment", async () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.readingPaneVisible = true;
+    mockUiState.searchActive = false;
+    mockUiState.searchQuery = "";
+
+    const { rerender } = renderLayout();
+    expect(screen.getByTestId("three-panel-list-transition")).toBeTruthy();
+
+    mockUiState.searchActive = true;
+    mockUiState.searchQuery = "test";
+    rerender(
+      <ThreePanelLayout
+        navRail={<div data-testid="nav-rail" />}
+        sidebar={<div data-testid="sidebar" />}
+        messageList={<div data-testid="message-list" />}
+        readingPane={<div data-testid="reading-pane" />}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("three-panel-search-transition")).toBeTruthy();
+    });
+
+    const searchWrapper = screen.getByTestId("three-panel-search-transition");
+    const classList = searchWrapper.className;
+
+    expect(classList).toContain("flex");
+    expect(classList).toContain("min-h-0");
+    expect(classList).toContain("flex-1");
+    expect(classList).toContain("flex-col");
+  });
 });
