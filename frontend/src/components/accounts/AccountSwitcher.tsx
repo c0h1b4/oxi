@@ -6,12 +6,13 @@ import { cn } from "@/lib/utils";
 import { Plus, ChevronRight, LogOut, X, Check } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiPost } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { AddAccountModal } from "./AddAccountModal";
 import { createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 export function AccountSwitcher() {
   const accounts = useAuthStore((s) => s.accounts);
@@ -29,10 +30,7 @@ export function AccountSwitcher() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const dropdownMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedDropdownMotionProps = useMemo(() => JSON.stringify(dropdownMotionProps), [dropdownMotionProps]);
-  const DropdownContainer = shouldAnimate ? motion.div : "div";
   const canPortal = typeof document !== "undefined";
 
   useEffect(() => {
@@ -157,18 +155,13 @@ export function AccountSwitcher() {
           createPortal(
             <AnimatePresence>
               {isOpen ? (
-                <DropdownContainer
-                  {...(shouldAnimate
-                    ? {
-                        ref: dropdownRef,
-                        "data-testid": "account-switcher-dropdown-transition",
-                        "data-motion-props": serializedDropdownMotionProps,
-                        initial: "initial",
-                        animate: "animate",
-                        exit: "exit",
-                        variants: dropdownMotionProps,
-                      }
-                    : { ref: dropdownRef })}
+                <AnimatedDiv
+                  ref={dropdownRef}
+                  data-testid="account-switcher-dropdown-transition"
+                  variants={dropdownMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
                   className="fixed w-72 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden"
                   style={{
                     top: dropdownPosition.top,
@@ -271,7 +264,7 @@ export function AccountSwitcher() {
                   </button>
                 )}
               </div>
-                </DropdownContainer>
+                </AnimatedDiv>
               ) : null}
             </AnimatePresence>,
             document.body

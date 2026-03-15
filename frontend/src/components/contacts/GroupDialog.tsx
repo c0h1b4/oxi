@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/useUiStore";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 interface GroupDialogProps {
   open: boolean;
@@ -25,38 +26,26 @@ function GroupForm({
 }: Omit<GroupDialogProps, "open">) {
   const [name, setName] = useState(initialName ?? "");
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
-  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {shouldAnimate ? (
-        <motion.div
-          data-testid="group-dialog-overlay-transition"
-          data-motion-props={serializedOverlayMotionProps}
-          initial={overlayMotionProps.initial}
-          animate={overlayMotionProps.animate}
-          exit={overlayMotionProps.exit}
-          className="fixed inset-0 bg-black/50"
-          onClick={onClose}
-        />
-      ) : (
-        <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      )}
-      <ContentContainer
-        {...(shouldAnimate
-          ? {
-              "data-testid": "group-dialog-content-transition",
-              "data-motion-props": serializedContentMotionProps,
-              initial: contentMotionProps.initial,
-              animate: contentMotionProps.animate,
-              exit: contentMotionProps.exit,
-            }
-          : {})}
+      <AnimatedDiv
+        data-testid="group-dialog-overlay-transition"
+        variants={overlayMotionProps}
+        initial={overlayMotionProps.initial}
+        animate={overlayMotionProps.animate}
+        exit={overlayMotionProps.exit}
+        className="fixed inset-0 bg-black/50"
+        onClick={onClose}
+      />
+      <AnimatedDiv
+        data-testid="group-dialog-content-transition"
+        variants={contentMotionProps}
+        initial={contentMotionProps.initial}
+        animate={contentMotionProps.animate}
+        exit={contentMotionProps.exit}
         className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg"
       >
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
@@ -104,7 +93,7 @@ function GroupForm({
             </Button>
           </div>
         </form>
-      </ContentContainer>
+      </AnimatedDiv>
     </div>
   );
 }

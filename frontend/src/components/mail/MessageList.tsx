@@ -2,7 +2,8 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { PenLine, X, PanelRight } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
 import { useTags, useTagMessages } from "@/hooks/useTags";
@@ -473,48 +474,23 @@ export function MessageList() {
                     },
                   };
 
-                  if (!shouldAnimateRows) {
-                    return (
-                      <div
-                        key={message.uid}
-                        style={{
-                          position: "absolute",
-                          top: virtualRow.start,
-                          left: 0,
-                          width: "100%",
-                          height: virtualRow.size,
-                        }}
-                      >
-                        <MessageListItem
-                          message={message}
-                          isSelected={selectedMessageUid === message.uid}
-                          density={density}
-                          onClick={(e) => handleClick(message.uid, e)}
-                          bulkSelectMode={bulkSelectMode}
-                          isBulkSelected={selectedMessageUids.includes(message.uid)}
-                          onBulkToggle={toggleBulkSelect}
-                          suppressHover={keyboardNav}
-                          effectiveAnimationMode={effectiveAnimationMode}
-                        />
-                      </div>
-                    );
-                  }
-
                   return (
-                    <motion.div
+                    <AnimatedDiv
                       key={message.uid}
                       data-testid="message-list-row-transition"
                       data-row-uid={String(message.uid)}
                       data-row-changed={changedVisibleDelays.has(message.uid) ? "true" : "false"}
                       data-row-stagger-delay={String(staggerDelay)}
+                      variants={rowMotionVariants}
+                      initial={rowMotionVariants.initial}
+                      animate={animateValue}
+                      exit={rowMotionVariants.exit}
+                      exposeMotionProps={false}
                       data-motion-props={JSON.stringify({
                         initial: rowMotionVariants.initial,
                         animate: animateValue,
                         exit: rowMotionVariants.exit,
                       })}
-                      initial={rowMotionVariants.initial}
-                      animate={animateValue}
-                      exit={rowMotionVariants.exit}
                       style={{
                         position: "absolute",
                         top: virtualRow.start,
@@ -534,7 +510,7 @@ export function MessageList() {
                         suppressHover={keyboardNav}
                         effectiveAnimationMode={effectiveAnimationMode}
                       />
-                    </motion.div>
+                    </AnimatedDiv>
                   );
                 })}
               </AnimatePresence>

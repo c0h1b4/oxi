@@ -2,11 +2,12 @@
 
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { Popover, Dialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { Send, Copy, Check, UserPlus, X, Search } from "lucide-react";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useCreateContact } from "@/hooks/useContacts";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { useUiStore } from "@/stores/useUiStore";
 import type { EmailAddress } from "@/types/message";
 
@@ -185,12 +186,8 @@ function RecipientModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
-  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
   const [filter, setFilter] = useState("");
 
   const handleEscapeKeyDown = useCallback(
@@ -221,43 +218,27 @@ function RecipientModal({
         <AnimatePresence>
           {open ? (
             <>
-              <Dialog.Overlay asChild={shouldAnimate}>
-                {shouldAnimate ? (
-                  <motion.div
-                    data-testid="recipient-modal-overlay-transition"
-                    data-motion-props={serializedOverlayMotionProps}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    variants={overlayMotionProps}
-                    className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-                  />
-                ) : (
-                  <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
-                )}
+              <Dialog.Overlay asChild>
+                <AnimatedDiv
+                  data-testid="recipient-modal-overlay-transition"
+                  variants={overlayMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+                />
               </Dialog.Overlay>
               <Dialog.Content
-                asChild={shouldAnimate}
+                asChild
                 onEscapeKeyDown={handleEscapeKeyDown}
-                className={
-                  shouldAnimate
-                    ? undefined
-                    : "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
-                }
               >
-                <ContentContainer
-                  {...(shouldAnimate
-                    ? {
-                        "data-testid": "recipient-modal-content-transition",
-                        "data-motion-props": serializedContentMotionProps,
-                        initial: "initial",
-                        animate: "animate",
-                        exit: "exit",
-                        variants: contentMotionProps,
-                        className:
-                          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg",
-                      }
-                    : {})}
+                <AnimatedDiv
+                  data-testid="recipient-modal-content-transition"
+                  variants={contentMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
                 >
                   <div className="flex flex-col space-y-1.5 text-center sm:text-left">
                     <Dialog.Title className="text-lg font-semibold leading-none tracking-tight">
@@ -326,7 +307,7 @@ function RecipientModal({
                       <span className="sr-only">Close</span>
                     </button>
                   </Dialog.Close>
-                </ContentContainer>
+                </AnimatedDiv>
               </Dialog.Content>
             </>
           ) : null}
