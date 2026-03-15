@@ -96,15 +96,50 @@ function applyThemeRootClass(nextTheme?: ThemeMode) {
   root.classList.remove("dark");
 }
 
-function buildCrossfadeOverlay(background: string) {
+function copyThemeCustomProperties(
+  source: CSSStyleDeclaration, target: HTMLElement) {
+  for (let index = 0; index < source.length; index += 1) {
+    const propertyName = source.item(index);
+    if (!propertyName.startsWith("--")) {
+      continue;
+    }
+    target.style.setProperty(propertyName, source.getPropertyValue(propertyName));
+  }
+}
+
+function buildSnapshotOverlay(oldTheme: "light" | "dark") {
   const overlay = document.createElement("div");
-  overlay.setAttribute("data-theme-transition", "crossfade");
+  overlay.setAttribute("data-theme-transition", "snapshot");
   overlay.style.position = "fixed";
   overlay.style.inset = "0";
   overlay.style.pointerEvents = "none";
+  overlay.style.overflow = "hidden";
   overlay.style.zIndex = "2147483646";
-  overlay.style.background = background;
-  overlay.style.opacity = "1";
+
+  const snapshotRoot = document.createElement("div");
+  snapshotRoot.className = `${document.body.className} ${oldTheme}`;
+  snapshotRoot.style.position = "absolute";
+  snapshotRoot.style.left = `${-window.scrollX}px`;
+  snapshotRoot.style.top = `${-window.scrollY}px`;
+  snapshotRoot.style.width = `${document.documentElement.scrollWidth}px`;
+  snapshotRoot.style.minHeight = `${document.documentElement.scrollHeight}px`;
+
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const bodyStyles = window.getComputedStyle(document.body);
+  copyThemeCustomProperties(rootStyles, snapshotRoot);
+  snapshotRoot.style.background = bodyStyles.background;
+  snapshotRoot.style.color = bodyStyles.color;
+  snapshotRoot.style.font = bodyStyles.font;
+  snapshotRoot.style.letterSpacing = bodyStyles.letterSpacing;
+
+  Array.from(document.body.children).forEach((child) => {
+    if (child.hasAttribute("data-theme-transition")) {
+      return;
+    }
+    snapshotRoot.appendChild(child.cloneNode(true));
+  });
+
+  overlay.appendChild(snapshotRoot);
   return overlay;
 }
 
@@ -201,15 +236,28 @@ function runViewTransition(
   }
 }
 
-function runCrossfadeFallback(
+function setRevealMask(el: HTMLElement, x: number, y: number, radius: number) {
+  const mask = `radial-gradient(circle ${radius}px at ${x}px ${y}px, transparent ${radius}px, black ${radius + 1}px)`;
+  el.style.webkitMaskImage = mask;
+  el.style.maskImage = mask;
+}
+
+function runSnapshotFallback(
   transitionId: number,
-  _origin: ThemeTransitionOrigin | null | undefined,
+  origin: ThemeTransitionOrigin | null | undefined,
   applyTheme?: () => void,
   nextTheme?: ThemeMode,
 ) {
   const root = document.documentElement;
-  const oldBackground = resolveCurrentBackgroundColor();
-  const overlay = buildCrossfadeOverlay(oldBackground);
+  const transitionOrigin = resolveTransitionOrigin(origin);
+  const oldTheme = resolveThemeMode(nextTheme) === "dark" ? "light" : "dark";
+  const overlay = buildSnapshotOverlay(oldTheme);
+
+  const maxX = Math.max(transitionOrigin.x, window.innerWidth - transitionOrigin.x);
+  const maxY = Math.max(transitionOrigin.y, window.innerHeight - transitionOrigin.y);
+  const maxRadius = Math.sqrt(maxX * maxX + maxY * maxY) + 16;
+
+  setRevealMask(overlay, transitionOrigin.x, transitionOrigin.y, 0);
 
   root.classList.add("disable-transitions");
   document.body.appendChild(overlay);
@@ -217,14 +265,24 @@ function runCrossfadeFallback(
   applyThemeChange(applyTheme);
   applyThemeRootClass(nextTheme);
 
-  overlay.style.transition = `opacity ${FALLBACK_REVEAL_DURATION_MS}ms ease-in-out`;
+  let frame = 0;
+  let start = 0;
 
-  const frame = window.requestAnimationFrame(() => {
+  const paint = (timestamp: number) => {
     if (transitionId !== activeTransitionId) {
       return;
     }
-    overlay.style.opacity = "0";
-  });
+    if (!start) start = timestamp;
+    const elapsed = Math.min(timestamp - start, FALLBACK_REVEAL_DURATION_MS);
+    const progress = elapsed / FALLBACK_REVEAL_DURATION_MS;
+    const eased = 0.5 - Math.cos(Math.PI * progress) / 2;
+    setRevealMask(overlay, transitionOrigin.x, transitionOrigin.y, maxRadius * eased);
+    if (progress < 1) {
+      frame = window.requestAnimationFrame(paint);
+    }
+  };
+
+  frame = window.requestAnimationFrame(paint);
 
   const cleanup = () => {
     window.cancelAnimationFrame(frame);
@@ -298,7 +356,7 @@ export function runThemeSpreadTransition({
     }
 
     if (!prefersReducedMotion()) {
-      runCrossfadeFallback(transitionId, origin, applyTheme, nextTheme);
+      runSnapshotFallback(transitionId, origin, applyTheme, nextTheme);
       return;
     }
 
