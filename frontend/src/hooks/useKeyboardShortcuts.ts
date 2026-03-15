@@ -23,7 +23,6 @@ export function useKeyboardShortcuts() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
   const searchActive = useUiStore((s) => s.searchActive);
-  const setSearchActive = useUiStore((s) => s.setSearchActive);
   const clearSearch = useUiStore((s) => s.clearSearch);
   const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
@@ -41,7 +40,6 @@ export function useKeyboardShortcuts() {
       // Cmd/Ctrl+K — search
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setSearchActive(true);
         setTimeout(() => {
           const searchInput = document.querySelector(
             "[data-search-input]",
@@ -168,7 +166,6 @@ export function useKeyboardShortcuts() {
     selectedMessageUid,
     selectMessage,
     searchActive,
-    setSearchActive,
     clearSearch,
     setShortcutsOpen,
     setCommandPaletteOpen,

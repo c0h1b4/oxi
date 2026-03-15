@@ -130,7 +130,6 @@ export function CommandPalette() {
                   icon={<Search className="size-4" />}
                   onSelect={() =>
                     runAndClose(() => {
-                      useUiStore.getState().setSearchActive(true);
                       setTimeout(() => {
                         (document.querySelector("[data-search-input]") as HTMLElement)?.focus();
                       }, 0);
