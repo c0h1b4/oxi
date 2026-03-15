@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/refs, react/display-name */
+/* eslint-disable react/display-name */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";
@@ -19,14 +19,18 @@ vi.mock("framer-motion", async () => {
     const keyedChildren = getKeyedChildren(children);
     const currentKeys = new Set(keyedChildren.map((child) => child.key as Key));
 
+    // eslint-disable-next-line react-hooks/refs -- test mock for AnimatePresence
     const exitingChildren = Array.from(prevKeysRef.current)
       .filter((key) => !currentKeys.has(key))
+      // eslint-disable-next-line react-hooks/refs -- test mock for AnimatePresence
       .map((key) => prevChildrenByKeyRef.current.get(key))
       .filter((child): child is React.ReactElement => child != null);
 
     for (const child of keyedChildren) {
+      // eslint-disable-next-line react-hooks/refs -- test mock for AnimatePresence
       prevChildrenByKeyRef.current.set(child.key as Key, child);
     }
+    // eslint-disable-next-line react-hooks/refs -- test mock for AnimatePresence
     prevKeysRef.current = currentKeys;
 
     return <>{[...keyedChildren, ...exitingChildren]}</>;

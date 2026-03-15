@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";

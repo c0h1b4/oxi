@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 "use client";
 
 import { useRef, useCallback, useEffect, useState, useReducer, useMemo } from "react";
@@ -73,9 +72,12 @@ export function EmailRenderer({
   const appTheme = useUiStore((state) => state.theme);
   const effectiveAnimationMode = useUiStore((state) => state.effectiveAnimationMode);
   const resolvedTheme = theme === "auto" ? appTheme : theme;
-  const previousSurfaceRef = useRef<"html" | "text" | "empty" | null>(null);
-  const previousTextSignatureRef = useRef<string | null>(null);
-  const richStreamSessionRef = useRef(0);
+  const [prevTrack, setPrevTrack] = useState<{
+    surface: "html" | "text" | "empty" | null;
+    textSignature: string | null;
+    richStreamSession: number;
+    shouldAnimate: boolean;
+  }>({ surface: null, textSignature: null, richStreamSession: 0, shouldAnimate: false });
 
   const [isSystemDark, setIsSystemDark] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -449,21 +451,36 @@ export function EmailRenderer({
   const surface: "html" | "text" | "empty" = wrappedHtml ? "html" : text ? "text" : "empty";
   const textSignature = text ? `${text.length}:${text}` : null;
 
-  const shouldStartRichStream =
-    surface === "text" &&
-    effectiveAnimationMode === "rich" &&
-    (
-      previousSurfaceRef.current == null ||
-      previousSurfaceRef.current === "html" ||
-      previousTextSignatureRef.current !== textSignature
-    );
+  // Adjust state during render (React-recommended pattern for "previous value" tracking).
+  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const needsUpdate =
+    prevTrack.surface !== surface ||
+    (surface === "text" && prevTrack.textSignature !== textSignature);
 
-  if (shouldStartRichStream) {
-    richStreamSessionRef.current += 1;
+  let shouldStartRichStream = prevTrack.shouldAnimate;
+  let richStreamSession = prevTrack.richStreamSession;
+
+  if (needsUpdate) {
+    shouldStartRichStream =
+      surface === "text" &&
+      effectiveAnimationMode === "rich" &&
+      (
+        prevTrack.surface == null ||
+        prevTrack.surface === "html" ||
+        prevTrack.textSignature !== textSignature
+      );
+
+    if (shouldStartRichStream) {
+      richStreamSession = prevTrack.richStreamSession + 1;
+    }
+
+    setPrevTrack({
+      surface,
+      textSignature: surface === "text" ? textSignature : null,
+      richStreamSession,
+      shouldAnimate: shouldStartRichStream,
+    });
   }
-
-  previousSurfaceRef.current = surface;
-  previousTextSignatureRef.current = surface === "text" ? textSignature : null;
 
   if (wrappedHtml) {
     return (
@@ -557,7 +574,7 @@ export function EmailRenderer({
         return (
           <pre
             data-testid="email-renderer-plaintext-large-reveal"
-            data-stream-session={String(richStreamSessionRef.current)}
+            data-stream-session={String(richStreamSession)}
             className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-200"
             style={{
               animationName: shouldAnimateRich ? "email-plaintext-container-reveal" : "none",
@@ -574,12 +591,12 @@ export function EmailRenderer({
       return (
         <pre
           data-testid="email-renderer-plaintext-rich-stream"
-          data-stream-session={String(richStreamSessionRef.current)}
+          data-stream-session={String(richStreamSession)}
           className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground"
         >
           {lines.map((line, index) => (
             <span
-              key={`${richStreamSessionRef.current}-${index}`}
+              key={`${richStreamSession}-${index}`}
               data-testid="email-renderer-plaintext-line"
               style={{
                 display: "inline-block",
