@@ -8,19 +8,38 @@ describe("runThemeSpreadTransition", () => {
       node.remove();
     });
     document.documentElement.classList.remove("theme-transitioning");
+    document.documentElement.classList.remove("disable-transitions");
+    document.documentElement.style.removeProperty("--background");
+    document.documentElement.style.removeProperty("--click-x");
+    document.documentElement.style.removeProperty("--click-y");
+    Object.defineProperty(document, "startViewTransition", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
     vi.useRealTimers();
   });
 
-  it("creates spread transition for medium/rich explicit toggles", () => {
-    runThemeSpreadTransition({ mode: "medium", trigger: "explicit" });
-    const mediumSpread = document.querySelector('[data-theme-transition="spread"]');
-    expect(mediumSpread).toBeTruthy();
-    expect(mediumSpread?.getAttribute("data-mode")).toBe("medium");
+  it("falls back to immediate theme apply when view transitions are unavailable", () => {
+    const applyTheme = vi.fn();
+    runThemeSpreadTransition({
+      mode: "medium",
+      trigger: "explicit",
+      applyTheme,
+      nextTheme: "dark",
+    });
+    expect(applyTheme).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
 
-    runThemeSpreadTransition({ mode: "rich", trigger: "explicit" });
-    const richSpread = document.querySelector('[data-theme-transition="spread"]');
-    expect(richSpread).toBeTruthy();
-    expect(richSpread?.getAttribute("data-mode")).toBe("rich");
+    runThemeSpreadTransition({
+      mode: "rich",
+      trigger: "explicit",
+      applyTheme,
+      nextTheme: "light",
+    });
+    expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(applyTheme).toHaveBeenCalledTimes(2);
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
   it("uses subtle crossfade without spread wipe", () => {
@@ -32,26 +51,59 @@ describe("runThemeSpreadTransition", () => {
   });
 
   it("skips transition effects in off mode", () => {
-    runThemeSpreadTransition({ mode: "off", trigger: "explicit" });
+    const applyTheme = vi.fn();
+    document.documentElement.classList.add("dark");
+    runThemeSpreadTransition({
+      mode: "off",
+      trigger: "explicit",
+      applyTheme,
+      nextTheme: "light",
+    });
     expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(applyTheme).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("collapses rapid toggles to latest call", () => {
-    vi.useFakeTimers();
-
-    runThemeSpreadTransition({ mode: "medium", trigger: "explicit" });
-    runThemeSpreadTransition({ mode: "rich", trigger: "explicit" });
-
-    const spreads = document.querySelectorAll('[data-theme-transition="spread"]');
-    expect(spreads).toHaveLength(1);
-    expect(spreads[0]?.getAttribute("data-mode")).toBe("rich");
-
-    vi.runAllTimers();
-    expect(document.querySelector('[data-theme-transition="spread"]')).toBeNull();
+  it("does not animate on hydration path", () => {
+    const applyTheme = vi.fn();
+    runThemeSpreadTransition({ mode: "rich", trigger: "hydration", applyTheme });
+    expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(applyTheme).toHaveBeenCalledTimes(1);
   });
 
-  it("does not run spread on hydration path", () => {
-    runThemeSpreadTransition({ mode: "rich", trigger: "hydration" });
+  it("uses view transitions API when available for medium/rich", async () => {
+    const applyTheme = vi.fn();
+    const finished = Promise.resolve();
+    const startViewTransition = vi.fn((update: () => void) => {
+      update();
+      return { finished } as unknown as ViewTransition;
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      value: startViewTransition as unknown as Document["startViewTransition"],
+      configurable: true,
+      writable: true,
+    });
+
+    runThemeSpreadTransition({
+      mode: "rich",
+      trigger: "explicit",
+      origin: { x: 48, y: 96 },
+      applyTheme,
+      nextTheme: "dark",
+    });
+
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(applyTheme).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(document.documentElement.style.getPropertyValue("--click-x")).toBe("48px");
+    expect(document.documentElement.style.getPropertyValue("--click-y")).toBe("96px");
+    expect(document.documentElement.classList.contains("disable-transitions")).toBe(true);
+
+    await finished;
+    await Promise.resolve();
+
+    expect(document.documentElement.classList.contains("disable-transitions")).toBe(false);
+    expect(document.documentElement.style.getPropertyValue("--click-x")).toBe("");
   });
 });

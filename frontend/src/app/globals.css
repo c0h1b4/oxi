@@ -133,6 +133,43 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  .disable-transitions,
+  .disable-transitions * {
+    transition: none !important;
+  }
+
+  .theme-transitioning *:not([data-theme-transition]),
+  .theme-transitioning *:not([data-theme-transition])::before,
+  .theme-transitioning *:not([data-theme-transition])::after {
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  z-index: 9999;
+  animation: clip-reveal 0.5s ease-in-out forwards;
+}
+
+::view-transition-group(root) {
+  animation: none;
+}
+
+@keyframes clip-reveal {
+  from {
+    clip-path: circle(0px at var(--click-x) var(--click-y));
+  }
+  to {
+    clip-path: circle(150vmax at var(--click-x) var(--click-y));
+  }
 }
 
 @keyframes email-plaintext-line-reveal {

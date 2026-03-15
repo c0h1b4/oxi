@@ -1,18 +1,40 @@
 import type { AnimationMode } from "@/lib/motion/config";
+import { flushSync } from "react-dom";
 
 type ThemeTransitionTrigger = "explicit" | "hydration";
+type ThemeTransitionOrigin = { x: number; y: number };
+type ThemeMode = "light" | "dark" | "system";
+type DocumentWithViewTransition = Document & {
+  startViewTransition?: (update: () => void) => { finished: Promise<unknown> };
+};
 
 export type ThemeSpreadTransitionInput = {
   mode: AnimationMode;
   trigger: ThemeTransitionTrigger;
+  origin?: ThemeTransitionOrigin | null;
+  applyTheme?: () => void;
+  nextTheme?: ThemeMode;
 };
 
-const RICH_DURATION_MS = 360;
-const MEDIUM_DURATION_MS = 280;
 const SUBTLE_DURATION_MS = 140;
 
 let activeTransitionId = 0;
 let activeCleanup: (() => void) | null = null;
+
+function resolveCurrentBackgroundColor() {
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const backgroundVar = rootStyles.getPropertyValue("--background").trim();
+  if (backgroundVar) {
+    return backgroundVar;
+  }
+
+  const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+  if (bodyBg) {
+    return bodyBg;
+  }
+
+  return rootStyles.backgroundColor || "#000";
+}
 
 function buildOverlay(kind: "spread" | "fade", mode: AnimationMode) {
   const el = document.createElement("div");
@@ -22,54 +44,72 @@ function buildOverlay(kind: "spread" | "fade", mode: AnimationMode) {
   el.style.inset = "0";
   el.style.pointerEvents = "none";
   el.style.zIndex = "2147483647";
-  el.style.background = "hsl(var(--background))";
+  el.style.background = resolveCurrentBackgroundColor();
   el.style.opacity = kind === "fade" ? "0.12" : "0.16";
   return el;
 }
 
-function runSpread(mode: Extract<AnimationMode, "medium" | "rich">, transitionId: number) {
-  const overlay = buildOverlay("spread", mode);
-  const duration = mode === "rich" ? RICH_DURATION_MS : MEDIUM_DURATION_MS;
-
-  overlay.style.clipPath = "circle(0% at calc(100% - 2rem) 2rem)";
-  overlay.style.transition = `clip-path ${duration}ms cubic-bezier(0.2, 0, 0, 1), opacity ${duration}ms linear`;
-
-  document.documentElement.classList.add("theme-transitioning");
-  document.body.appendChild(overlay);
-
-  const frame = window.requestAnimationFrame(() => {
-    if (transitionId !== activeTransitionId) {
-      return;
-    }
-    overlay.style.clipPath = "circle(150% at calc(100% - 2rem) 2rem)";
-    overlay.style.opacity = "0";
-  });
-
-  const timeout = window.setTimeout(() => {
-    if (transitionId !== activeTransitionId) {
-      return;
-    }
-    overlay.remove();
-    document.documentElement.classList.remove("theme-transitioning");
-    if (activeCleanup) {
-      activeCleanup = null;
-    }
-  }, duration + 40);
-
-  activeCleanup = () => {
-    window.cancelAnimationFrame(frame);
-    window.clearTimeout(timeout);
-    overlay.remove();
-    document.documentElement.classList.remove("theme-transitioning");
-  };
+function resolveTransitionOrigin(origin?: ThemeTransitionOrigin | null): ThemeTransitionOrigin {
+  if (
+    origin &&
+    Number.isFinite(origin.x) &&
+    Number.isFinite(origin.y)
+  ) {
+    return { x: origin.x, y: origin.y };
+  }
+  return { x: window.innerWidth - 32, y: 32 };
 }
 
-function runSubtle(transitionId: number) {
+function applyThemeChange(applyTheme?: () => void) {
+  if (!applyTheme) {
+    return;
+  }
+  flushSync(() => {
+    applyTheme();
+  });
+}
+
+function resolveThemeMode(nextTheme?: ThemeMode): "light" | "dark" {
+  const root = document.documentElement;
+  if (nextTheme === "dark" || nextTheme === "light") {
+    return nextTheme;
+  }
+
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  return root.classList.contains("dark") ? "dark" : "light";
+}
+
+function applyThemeRootClass(nextTheme?: ThemeMode) {
+  const root = document.documentElement;
+  const resolvedTheme = resolveThemeMode(nextTheme);
+  if (resolvedTheme === "dark") {
+    root.classList.add("dark");
+    root.classList.remove("light");
+    return;
+  }
+
+  root.classList.add("light");
+  root.classList.remove("dark");
+}
+
+function prefersReducedMotion() {
+  if (typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function runSubtle(transitionId: number, applyTheme?: () => void, nextTheme?: ThemeMode) {
   const overlay = buildOverlay("fade", "subtle");
   overlay.style.transition = `opacity ${SUBTLE_DURATION_MS}ms ease-out`;
 
   document.documentElement.classList.add("theme-transitioning");
   document.body.appendChild(overlay);
+  applyThemeChange(applyTheme);
+  applyThemeRootClass(nextTheme);
 
   const frame = window.requestAnimationFrame(() => {
     if (transitionId !== activeTransitionId) {
@@ -97,12 +137,71 @@ function runSubtle(transitionId: number) {
   };
 }
 
-export function runThemeSpreadTransition({ mode, trigger }: ThemeSpreadTransitionInput) {
+function runViewTransition(
+  transitionId: number,
+  origin: ThemeTransitionOrigin | null | undefined,
+  applyTheme?: () => void,
+  nextTheme?: ThemeMode,
+) {
+  const documentWithViewTransition = document as DocumentWithViewTransition;
+  const startViewTransition = documentWithViewTransition.startViewTransition;
+  if (!startViewTransition) {
+    return false;
+  }
+
+  const root = document.documentElement;
+  const transitionOrigin = resolveTransitionOrigin(origin);
+  root.style.setProperty("--click-x", `${transitionOrigin.x}px`);
+  root.style.setProperty("--click-y", `${transitionOrigin.y}px`);
+  root.classList.add("disable-transitions");
+
+  const cleanup = () => {
+    root.classList.remove("disable-transitions");
+    root.style.removeProperty("--click-x");
+    root.style.removeProperty("--click-y");
+  };
+
+  try {
+    const transition = startViewTransition(() => {
+      applyThemeChange(applyTheme);
+      applyThemeRootClass(nextTheme);
+    });
+
+    transition.finished.finally(() => {
+      if (transitionId !== activeTransitionId) {
+        return;
+      }
+      cleanup();
+      if (activeCleanup) {
+        activeCleanup = null;
+      }
+    });
+
+    activeCleanup = () => {
+      cleanup();
+    };
+
+    return true;
+  } catch {
+    cleanup();
+    return false;
+  }
+}
+
+export function runThemeSpreadTransition({
+  mode,
+  trigger,
+  origin,
+  applyTheme,
+  nextTheme,
+}: ThemeSpreadTransitionInput) {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return;
   }
 
   if (trigger !== "explicit") {
+    applyThemeChange(applyTheme);
+    applyThemeRootClass(nextTheme);
     return;
   }
 
@@ -115,13 +214,23 @@ export function runThemeSpreadTransition({ mode, trigger }: ThemeSpreadTransitio
   const transitionId = activeTransitionId;
 
   if (mode === "off") {
+    applyThemeChange(applyTheme);
+    applyThemeRootClass(nextTheme);
     return;
   }
 
-  if (mode === "subtle") {
-    runSubtle(transitionId);
+  if (mode !== "subtle") {
+    if (
+      !prefersReducedMotion() &&
+      runViewTransition(transitionId, origin, applyTheme, nextTheme)
+    ) {
+      return;
+    }
+
+    applyThemeChange(applyTheme);
+    applyThemeRootClass(nextTheme);
     return;
   }
 
-  runSpread(mode, transitionId);
+  runSubtle(transitionId, applyTheme, nextTheme);
 }
