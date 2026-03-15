@@ -2,10 +2,13 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useUiStore } from "@/stores/useUiStore";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 
 interface ContactDialogProps {
   open: boolean;
@@ -29,6 +32,11 @@ export function ContactDialog({
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
   const [notes, setNotes] = useState("");
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -64,18 +72,40 @@ export function ContactDialog({
     [name, email, company, notes, onSubmit],
   );
 
-  if (!open) return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-      />
+    <AnimatePresence>
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Overlay */}
+          {shouldAnimate ? (
+            <motion.div
+              data-testid="contact-dialog-overlay-transition"
+              data-motion-props={JSON.stringify(overlayMotionProps)}
+              initial={overlayMotionProps.initial}
+              animate={overlayMotionProps.animate}
+              exit={overlayMotionProps.exit}
+              className="absolute inset-0 bg-black/50"
+              onClick={onClose}
+            />
+          ) : (
+            <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+          )}
 
-      {/* Dialog */}
-      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-xl">
+          {/* Dialog */}
+          <ContentContainer
+            {...(shouldAnimate
+              ? {
+                  "data-testid": "contact-dialog-content-transition",
+                  "data-motion-props": JSON.stringify(contentMotionProps),
+                  initial: contentMotionProps.initial,
+                  animate: contentMotionProps.animate,
+                  exit: contentMotionProps.exit,
+                }
+              : {})}
+            className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-xl"
+          >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">
             New Contact
@@ -151,8 +181,10 @@ export function ContactDialog({
             </Button>
           </div>
         </form>
-      </div>
-    </div>,
+          </ContentContainer>
+        </div>
+      ) : null}
+    </AnimatePresence>,
     document.body,
   );
 }

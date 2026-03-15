@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { useUiStore } from "@/stores/useUiStore";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 
 interface GroupDialogProps {
   open: boolean;
@@ -21,11 +24,39 @@ function GroupForm({
   title,
 }: Omit<GroupDialogProps, "open">) {
   const [name, setName] = useState(initialName ?? "");
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg">
+      {shouldAnimate ? (
+        <motion.div
+          data-testid="group-dialog-overlay-transition"
+          data-motion-props={JSON.stringify(overlayMotionProps)}
+          initial={overlayMotionProps.initial}
+          animate={overlayMotionProps.animate}
+          exit={overlayMotionProps.exit}
+          className="fixed inset-0 bg-black/50"
+          onClick={onClose}
+        />
+      ) : (
+        <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      )}
+      <ContentContainer
+        {...(shouldAnimate
+          ? {
+              "data-testid": "group-dialog-content-transition",
+              "data-motion-props": JSON.stringify(contentMotionProps),
+              initial: contentMotionProps.initial,
+              animate: contentMotionProps.animate,
+              exit: contentMotionProps.exit,
+            }
+          : {})}
+        className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg"
+      >
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
         <form
           onSubmit={(e) => {
@@ -71,7 +102,7 @@ function GroupForm({
             </Button>
           </div>
         </form>
-      </div>
+      </ContentContainer>
     </div>
   );
 }
@@ -80,6 +111,9 @@ export function GroupDialog({
   open,
   ...rest
 }: GroupDialogProps) {
-  if (!open) return null;
-  return <GroupForm {...rest} />;
+  return (
+    <AnimatePresence>
+      {open ? <GroupForm {...rest} /> : null}
+    </AnimatePresence>
+  );
 }
