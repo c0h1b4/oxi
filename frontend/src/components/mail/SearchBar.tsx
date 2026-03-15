@@ -34,6 +34,12 @@ export function SearchBar() {
   const [showTips, setShowTips] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDebounce = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, []);
 
   // Fetch results for displaying the count
   const { data } = useSearch(searchQuery);
@@ -48,10 +54,7 @@ export function SearchBar() {
       const normalizedValue = normalizeSearchQuery(value);
 
       setInputValue(value);
-
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      cancelDebounce();
 
       if (normalizedValue === "") {
         clearSearch();
@@ -67,7 +70,7 @@ export function SearchBar() {
         setSearchActive(true);
       }, 300);
     },
-    [clearSearch, setSearchActive, setSearchQuery],
+    [cancelDebounce, clearSearch, setSearchActive, setSearchQuery],
   );
 
   // Clear search on Escape
@@ -75,20 +78,27 @@ export function SearchBar() {
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Escape") {
         setInputValue("");
+        cancelDebounce();
         clearSearch();
         setShowTips(false);
         inputRef.current?.blur();
       }
     },
-    [clearSearch],
+    [cancelDebounce, clearSearch],
   );
 
   // Clear button handler
   const handleClear = useCallback(() => {
     setInputValue("");
+    cancelDebounce();
     clearSearch();
     inputRef.current?.focus();
-  }, [clearSearch]);
+  }, [cancelDebounce, clearSearch]);
+
+  // Cancel debounce on blur to avoid unexpected state updates
+  const handleBlur = useCallback(() => {
+    cancelDebounce();
+  }, [cancelDebounce]);
 
   // Remove a filter chip
   const handleRemoveFilter = useCallback(
@@ -97,6 +107,7 @@ export function SearchBar() {
       const normalizedQuery = normalizeSearchQuery(newQuery);
 
       setInputValue(newQuery);
+      cancelDebounce();
 
       if (normalizedQuery === "") {
         clearSearch();
@@ -108,7 +119,7 @@ export function SearchBar() {
         setSearchActive(true);
       }
     },
-    [clearSearch, inputValue, setSearchActive, setSearchQuery],
+    [cancelDebounce, clearSearch, inputValue, setSearchActive, setSearchQuery],
   );
 
   // Insert a tip operator into the input
@@ -134,6 +145,11 @@ export function SearchBar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // Cleanup pending debounce on unmount
+  useEffect(() => {
+    return () => cancelDebounce();
+  }, [cancelDebounce]);
+
   // Sync input value when the Zustand store is cleared externally (e.g. pressing
   // Escape or clicking the clear button).  This is an intentional synchronisation
   // between external state and local component state.
@@ -154,6 +170,7 @@ export function SearchBar() {
             value={inputValue}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
             placeholder="Search mail... (Ctrl+K)"
             data-search-input
             className="h-8 w-full rounded-md border border-border bg-background py-1 pl-8 pr-14 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"

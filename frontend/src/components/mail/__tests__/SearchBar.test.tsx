@@ -100,6 +100,33 @@ describe("SearchBar", () => {
     expect(mockUiState.setSearchActive).not.toHaveBeenCalled();
   });
 
+  it("does not reactivate after clear during debounce", () => {
+    render(<SearchBar />);
+
+    const input = screen.getByPlaceholderText("Search mail... (Ctrl+K)") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "valid" } });
+    expect(input.value).toBe("valid");
+
+    // Clear it before 300ms
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.click(screen.getByLabelText("Clear search"));
+
+    expect(input.value).toBe("");
+    expect(mockUiState.clearSearch).toHaveBeenCalled();
+
+    // Advance the remaining time
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    // Should NOT have committed "valid"
+    expect(mockUiState.setSearchQuery).not.toHaveBeenCalledWith("valid");
+    expect(mockUiState.setSearchActive).not.toHaveBeenCalledWith(true);
+  });
+
   it("clears when the last filter chip is removed", () => {
     // Initial state with a filter
     mockUiState.searchQuery = "from:alice@example.com";
@@ -113,5 +140,33 @@ describe("SearchBar", () => {
 
     expect(input.value).toBe("");
     expect(mockUiState.clearSearch).toHaveBeenCalled();
+  });
+
+  it("cancels debounce on Escape", () => {
+    render(<SearchBar />);
+    const input = screen.getByPlaceholderText("Search mail... (Ctrl+K)") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "valid" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(mockUiState.setSearchQuery).not.toHaveBeenCalled();
+  });
+
+  it("cancels debounce on blur", () => {
+    render(<SearchBar />);
+    const input = screen.getByPlaceholderText("Search mail... (Ctrl+K)") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "valid" } });
+    fireEvent.blur(input);
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(mockUiState.setSearchQuery).not.toHaveBeenCalled();
   });
 });
