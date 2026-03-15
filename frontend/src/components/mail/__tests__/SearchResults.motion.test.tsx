@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/refs */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
 
@@ -196,5 +196,73 @@ describe("SearchResults motion transitions", () => {
     render(<SearchResults />);
 
     expect(screen.queryByText("No results found")).toBeNull();
+  });
+
+  it("clears committed query when filter removal leaves invalid query", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.searchQuery = "a has:attachment";
+    mockUiState.setSearchQuery.mockClear();
+    mockUiState.setSearchActive.mockClear();
+    mockUseSearch.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        total_count: 1,
+        results: [
+          {
+            uid: 10,
+            folder: "INBOX",
+            from_name: "Alice",
+            from_address: "alice@example.com",
+            subject: "Hello",
+            snippet: "Snippet",
+            date: "2026-03-14T00:00:00Z",
+            flags: [],
+            has_attachments: true,
+          },
+        ],
+      },
+    });
+
+    render(<SearchResults />);
+
+    fireEvent.click(screen.getByRole("button", { name: /remove has filter/i }));
+
+    expect(mockUiState.setSearchQuery).toHaveBeenCalledWith("");
+    expect(mockUiState.setSearchActive).toHaveBeenCalledWith(false);
+  });
+
+  it("persists normalized query when filter removal leaves valid query", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.searchQuery = "  report   has:attachment  ";
+    mockUiState.setSearchQuery.mockClear();
+    mockUiState.setSearchActive.mockClear();
+    mockUseSearch.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: {
+        total_count: 1,
+        results: [
+          {
+            uid: 10,
+            folder: "INBOX",
+            from_name: "Alice",
+            from_address: "alice@example.com",
+            subject: "Hello",
+            snippet: "Snippet",
+            date: "2026-03-14T00:00:00Z",
+            flags: [],
+            has_attachments: true,
+          },
+        ],
+      },
+    });
+
+    render(<SearchResults />);
+
+    fireEvent.click(screen.getByRole("button", { name: /remove has filter/i }));
+
+    expect(mockUiState.setSearchQuery).toHaveBeenCalledWith("report");
+    expect(mockUiState.setSearchActive).toHaveBeenCalledWith(true);
   });
 });

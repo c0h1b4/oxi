@@ -184,9 +184,10 @@ export function SearchResults() {
 
   const handleRemoveFilter = useCallback(
     (filterRaw: string) => {
-      const newQuery = removeFilterFromQuery(searchQuery, filterRaw);
-      setSearchQuery(newQuery);
-      setSearchActive(isValidCommittedSearch(newQuery));
+      const nextQuery = normalizeSearchQuery(removeFilterFromQuery(searchQuery, filterRaw));
+      const hasValidNextQuery = isValidCommittedSearch(nextQuery);
+      setSearchQuery(hasValidNextQuery ? nextQuery : "");
+      setSearchActive(hasValidNextQuery);
     },
     [searchQuery, setSearchQuery, setSearchActive],
   );

@@ -29,13 +29,28 @@ vi.mock("cmdk", () => {
     return <div>{children}</div>;
   }
 
-  CommandRoot.Input = ({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />;
-  CommandRoot.List = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
-  CommandRoot.Empty = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
-  CommandRoot.Group = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
-  CommandRoot.Item = ({ children, onSelect, ...props }: React.HTMLAttributes<HTMLButtonElement> & { onSelect?: () => void }) => (
+  const CommandInput = ({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />;
+  CommandInput.displayName = "MockCommandInput";
+
+  const CommandList = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
+  CommandList.displayName = "MockCommandList";
+
+  const CommandEmpty = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
+  CommandEmpty.displayName = "MockCommandEmpty";
+
+  const CommandGroup = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>;
+  CommandGroup.displayName = "MockCommandGroup";
+
+  const CommandItem = ({ children, onSelect, ...props }: React.HTMLAttributes<HTMLButtonElement> & { onSelect?: () => void }) => (
     <button type="button" onClick={onSelect} {...props}>{children}</button>
   );
+  CommandItem.displayName = "MockCommandItem";
+
+  CommandRoot.Input = CommandInput;
+  CommandRoot.List = CommandList;
+  CommandRoot.Empty = CommandEmpty;
+  CommandRoot.Group = CommandGroup;
+  CommandRoot.Item = CommandItem;
 
   return { Command: CommandRoot };
 });
