@@ -45,10 +45,9 @@ function NavButton({
       title={disabled ? `${label} (coming soon)` : label}
       className={cn(
         "flex size-10 items-center justify-center rounded-lg transition-colors",
-        disabled
-          ? "cursor-default text-sidebar-foreground/30"
-          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-        active && "bg-sidebar-accent text-sidebar-foreground",
+        disabled && "cursor-default text-sidebar-foreground/30",
+        !disabled && !active && "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+        active && "bg-primary/10 text-primary hover:bg-primary/15",
       )}
     >
       {icon}
