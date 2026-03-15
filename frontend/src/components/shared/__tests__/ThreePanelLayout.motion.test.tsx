@@ -7,6 +7,7 @@ const { mockUiState } = vi.hoisted(() => ({
     messageListWidth: 420,
     selectedMessageUid: null as number | null,
     searchActive: false,
+    searchQuery: "",
     readingPaneVisible: true,
     effectiveAnimationMode: "medium" as "rich" | "medium" | "subtle" | "off",
     setSidebarWidth: vi.fn(),
@@ -73,11 +74,13 @@ describe("ThreePanelLayout motion transitions", () => {
     mockUiState.effectiveAnimationMode = "medium";
     mockUiState.readingPaneVisible = true;
     mockUiState.searchActive = false;
+    mockUiState.searchQuery = "";
 
     const { rerender } = renderLayout();
     expect(screen.getByTestId("three-panel-list-transition")).toBeTruthy();
 
     mockUiState.searchActive = true;
+    mockUiState.searchQuery = "from:alice";
     rerender(
       <ThreePanelLayout
         navRail={<div data-testid="nav-rail" />}
@@ -96,6 +99,7 @@ describe("ThreePanelLayout motion transitions", () => {
     mockUiState.effectiveAnimationMode = "off";
     mockUiState.readingPaneVisible = true;
     mockUiState.searchActive = true;
+    mockUiState.searchQuery = "from:alice";
 
     renderLayout();
 
@@ -103,6 +107,19 @@ describe("ThreePanelLayout motion transitions", () => {
     expect(screen.queryByTestId("three-panel-search-transition")).toBeNull();
     expect(screen.queryByTestId("three-panel-list-transition")).toBeNull();
     expect(screen.getByTestId("search-results")).toBeTruthy();
+  });
+
+  it("keeps message-list as fallback when committed search is invalid", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.readingPaneVisible = true;
+    mockUiState.searchActive = true;
+    mockUiState.searchQuery = "   ";
+
+    renderLayout();
+
+    expect(screen.getByTestId("three-panel-list-transition")).toBeTruthy();
+    expect(screen.getByTestId("message-list")).toBeTruthy();
+    expect(screen.queryByTestId("search-results")).toBeNull();
   });
 
   it("uses transform/opacity-only transition declarations", () => {

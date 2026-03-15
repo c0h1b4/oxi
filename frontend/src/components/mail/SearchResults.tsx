@@ -8,6 +8,8 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
 import {
   getFilterLabel,
+  isValidCommittedSearch,
+  normalizeSearchQuery,
   parseSearchQuery,
   removeFilterFromQuery,
 } from "@/lib/search-parser";
@@ -168,6 +170,8 @@ export function SearchResults() {
   };
 
   const [sortOrder, setSortOrder] = useState<"date_desc" | "date_asc">("date_desc");
+  const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
+  const hasValidCommittedSearch = isValidCommittedSearch(normalizedSearchQuery);
 
   const {
     data,
@@ -176,13 +180,13 @@ export function SearchResults() {
   } = useSearch(searchQuery, undefined, sortOrder);
 
   // Parse filters for display in the results header
-  const parsed = parseSearchQuery(searchQuery);
+  const parsed = parseSearchQuery(normalizedSearchQuery);
 
   const handleRemoveFilter = useCallback(
     (filterRaw: string) => {
       const newQuery = removeFilterFromQuery(searchQuery, filterRaw);
       setSearchQuery(newQuery);
-      setSearchActive(newQuery.length >= 2);
+      setSearchActive(isValidCommittedSearch(newQuery));
     },
     [searchQuery, setSearchQuery, setSearchActive],
   );
@@ -219,14 +223,14 @@ export function SearchResults() {
       )}
 
       {/* Empty state */}
-      {!isLoading && !isError && results.length === 0 && (
+      {!isLoading && !isError && hasValidCommittedSearch && results.length === 0 && (
         <div className="flex flex-1 items-center justify-center px-4 pt-4 text-center">
           <p className="text-sm text-muted-foreground">No results found</p>
         </div>
       )}
 
       {/* Results list with infinite scroll */}
-      {!isLoading && !isError && (
+      {!isLoading && !isError && hasValidCommittedSearch && (
         <>
           {/* Result count header */}
           {results.length > 0 && (

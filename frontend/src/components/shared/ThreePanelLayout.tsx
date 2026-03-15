@@ -6,6 +6,7 @@ import { useUiStore } from "@/stores/useUiStore";
 import { SearchBar } from "@/components/mail/SearchBar";
 import { SearchResults } from "@/components/mail/SearchResults";
 import { MessageActionBar } from "@/components/mail/MessageActionBar";
+import { isValidCommittedSearch } from "@/lib/search-parser";
 
 interface ThreePanelLayoutProps {
   navRail: React.ReactNode;
@@ -85,9 +86,12 @@ export function ThreePanelLayout({
   const setMessageListWidth = useUiStore((s) => s.setMessageListWidth);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const searchActive = useUiStore((s) => s.searchActive);
+  const searchQuery = useUiStore((s) => s.searchQuery);
   const readingPaneVisible = useUiStore((s) => s.readingPaneVisible);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
+  const hasValidCommittedSearch = isValidCommittedSearch(searchQuery);
+  const showSearchResults = searchActive && hasValidCommittedSearch;
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
 
   useEffect(() => {
@@ -208,7 +212,7 @@ export function ThreePanelLayout({
         <SearchBar />
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
-            {searchActive ? (
+            {showSearchResults ? (
               <motion.div
                 key="search"
                 data-testid="three-panel-search-transition"
@@ -234,7 +238,7 @@ export function ThreePanelLayout({
               </motion.div>
             )}
           </AnimatePresence>
-        ) : searchActive ? (
+        ) : showSearchResults ? (
           <SearchResults />
         ) : (
           <div className="flex-1 overflow-y-auto">{messageList}</div>
