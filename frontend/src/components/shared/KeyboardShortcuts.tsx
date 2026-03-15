@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
@@ -22,8 +23,10 @@ export function KeyboardShortcuts() {
   const setOpen = useUiStore((s) => s.setShortcutsOpen);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
@@ -36,7 +39,7 @@ export function KeyboardShortcuts() {
                 {shouldAnimate ? (
                   <motion.div
                     data-testid="keyboard-shortcuts-overlay-transition"
-                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    data-motion-props={serializedOverlayMotionProps}
                     initial="initial"
                     animate="animate"
                     exit="exit"
@@ -59,7 +62,7 @@ export function KeyboardShortcuts() {
                   {...(shouldAnimate
                     ? {
                         "data-testid": "keyboard-shortcuts-content-transition",
-                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        "data-motion-props": serializedContentMotionProps,
                         initial: "initial",
                         animate: "animate",
                         exit: "exit",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronRight, Plus, X, Loader2 } from "lucide-react";
 import { useTags, useCreateTag, useDeleteTag } from "@/hooks/useTags";
@@ -34,8 +34,10 @@ export function TagSection() {
   const [newColor, setNewColor] = useState(PRESET_COLORS[5]);
   const inputRef = useRef<HTMLInputElement>(null);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const sectionMotion = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const createFormMotion = createScaleFadeVariants(effectiveAnimationMode);
+  const sectionMotion = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const createFormMotion = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedSectionMotion = useMemo(() => JSON.stringify(sectionMotion), [sectionMotion]);
+  const serializedCreateFormMotion = useMemo(() => JSON.stringify(createFormMotion), [createFormMotion]);
 
   useEffect(() => {
     if (isCreating) {
@@ -115,7 +117,7 @@ export function TagSection() {
               animate={createFormMotion.animate}
               exit={createFormMotion.exit}
               data-testid="tag-create-form-transition"
-              data-motion-props={JSON.stringify(createFormMotion)}
+              data-motion-props={serializedCreateFormMotion}
               className="flex min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-1.5"
             >
               <div className="flex min-w-0 items-center gap-1.5">
@@ -291,7 +293,7 @@ export function TagSection() {
               animate={sectionMotion.animate}
               exit={sectionMotion.exit}
               data-testid="tag-section-body-transition"
-              data-motion-props={JSON.stringify(sectionMotion)}
+              data-motion-props={serializedSectionMotion}
               className="overflow-hidden"
             >
               {sectionBody}

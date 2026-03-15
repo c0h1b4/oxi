@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FolderInput } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,8 @@ export function MoveToFolderMenu({
   const { data } = useFolders();
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const menuMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const menuMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedMenuMotionProps = useMemo(() => JSON.stringify(menuMotionProps), [menuMotionProps]);
 
   const folders =
     data?.folders.filter((f) => f.name !== currentFolder) ?? [];
@@ -61,7 +62,7 @@ export function MoveToFolderMenu({
             <motion.div
               key="move-to-folder-menu"
               data-testid="move-to-folder-menu-transition"
-              data-motion-props={JSON.stringify(menuMotionProps)}
+              data-motion-props={serializedMenuMotionProps}
               initial="initial"
               animate="animate"
               exit="exit"

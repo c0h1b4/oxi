@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, type ReactNode } from "react";
+import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { Popover, Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { Send, Copy, Check, UserPlus, X, Search } from "lucide-react";
@@ -186,8 +186,10 @@ function RecipientModal({
 }) {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
   const [filter, setFilter] = useState("");
 
@@ -223,7 +225,7 @@ function RecipientModal({
                 {shouldAnimate ? (
                   <motion.div
                     data-testid="recipient-modal-overlay-transition"
-                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    data-motion-props={serializedOverlayMotionProps}
                     initial="initial"
                     animate="animate"
                     exit="exit"
@@ -247,7 +249,7 @@ function RecipientModal({
                   {...(shouldAnimate
                     ? {
                         "data-testid": "recipient-modal-content-transition",
-                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        "data-motion-props": serializedContentMotionProps,
                         initial: "initial",
                         animate: "animate",
                         exit: "exit",

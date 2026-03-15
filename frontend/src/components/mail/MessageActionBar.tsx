@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Reply,
   ReplyAll,
@@ -76,8 +76,10 @@ export function MessageActionBar() {
   const disabled = !data;
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const feedbackMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const barMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const feedbackMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedBarMotionProps = useMemo(() => JSON.stringify(barMotionProps), [barMotionProps]);
+  const serializedFeedbackMotionProps = useMemo(() => JSON.stringify(feedbackMotionProps), [feedbackMotionProps]);
   const ActionContainer = shouldAnimate ? motion.div : "div";
   const [actionFeedback, setActionFeedback] = useState<"delete" | "archive" | "move" | null>(null);
 
@@ -215,7 +217,7 @@ export function MessageActionBar() {
       {...(shouldAnimate
         ? {
             "data-testid": "message-action-bar-transition",
-            "data-motion-props": JSON.stringify(barMotionProps),
+            "data-motion-props": serializedBarMotionProps,
             initial: "initial",
             animate: "animate",
             exit: "exit",
@@ -251,7 +253,7 @@ export function MessageActionBar() {
             <motion.span
               key={actionFeedback === "delete" ? "delete-busy" : "delete-idle"}
               data-testid="message-action-delete-feedback-transition"
-              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              data-motion-props={serializedFeedbackMotionProps}
               initial="initial"
               animate="animate"
               exit="exit"
@@ -278,7 +280,7 @@ export function MessageActionBar() {
             <motion.span
               key={actionFeedback === "archive" ? "archive-busy" : "archive-idle"}
               data-testid="message-action-archive-feedback-transition"
-              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              data-motion-props={serializedFeedbackMotionProps}
               initial="initial"
               animate="animate"
               exit="exit"
@@ -304,7 +306,7 @@ export function MessageActionBar() {
           <motion.span
             key={actionFeedback === "move" ? "move-busy" : "move-idle"}
             data-testid="message-action-move-feedback-transition"
-            data-motion-props={JSON.stringify(feedbackMotionProps)}
+            data-motion-props={serializedFeedbackMotionProps}
             initial="initial"
             animate="animate"
             exit="exit"
@@ -360,7 +362,7 @@ export function MessageActionBar() {
             <motion.span
               key={isFlagged ? "flagged" : "unflagged"}
               data-testid="message-action-star-feedback-transition"
-              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              data-motion-props={serializedFeedbackMotionProps}
               initial="initial"
               animate="animate"
               exit="exit"
@@ -389,7 +391,7 @@ export function MessageActionBar() {
             <motion.span
               key={isSeen ? "seen" : "unseen"}
               data-testid="message-action-read-feedback-transition"
-              data-motion-props={JSON.stringify(feedbackMotionProps)}
+              data-motion-props={serializedFeedbackMotionProps}
               initial="initial"
               animate="animate"
               exit="exit"

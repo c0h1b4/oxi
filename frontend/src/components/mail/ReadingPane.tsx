@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Paperclip,
@@ -59,6 +59,10 @@ export function ReadingPane() {
   );
 
   const updateFlags = useUpdateFlags();
+
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const paneVariants = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
+  const serializedPaneVariants = useMemo(() => JSON.stringify(paneVariants), [paneVariants]);
 
   // When a message is not found on the server (stale cache), deselect it and
   // refresh the message list and search results so the ghost entry disappears.
@@ -137,8 +141,6 @@ export function ReadingPane() {
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const paneVariants = createFadeSlideVariants(effectiveAnimationMode, "x");
 
   const paneContent = (
     <div
@@ -354,7 +356,7 @@ export function ReadingPane() {
       <motion.div
         key={`reading-pane-${data.uid}`}
         data-testid="reading-pane-message-transition"
-        data-motion-props={JSON.stringify(paneVariants)}
+        data-motion-props={serializedPaneVariants}
         initial={paneVariants.initial}
         animate={paneVariants.animate}
         exit={paneVariants.exit}

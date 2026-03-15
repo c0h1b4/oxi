@@ -47,7 +47,8 @@ export function ContactsPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const panelTransition = createFadeSlideVariants(effectiveAnimationMode, "x");
+  const panelTransition = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
+  const serializedPanelTransition = useMemo(() => JSON.stringify(panelTransition), [panelTransition]);
   const PanelContainer = shouldAnimate ? motion.div : "div";
 
   const { data, isLoading, error } = useContacts(search || undefined);
@@ -155,7 +156,7 @@ export function ContactsPanel() {
       {...(shouldAnimate
         ? {
             "data-testid": "contacts-panel-transition",
-            "data-motion-props": JSON.stringify(panelTransition),
+            "data-motion-props": serializedPanelTransition,
             initial: panelTransition.initial,
             animate: panelTransition.animate,
             exit: panelTransition.exit,
@@ -387,7 +388,7 @@ export function ContactsPanel() {
               <motion.div
                 key={`contact-detail-${selectedContact.id}`}
                 data-testid="contacts-detail-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
+                data-motion-props={serializedPanelTransition}
                 initial={panelTransition.initial}
                 animate={panelTransition.animate}
                 exit={panelTransition.exit}
@@ -405,7 +406,7 @@ export function ContactsPanel() {
               <motion.div
                 key="contacts-detail-empty"
                 data-testid="contacts-empty-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
+                data-motion-props={serializedPanelTransition}
                 initial={panelTransition.initial}
                 animate={panelTransition.animate}
                 exit={panelTransition.exit}

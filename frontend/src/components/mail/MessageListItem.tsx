@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Star, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -139,7 +139,8 @@ export const MessageListItem = memo(function MessageListItem({
   };
 
   const [isDragging, setIsDragging] = useState(false);
-  const selectionVariants = createScaleFadeVariants(effectiveAnimationMode);
+  const selectionVariants = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedSelectionVariants = useMemo(() => JSON.stringify(selectionVariants), [selectionVariants]);
   const shouldAnimateSelection =
     isSelected &&
     (effectiveAnimationMode === "medium" || effectiveAnimationMode === "rich");
@@ -277,7 +278,7 @@ export const MessageListItem = memo(function MessageListItem({
     return (
       <motion.div
         data-testid="message-list-item-selection-transition"
-        data-motion-props={JSON.stringify(selectionVariants)}
+        data-motion-props={serializedSelectionVariants}
         initial={selectionVariants.initial}
         animate={selectionVariants.animate}
         exit={selectionVariants.exit}
@@ -412,7 +413,7 @@ export const MessageListItem = memo(function MessageListItem({
   return (
     <motion.div
       data-testid="message-list-item-selection-transition"
-      data-motion-props={JSON.stringify(selectionVariants)}
+      data-motion-props={serializedSelectionVariants}
       initial={selectionVariants.initial}
       animate={selectionVariants.animate}
       exit={selectionVariants.exit}

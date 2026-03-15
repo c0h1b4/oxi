@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { cn } from "@/lib/utils";
 import { Plus, ChevronRight, LogOut, X, Check } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,7 +30,8 @@ export function AccountSwitcher() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const dropdownMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const dropdownMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedDropdownMotionProps = useMemo(() => JSON.stringify(dropdownMotionProps), [dropdownMotionProps]);
   const DropdownContainer = shouldAnimate ? motion.div : "div";
   const canPortal = typeof document !== "undefined";
 
@@ -161,7 +162,7 @@ export function AccountSwitcher() {
                     ? {
                         ref: dropdownRef,
                         "data-testid": "account-switcher-dropdown-transition",
-                        "data-motion-props": JSON.stringify(dropdownMotionProps),
+                        "data-motion-props": serializedDropdownMotionProps,
                         initial: "initial",
                         animate: "animate",
                         exit: "exit",

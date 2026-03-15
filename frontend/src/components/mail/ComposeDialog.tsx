@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -101,9 +101,12 @@ export function ComposeDialog() {
   const lastSavedHashRef = useRef<string>("");
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
-  const sendFeedbackMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const sendFeedbackMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
+  const serializedSendFeedbackMotionProps = useMemo(() => JSON.stringify(sendFeedbackMotionProps), [sendFeedbackMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
 
   const hasContent = useCallback(() => {
@@ -537,7 +540,7 @@ export function ComposeDialog() {
                   {shouldAnimate ? (
                     <motion.div
                       data-testid="compose-dialog-overlay-transition"
-                      data-motion-props={JSON.stringify(overlayMotionProps)}
+                      data-motion-props={serializedOverlayMotionProps}
                       initial="initial"
                       animate="animate"
                       exit="exit"
@@ -571,7 +574,7 @@ export function ComposeDialog() {
                     {...(shouldAnimate
                       ? {
                           "data-testid": "compose-dialog-content-transition",
-                          "data-motion-props": JSON.stringify(contentMotionProps),
+                          "data-motion-props": serializedContentMotionProps,
                           initial: "initial",
                           animate: "animate",
                           exit: "exit",
@@ -813,7 +816,7 @@ export function ComposeDialog() {
                       <motion.span
                         key={sendMutation.isPending ? "pending" : "idle"}
                         data-testid="compose-send-feedback-transition"
-                        data-motion-props={JSON.stringify(sendFeedbackMotionProps)}
+                        data-motion-props={serializedSendFeedbackMotionProps}
                         initial="initial"
                         animate="animate"
                         exit="exit"

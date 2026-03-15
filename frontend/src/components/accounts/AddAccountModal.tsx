@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, useEffect, useRef } from "react";
+import { useState, type FormEvent, useEffect, useRef, useMemo } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, Loader2 } from "lucide-react";
@@ -46,8 +46,10 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const [showServerConfig, setShowServerConfig] = useState(false);
   const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ModalContainer = shouldAnimate ? motion.div : "div";
   const [serverConfig, setServerConfig] = useState<ServerConfig>({
     imapHost: "",
@@ -144,7 +146,7 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
                   <motion.div
                     key="add-account-overlay"
                     data-testid="add-account-overlay-transition"
-                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    data-motion-props={serializedOverlayMotionProps}
                     initial="initial"
                     animate="animate"
                     exit="exit"
@@ -167,7 +169,7 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
                   {...(shouldAnimate
                     ? {
                         "data-testid": "add-account-content-transition",
-                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        "data-motion-props": serializedContentMotionProps,
                         initial: "initial",
                         animate: "animate",
                         exit: "exit",

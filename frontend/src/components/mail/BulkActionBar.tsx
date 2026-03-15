@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Mail,
@@ -43,7 +43,8 @@ export function BulkActionBar() {
   const folders = foldersData?.folders ?? [];
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const barMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const serializedBarMotionProps = useMemo(() => JSON.stringify(barMotionProps), [barMotionProps]);
   const { data: tagsData } = useTags();
   const allTags = tagsData?.tags ?? [];
   const bulkAddTag = useBulkAddTag();
@@ -304,7 +305,7 @@ export function BulkActionBar() {
           <motion.div
             key="bulk-action-bar"
             data-testid="bulk-action-bar-transition"
-            data-motion-props={JSON.stringify(barMotionProps)}
+            data-motion-props={serializedBarMotionProps}
             initial="initial"
             animate="animate"
             exit="exit"

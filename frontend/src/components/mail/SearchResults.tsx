@@ -132,6 +132,37 @@ function SearchResultRow({
   );
 }
 
+const listTransition = {
+  initial: { opacity: 0, y: 6 },
+  animate: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
+  },
+  exit: {
+    opacity: 0,
+    y: 3,
+    transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
+  },
+};
+
+const itemTransition = {
+  initial: { opacity: 0, x: 6 },
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
+  },
+  exit: {
+    opacity: 0,
+    x: -3,
+    transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
+  },
+};
+
+const serializedListTransition = JSON.stringify(listTransition);
+const serializedItemTransition = JSON.stringify(itemTransition);
+
 export function SearchResults() {
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
@@ -145,34 +176,6 @@ export function SearchResults() {
   const setSearchSortOrder = useUiStore((s) => s.setSearchSortOrder);
   const setSearchResultCount = useUiStore((s) => s.setSearchResultCount);
   const shouldAnimate = effectiveAnimationMode !== "off";
-
-  const listTransition = {
-    initial: { opacity: 0, y: 6 },
-    animate: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
-    },
-    exit: {
-      opacity: 0,
-      y: 3,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
-    },
-  };
-
-  const itemTransition = {
-    initial: { opacity: 0, x: 6 },
-    animate: {
-      opacity: 1,
-      x: 0,
-      transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
-    },
-    exit: {
-      opacity: 0,
-      x: -3,
-      transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
-    },
-  };
 
   const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
   const hasValidCommittedSearch = isValidCommittedSearch(normalizedSearchQuery);
@@ -328,7 +331,7 @@ export function SearchResults() {
                   key="search-results-list"
                   ref={scrollRef}
                   data-testid="search-results-list-transition"
-                  data-motion-props={JSON.stringify(listTransition)}
+                  data-motion-props={serializedListTransition}
                   initial={listTransition.initial}
                   animate={listTransition.animate}
                   exit={listTransition.exit}
@@ -339,7 +342,7 @@ export function SearchResults() {
                       <motion.div
                         key={`${result.folder}-${result.uid}`}
                         data-testid="search-results-item-transition"
-                        data-motion-props={JSON.stringify(itemTransition)}
+                        data-motion-props={serializedItemTransition}
                         initial={itemTransition.initial}
                         animate={itemTransition.animate}
                         exit={itemTransition.exit}

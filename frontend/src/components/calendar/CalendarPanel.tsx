@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCalendarStore } from "@/stores/useCalendarStore";
 import { useUiStore } from "@/stores/useUiStore";
@@ -18,7 +18,8 @@ export function CalendarPanel() {
   const setViewMode = useCalendarStore((s) => s.setViewMode);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const panelTransition = createFadeSlideVariants(effectiveAnimationMode, "x");
+  const panelTransition = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
+  const serializedPanelTransition = useMemo(() => JSON.stringify(panelTransition), [panelTransition]);
   const PanelContainer = shouldAnimate ? motion.div : "div";
   const { data: settings } = useCalendarSettings();
 
@@ -40,7 +41,7 @@ export function CalendarPanel() {
       {...(shouldAnimate
         ? {
             "data-testid": "calendar-panel-transition",
-            "data-motion-props": JSON.stringify(panelTransition),
+            "data-motion-props": serializedPanelTransition,
             initial: panelTransition.initial,
             animate: panelTransition.animate,
             exit: panelTransition.exit,
@@ -57,7 +58,7 @@ export function CalendarPanel() {
               <motion.div
                 key="calendar-month-view"
                 data-testid="calendar-month-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
+                data-motion-props={serializedPanelTransition}
                 initial={panelTransition.initial}
                 animate={panelTransition.animate}
                 exit={panelTransition.exit}
@@ -70,7 +71,7 @@ export function CalendarPanel() {
               <motion.div
                 key="calendar-week-view"
                 data-testid="calendar-week-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
+                data-motion-props={serializedPanelTransition}
                 initial={panelTransition.initial}
                 animate={panelTransition.animate}
                 exit={panelTransition.exit}
@@ -83,7 +84,7 @@ export function CalendarPanel() {
               <motion.div
                 key="calendar-day-view"
                 data-testid="calendar-day-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
+                data-motion-props={serializedPanelTransition}
                 initial={panelTransition.initial}
                 animate={panelTransition.animate}
                 exit={panelTransition.exit}

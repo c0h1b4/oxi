@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { AlertDialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
@@ -18,8 +19,10 @@ export function DiscardAlertDialog({
 }: DiscardAlertDialogProps) {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
@@ -32,7 +35,7 @@ export function DiscardAlertDialog({
                 {shouldAnimate ? (
                   <motion.div
                     data-testid="discard-alert-overlay-transition"
-                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    data-motion-props={serializedOverlayMotionProps}
                     initial="initial"
                     animate="animate"
                     exit="exit"
@@ -55,7 +58,7 @@ export function DiscardAlertDialog({
                   {...(shouldAnimate
                     ? {
                         "data-testid": "discard-alert-content-transition",
-                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        "data-motion-props": serializedContentMotionProps,
                         initial: "initial",
                         animate: "animate",
                         exit: "exit",

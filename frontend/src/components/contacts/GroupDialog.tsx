@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/useUiStore";
@@ -26,8 +26,10 @@ function GroupForm({
   const [name, setName] = useState(initialName ?? "");
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
@@ -35,7 +37,7 @@ function GroupForm({
       {shouldAnimate ? (
         <motion.div
           data-testid="group-dialog-overlay-transition"
-          data-motion-props={JSON.stringify(overlayMotionProps)}
+          data-motion-props={serializedOverlayMotionProps}
           initial={overlayMotionProps.initial}
           animate={overlayMotionProps.animate}
           exit={overlayMotionProps.exit}
@@ -49,7 +51,7 @@ function GroupForm({
         {...(shouldAnimate
           ? {
               "data-testid": "group-dialog-content-transition",
-              "data-motion-props": JSON.stringify(contentMotionProps),
+              "data-motion-props": serializedContentMotionProps,
               initial: contentMotionProps.initial,
               animate: contentMotionProps.animate,
               exit: contentMotionProps.exit,

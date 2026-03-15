@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
@@ -29,8 +29,10 @@ export function EventForm() {
   const selectedDate = useCalendarStore((s) => s.selectedDate);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ContentContainer = shouldAnimate ? motion.div : "div";
 
   const { data: editingEvent } = useCalendarEvent(editingEventId);
@@ -194,7 +196,7 @@ export function EventForm() {
       {shouldAnimate ? (
         <motion.div
           data-testid="calendar-event-form-overlay-transition"
-          data-motion-props={JSON.stringify(overlayMotionProps)}
+          data-motion-props={serializedOverlayMotionProps}
           initial={overlayMotionProps.initial}
           animate={overlayMotionProps.animate}
           exit={overlayMotionProps.exit}
@@ -212,7 +214,7 @@ export function EventForm() {
         {...(shouldAnimate
           ? {
               "data-testid": "calendar-event-form-content-transition",
-              "data-motion-props": JSON.stringify(contentMotionProps),
+              "data-motion-props": serializedContentMotionProps,
               initial: contentMotionProps.initial,
               animate: contentMotionProps.animate,
               exit: contentMotionProps.exit,

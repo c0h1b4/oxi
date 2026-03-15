@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
@@ -21,8 +21,10 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
   const createFolder = useCreateFolder();
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
+  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
   const ModalContainer = shouldAnimate ? motion.div : "div";
 
   // Reset state and focus input when dialog opens.
@@ -62,7 +64,7 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
                 <motion.div
                   key="create-folder-overlay"
                   data-testid="create-folder-overlay-transition"
-                  data-motion-props={JSON.stringify(overlayMotionProps)}
+                  data-motion-props={serializedOverlayMotionProps}
                   initial="initial"
                   animate="animate"
                   exit="exit"
@@ -89,7 +91,7 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
                 {...(shouldAnimate
                   ? {
                       "data-testid": "create-folder-content-transition",
-                      "data-motion-props": JSON.stringify(contentMotionProps),
+                      "data-motion-props": serializedContentMotionProps,
                       initial: "initial",
                       animate: "animate",
                       exit: "exit",

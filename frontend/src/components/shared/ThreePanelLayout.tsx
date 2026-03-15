@@ -15,6 +15,37 @@ interface ThreePanelLayoutProps {
   readingPane: React.ReactNode;
 }
 
+const centerTransition = {
+  initial: { opacity: 0, x: 8 },
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
+  },
+  exit: {
+    opacity: 0,
+    x: -4,
+    transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
+  },
+};
+
+const readingPaneTransition = {
+  initial: { opacity: 0, x: 12 },
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
+  },
+  exit: {
+    opacity: 0,
+    x: 6,
+    transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
+  },
+};
+
+const serializedCenterTransition = JSON.stringify(centerTransition);
+const serializedReadingPaneTransition = JSON.stringify(readingPaneTransition);
+
 const MIN_SIDEBAR_WIDTH = 140;
 const MAX_SIDEBAR_WIDTH = 400;
 const MIN_MESSAGE_LIST_WIDTH = 280;
@@ -138,34 +169,6 @@ export function ThreePanelLayout({
     ? Math.max(MIN_MESSAGE_LIST_WIDTH, Math.min(messageListWidth, maxMessageListWidth))
     : null;
 
-  const centerTransition = {
-    initial: { opacity: 0, x: 8 },
-    animate: {
-      opacity: 1,
-      x: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
-    },
-    exit: {
-      opacity: 0,
-      x: -4,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
-    },
-  };
-
-  const readingPaneTransition = {
-    initial: { opacity: 0, x: 12 },
-    animate: {
-      opacity: 1,
-      x: 0,
-      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
-    },
-    exit: {
-      opacity: 0,
-      x: 6,
-      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
-    },
-  };
-
   const handleSidebarDrag = useCallback(
     (delta: number) => {
       const current = useUiStore.getState().sidebarWidth;
@@ -216,7 +219,7 @@ export function ThreePanelLayout({
               <motion.div
                 key="search"
                 data-testid="three-panel-search-transition"
-                data-motion-props={JSON.stringify(centerTransition)}
+                data-motion-props={serializedCenterTransition}
                 initial={centerTransition.initial}
                 animate={centerTransition.animate}
                 exit={centerTransition.exit}
@@ -228,7 +231,7 @@ export function ThreePanelLayout({
               <motion.div
                 key="list"
                 data-testid="three-panel-list-transition"
-                data-motion-props={JSON.stringify(centerTransition)}
+                data-motion-props={serializedCenterTransition}
                 initial={centerTransition.initial}
                 animate={centerTransition.animate}
                 exit={centerTransition.exit}
@@ -252,7 +255,7 @@ export function ThreePanelLayout({
             <motion.div
               key="reading-pane"
               data-testid="three-panel-reading-pane-transition"
-              data-motion-props={JSON.stringify(readingPaneTransition)}
+              data-motion-props={serializedReadingPaneTransition}
               initial={readingPaneTransition.initial}
               animate={readingPaneTransition.animate}
               exit={readingPaneTransition.exit}
