@@ -77,6 +77,7 @@ import { SearchResults } from "../SearchResults";
 describe("SearchResults motion transitions", () => {
   it("keeps the list mounted for exit when results become empty", () => {
     mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.searchQuery = "from:alice";
     mockUseSearch.mockReturnValue({
       isLoading: false,
       isError: false,
@@ -113,6 +114,7 @@ describe("SearchResults motion transitions", () => {
 
   it("animates individual result items in non-off modes", () => {
     mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.searchQuery = "from:alice";
     mockUseSearch.mockReturnValue({
       isLoading: false,
       isError: false,
@@ -153,6 +155,7 @@ describe("SearchResults motion transitions", () => {
 
   it("bypasses motion wrappers in off mode", () => {
     mockUiState.effectiveAnimationMode = "off";
+    mockUiState.searchQuery = "from:alice";
     mockUseSearch.mockReturnValue({
       isLoading: false,
       isError: false,
@@ -179,5 +182,19 @@ describe("SearchResults motion transitions", () => {
     expect(screen.queryByTestId("search-results-list-transition")).toBeNull();
     expect(screen.queryByTestId("search-results-item-transition")).toBeNull();
     expect(screen.getByText("Alice")).toBeTruthy();
+  });
+
+  it("does not show empty-results copy for invalid committed search", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.searchQuery = "   ";
+    mockUseSearch.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: { total_count: 0, results: [] },
+    });
+
+    render(<SearchResults />);
+
+    expect(screen.queryByText("No results found")).toBeNull();
   });
 });

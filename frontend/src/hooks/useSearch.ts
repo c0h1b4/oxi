@@ -2,6 +2,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
+import {
+  isValidCommittedSearch,
+  normalizeSearchQuery,
+} from "@/lib/search-parser";
 import type { SearchResponse } from "@/types/message";
 
 export interface SearchFilters {
@@ -19,8 +23,11 @@ export function useSearch(
   sort: "date_desc" | "date_asc" = "date_desc",
   filters?: SearchFilters,
 ) {
+  const normalizedQuery = normalizeSearchQuery(query);
+  const hasValidCommittedQuery = isValidCommittedSearch(normalizedQuery);
+
   const params = new URLSearchParams();
-  if (query) params.set("q", query);
+  if (normalizedQuery) params.set("q", normalizedQuery);
   if (folder) params.set("folder", folder);
   if (sort) params.set("sort", sort);
 
@@ -35,9 +42,9 @@ export function useSearch(
   }
 
   return useQuery({
-    queryKey: ["search", query, folder, sort, filters],
+    queryKey: ["search", normalizedQuery, folder, sort, filters],
     queryFn: () => apiGet<SearchResponse>(`/search?${params.toString()}`),
-    enabled: query.length >= 2,
+    enabled: hasValidCommittedQuery,
     placeholderData: (prev) => prev,
   });
 }
