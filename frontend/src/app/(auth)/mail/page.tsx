@@ -38,21 +38,21 @@ export default function MailPage() {
   let viewContent: React.ReactNode;
   if (viewMode === "contacts") {
     viewContent = (
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
         <NavRail />
         <ContactsPanel />
       </div>
     );
   } else if (viewMode === "calendar") {
     viewContent = (
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
         <NavRail />
         <CalendarPanel />
       </div>
     );
   } else if (viewMode === "settings") {
     viewContent = (
-      <div className="flex h-screen w-full overflow-hidden">
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
         <NavRail />
         <SettingsPanel />
       </div>
@@ -69,26 +69,29 @@ export default function MailPage() {
   }
 
   const content = shouldAnimateViews ? (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence mode="sync" initial={false}>
       <motion.div
         key={viewMode}
         data-testid={`mail-view-transition-${viewMode}`}
-        initial={{ opacity: 0, x: 10 }}
-        animate={{ opacity: 1, x: 0, transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const } }}
-        exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const } }}
+        className="absolute inset-0"
+        initial={{ opacity: 0, x: 6 }}
+        animate={{ opacity: 1, x: 0, transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const } }}
+        exit={{ opacity: 0, x: -4, transition: { duration: 0.12, ease: [0.2, 0, 0, 1] as const } }}
       >
         {viewContent}
       </motion.div>
     </AnimatePresence>
   ) : (
-    <div data-testid={`mail-view-static-${viewMode}`}>{viewContent}</div>
+    <div data-testid={`mail-view-static-${viewMode}`} className="h-full min-h-0">
+      {viewContent}
+    </div>
   );
 
   return (
     <WsContext.Provider value={wsContextValue}>
       <PreferencesLoader />
       {showBanner && <NotificationBanner onEnable={requestPermission} onDismiss={dismissBanner} />}
-      {content}
+      <div className="relative h-dvh w-full overflow-hidden">{content}</div>
       <KeyboardShortcuts />
       <CommandPalette />
     </WsContext.Provider>

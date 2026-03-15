@@ -472,11 +472,10 @@ export function MessageList() {
                         key={message.uid}
                         style={{
                           position: "absolute",
-                          top: 0,
+                          top: virtualRow.start,
                           left: 0,
                           width: "100%",
                           height: virtualRow.size,
-                          transform: `translateY(${virtualRow.start}px)`,
                         }}
                       >
                         <MessageListItem
@@ -510,11 +509,10 @@ export function MessageList() {
                       exit={rowMotionVariants.exit}
                       style={{
                         position: "absolute",
-                        top: 0,
+                        top: virtualRow.start,
                         left: 0,
                         width: "100%",
                         height: virtualRow.size,
-                        transform: `translateY(${virtualRow.start}px)`,
                       }}
                     >
                       <MessageListItem

@@ -358,7 +358,7 @@ export function ReadingPane() {
         initial={paneVariants.initial}
         animate={paneVariants.animate}
         exit={paneVariants.exit}
-        className="h-full"
+        className="h-full min-w-0 w-full"
       >
         {paneContent}
       </motion.div>

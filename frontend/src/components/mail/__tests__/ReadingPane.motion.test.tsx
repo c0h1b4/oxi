@@ -171,4 +171,16 @@ describe("ReadingPane motion transitions", () => {
       expect(serialized.includes(forbidden)).toBe(false);
     }
   });
+
+  it("keeps animated wrapper full width to avoid half-pane rendering", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    mockUiState.selectedMessageUid = 9;
+    setMessage(9);
+
+    render(<ReadingPane />);
+
+    const wrapper = screen.getByTestId("reading-pane-message-transition");
+    expect(wrapper.className).toContain("w-full");
+    expect(wrapper.className).toContain("min-w-0");
+  });
 });

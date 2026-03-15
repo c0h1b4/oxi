@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useUiStore } from "@/stores/useUiStore";
 import { SearchBar } from "@/components/mail/SearchBar";
@@ -13,6 +13,14 @@ interface ThreePanelLayoutProps {
   messageList: React.ReactNode;
   readingPane: React.ReactNode;
 }
+
+const MIN_SIDEBAR_WIDTH = 140;
+const MAX_SIDEBAR_WIDTH = 400;
+const MIN_MESSAGE_LIST_WIDTH = 280;
+const MAX_MESSAGE_LIST_WIDTH = 700;
+const MIN_READING_PANE_WIDTH = 420;
+const NAV_RAIL_WIDTH = 56;
+const RESIZE_HANDLE_BUDGET = 8;
 
 function ResizeHandle({
   onDrag,
@@ -70,6 +78,7 @@ export function ThreePanelLayout({
   messageList,
   readingPane,
 }: ThreePanelLayoutProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const messageListWidth = useUiStore((s) => s.messageListWidth);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
@@ -79,6 +88,51 @@ export function ThreePanelLayout({
   const readingPaneVisible = useUiStore((s) => s.readingPaneVisible);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    setContainerWidth(node.getBoundingClientRect().width);
+    if (typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setContainerWidth(entry.contentRect.width);
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const maxMessageListWidth = useMemo(() => {
+    if (!readingPaneVisible) {
+      return MAX_MESSAGE_LIST_WIDTH;
+    }
+
+    if (containerWidth == null) {
+      return MAX_MESSAGE_LIST_WIDTH;
+    }
+
+    const remaining = Math.floor(
+      containerWidth -
+      sidebarWidth -
+      NAV_RAIL_WIDTH -
+      RESIZE_HANDLE_BUDGET -
+      MIN_READING_PANE_WIDTH,
+    );
+
+    return Math.max(
+      MIN_MESSAGE_LIST_WIDTH,
+      Math.min(MAX_MESSAGE_LIST_WIDTH, remaining),
+    );
+  }, [containerWidth, readingPaneVisible, sidebarWidth]);
+
+  const resolvedMessageListWidth = readingPaneVisible
+    ? Math.max(MIN_MESSAGE_LIST_WIDTH, Math.min(messageListWidth, maxMessageListWidth))
+    : null;
 
   const centerTransition = {
     initial: { opacity: 0, x: 8 },
@@ -111,7 +165,7 @@ export function ThreePanelLayout({
   const handleSidebarDrag = useCallback(
     (delta: number) => {
       const current = useUiStore.getState().sidebarWidth;
-      setSidebarWidth(Math.max(140, Math.min(400, current + delta)));
+      setSidebarWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, current + delta)));
     },
     [setSidebarWidth],
   );
@@ -119,13 +173,15 @@ export function ThreePanelLayout({
   const handleMessageListDrag = useCallback(
     (delta: number) => {
       const current = useUiStore.getState().messageListWidth;
-      setMessageListWidth(Math.max(280, Math.min(700, current + delta)));
+      setMessageListWidth(
+        Math.max(MIN_MESSAGE_LIST_WIDTH, Math.min(maxMessageListWidth, current + delta)),
+      );
     },
-    [setMessageListWidth],
+    [maxMessageListWidth, setMessageListWidth],
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div ref={containerRef} className="flex h-full min-h-0 w-full overflow-hidden">
       {/* Navigation rail */}
       {navRail}
 
@@ -147,7 +203,7 @@ export function ThreePanelLayout({
             ? "flex shrink-0 flex-col overflow-hidden border-x border-border"
             : "flex min-w-0 flex-1 flex-col overflow-hidden border-l border-border"
         }
-        style={readingPaneVisible ? { width: messageListWidth } : undefined}
+        style={readingPaneVisible ? { width: resolvedMessageListWidth ?? messageListWidth } : undefined}
       >
         <SearchBar />
         {shouldAnimate ? (

@@ -137,7 +137,7 @@ function buildMessage(uid: number) {
     to_addresses: "receiver@example.com",
     cc_addresses: "",
     date: "2026-03-14T00:00:00Z",
-    flags: [],
+    flags: "",
     size: 1024,
     has_attachments: false,
     snippet: "Snippet",
@@ -252,5 +252,18 @@ describe("MessageList and MessageListItem motion transitions", () => {
     for (const forbidden of ["width", "height", "top", "left"]) {
       expect(serialized.includes(forbidden)).toBe(false);
     }
+  });
+
+  it("keeps virtualization offset in top so motion transforms cannot stack rows", () => {
+    mockUiState.effectiveAnimationMode = "medium";
+    setMessages([1, 2]);
+
+    render(<MessageList />);
+
+    const rows = screen.getAllByTestId("message-list-row-transition");
+    const secondRow = rows[1];
+
+    expect(secondRow?.style.top).toBe("64px");
+    expect(secondRow?.style.transform).toBe("");
   });
 });
