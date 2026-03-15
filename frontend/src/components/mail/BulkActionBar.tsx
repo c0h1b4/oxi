@@ -295,8 +295,6 @@ export function BulkActionBar() {
     </>
   );
 
-  if (!hasSelection) return null;
-
   return (
     <AnimatePresence>
       {hasSelection ? (
