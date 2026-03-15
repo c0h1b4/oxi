@@ -22,10 +22,15 @@ fn unauthorized() -> Response {
 }
 
 fn account_expired(account_id: &str) -> Response {
-    let body = format!(
-        r#"{{"error":{{"code":"ACCOUNT_EXPIRED","message":"Account session has expired","status":401,"account_id":"{}"}}}}"#,
-        account_id
-    );
+    let body = serde_json::json!({
+        "error": {
+            "code": "ACCOUNT_EXPIRED",
+            "message": "Account session has expired",
+            "status": 401,
+            "account_id": account_id,
+        }
+    })
+    .to_string();
     (
         StatusCode::UNAUTHORIZED,
         [("content-type", "application/json")],
