@@ -39,6 +39,18 @@ static ELEM_CSS_RE: LazyLock<Regex> = LazyLock::new(|| {
 static BG_PROP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)background(?:-color)?\s*:\s*([^;}"']+)"#).unwrap());
 
+static BODY_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<body\b[^>]*>"#).unwrap());
+
+static TABLE_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<table\b[^>]*>"#).unwrap());
+
+static TD_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<td\b[^>]*>"#).unwrap());
+
+static DIV_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<div\b[^>]*>"#).unwrap());
+
 /// Named CSS colors mapped to RGB values.
 type NamedColorList = Vec<(&'static str, (u8, u8, u8))>;
 static NAMED_COLORS: LazyLock<NamedColorList> = LazyLock::new(|| {
@@ -270,24 +282,25 @@ fn deduplicate_colors(colors: &mut Vec<BackgroundColor>) {
 }
 
 fn extract_inline_style_colors(html: &str, colors: &mut Vec<BackgroundColor>) {
-    let element_weights: &[(&str, f32)] =
-        &[("body", 1.0), ("table", 0.8), ("td", 0.6), ("div", 0.4)];
+    let element_weights: &[(&LazyLock<Regex>, f32)] = &[
+        (&BODY_TAG_RE, 1.0),
+        (&TABLE_TAG_RE, 0.8),
+        (&TD_TAG_RE, 0.6),
+        (&DIV_TAG_RE, 0.4),
+    ];
 
-    for (tag, weight) in element_weights {
-        let tag_pattern = format!(r#"<{tag}\b[^>]*>"#);
-        if let Ok(tag_re) = Regex::new(&tag_pattern) {
-            for m in tag_re.find_iter(html) {
-                let tag_content = m.as_str();
-                let extracted = extract_colors_from_style(tag_content);
-                for color in extracted {
-                    if !is_transparent(&color) {
-                        let normalized = normalize_color(&color);
-                        if !normalized.is_empty() {
-                            colors.push(BackgroundColor {
-                                color: normalized,
-                                element_weight: *weight,
-                            });
-                        }
+    for (tag_re, weight) in element_weights {
+        for m in tag_re.find_iter(html) {
+            let tag_content = m.as_str();
+            let extracted = extract_colors_from_style(tag_content);
+            for color in extracted {
+                if !is_transparent(&color) {
+                    let normalized = normalize_color(&color);
+                    if !normalized.is_empty() {
+                        colors.push(BackgroundColor {
+                            color: normalized,
+                            element_weight: *weight,
+                        });
                     }
                 }
             }
@@ -391,23 +404,21 @@ fn extract_all_colors_from_css(css: &str, weight: f32, colors: &mut Vec<Backgrou
 }
 
 fn extract_bgcolor_attrs(html: &str, colors: &mut Vec<BackgroundColor>) {
-    let element_weights: &[(&str, f32)] = &[("body", 1.0), ("table", 0.8), ("td", 0.6)];
+    let element_weights: &[(&LazyLock<Regex>, f32)] =
+        &[(&BODY_TAG_RE, 1.0), (&TABLE_TAG_RE, 0.8), (&TD_TAG_RE, 0.6)];
 
-    for (tag, weight) in element_weights {
-        let tag_pattern = format!(r#"<{tag}\b[^>]*>"#);
-        if let Ok(tag_re) = Regex::new(&tag_pattern) {
-            for m in tag_re.find_iter(html) {
-                let tag_content = m.as_str();
-                if let Some(cap) = BGCOLOR_ATTR_RE.captures(tag_content) {
-                    let color = cap[1].to_string();
-                    if !is_transparent(&color) {
-                        let normalized = normalize_color(&color);
-                        if !normalized.is_empty() {
-                            colors.push(BackgroundColor {
-                                color: normalized,
-                                element_weight: *weight,
-                            });
-                        }
+    for (tag_re, weight) in element_weights {
+        for m in tag_re.find_iter(html) {
+            let tag_content = m.as_str();
+            if let Some(cap) = BGCOLOR_ATTR_RE.captures(tag_content) {
+                let color = cap[1].to_string();
+                if !is_transparent(&color) {
+                    let normalized = normalize_color(&color);
+                    if !normalized.is_empty() {
+                        colors.push(BackgroundColor {
+                            color: normalized,
+                            element_weight: *weight,
+                        });
                     }
                 }
             }
