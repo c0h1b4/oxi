@@ -260,8 +260,10 @@ impl SessionStore {
         let now = Instant::now();
         let effective_timeout = entry.timeout_override.unwrap_or(self.timeout);
         if now.duration_since(entry.last_accessed) > effective_timeout {
+            let account_id = entry.account_id.clone();
             drop(entry);
             self.sessions.remove(token);
+            self.evict_account(&account_id);
             return None;
         }
         entry.last_accessed = now;
@@ -273,37 +275,38 @@ impl SessionStore {
         self.sessions.remove(token).is_some()
     }
 
+    /// Remove an account's entries from `account_to_session` and `browsers`.
+    /// If a browser's account list becomes empty, the browser entry is removed
+    /// too -- keeping it would serve no purpose and would itself be a leak.
+    fn evict_account(&self, account_id: &str) {
+        self.account_to_session.remove(account_id);
+
+        // We cannot predict which browser owns this account, so scan all.
+        self.browsers.retain(|_, accounts| {
+            accounts.retain(|id| id != account_id);
+            // Keep the browser entry only if it still has accounts.
+            !accounts.is_empty()
+        });
+    }
+
     #[allow(dead_code)]
     pub fn purge_expired(&self) {
         let now = Instant::now();
 
-        // Collect expired session tokens and their account IDs before removal
-        // so we can clean up all secondary maps including the reverse index.
-        let expired: Vec<(SessionId, AccountId)> = self
-            .sessions
-            .iter()
-            .filter(|entry| {
-                let effective_timeout = entry.value().timeout_override.unwrap_or(self.timeout);
-                now.duration_since(entry.value().last_accessed) > effective_timeout
-            })
-            .map(|entry| (entry.key().clone(), entry.value().account_id.clone()))
-            .collect();
-
-        for (token, account_id) in &expired {
-            self.sessions.remove(token);
-            self.account_to_session.remove(account_id);
-            self.account_to_browser.remove(account_id);
-        }
-
-        // Remove expired account IDs from browser lists.
-        if !expired.is_empty() {
-            let expired_accounts: std::collections::HashSet<&str> =
-                expired.iter().map(|(_, aid)| aid.as_str()).collect();
-            for mut entry in self.browsers.iter_mut() {
-                entry
-                    .value_mut()
-                    .retain(|aid| !expired_accounts.contains(aid.as_str()));
+        // Collect expired account IDs while retaining live sessions.
+        let mut expired_accounts = Vec::new();
+        self.sessions.retain(|_, state| {
+            let effective_timeout = state.timeout_override.unwrap_or(self.timeout);
+            let alive = now.duration_since(state.last_accessed) <= effective_timeout;
+            if !alive {
+                expired_accounts.push(state.account_id.clone());
             }
+            alive
+        });
+
+        for account_id in &expired_accounts {
+            self.account_to_browser.remove(account_id);
+            self.evict_account(account_id);
         }
     }
 
@@ -852,9 +855,8 @@ mod tests {
         );
         assert_eq!(store.sessions.len(), 0);
         assert_eq!(store.account_to_session.len(), 0);
-        // Browser still exists but its account list should be empty.
-        assert!(store.browser_exists(&browser));
-        assert!(store.get_browser_accounts(&browser).is_empty());
+        // Browser entry is removed when its account list becomes empty.
+        assert!(!store.browser_exists(&browser));
     }
 
     #[test]
@@ -1039,5 +1041,155 @@ mod tests {
         assert!(!store.account_to_browser.contains_key(&account_id));
         assert!(!store.account_to_session.contains_key(&account_id));
         assert!(store.get_browser_accounts(&browser_id).is_empty());
+    }
+
+    // --- Cascade eviction tests ---
+
+    #[test]
+    fn purge_expired_cascades_to_browsers_and_account_map() {
+        let store = short_lived_store();
+        let browser_id = store.create_browser();
+
+        let (_token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        thread::sleep(Duration::from_millis(100));
+
+        store.purge_expired();
+
+        assert!(store.sessions.is_empty(), "session should be purged");
+        assert!(
+            !store.account_to_session.contains_key(&account_id),
+            "account_to_session entry should be removed"
+        );
+        assert!(
+            !store.browsers.contains_key(&browser_id),
+            "empty browser entry should be removed"
+        );
+    }
+
+    #[test]
+    fn purge_expired_keeps_live_accounts_in_browser() {
+        let store = SessionStore::new(Duration::from_millis(150));
+        let browser_id = store.create_browser();
+
+        // First account -- will expire.
+        let (_token1, account1) = store.add_account_to_browser(
+            &browser_id,
+            "old@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        thread::sleep(Duration::from_millis(100));
+
+        // Second account -- added later, still alive after sleep.
+        let (_token2, account2) = store.add_account_to_browser(
+            &browser_id,
+            "new@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        thread::sleep(Duration::from_millis(60));
+
+        store.purge_expired();
+
+        assert_eq!(store.sessions.len(), 1, "only the live session should remain");
+        assert!(
+            !store.account_to_session.contains_key(&account1),
+            "expired account mapping should be gone"
+        );
+        assert!(
+            store.account_to_session.contains_key(&account2),
+            "live account mapping should remain"
+        );
+
+        let browser_accounts = store.browsers.get(&browser_id).unwrap();
+        assert_eq!(browser_accounts.len(), 1);
+        assert_eq!(browser_accounts[0], account2);
+    }
+
+    #[test]
+    fn lazy_eviction_on_get_cascades() {
+        let store = short_lived_store();
+        let browser_id = store.create_browser();
+
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        thread::sleep(Duration::from_millis(100));
+
+        // Accessing the expired session should trigger cascade cleanup.
+        assert!(store.get(&token).is_none());
+
+        assert!(
+            !store.account_to_session.contains_key(&account_id),
+            "account_to_session should be cleaned up by lazy eviction"
+        );
+        assert!(
+            !store.browsers.contains_key(&browser_id),
+            "empty browser should be cleaned up by lazy eviction"
+        );
+    }
+
+    #[test]
+    fn lazy_eviction_on_get_account_session_cascades() {
+        let store = short_lived_store();
+        let browser_id = store.create_browser();
+
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        thread::sleep(Duration::from_millis(100));
+
+        assert!(store.get_account_session(&browser_id, &account_id, &token).is_none());
+
+        assert!(
+            !store.account_to_session.contains_key(&account_id),
+            "account_to_session should be cleaned up via get_account_session"
+        );
     }
 }
