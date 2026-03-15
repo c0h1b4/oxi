@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Search,
   UserPlus,
@@ -29,6 +30,8 @@ import {
 import { ContactCard, InitialsAvatar } from "@/components/contacts/ContactCard";
 import { ContactDialog } from "@/components/contacts/ContactDialog";
 import { GroupDialog } from "@/components/contacts/GroupDialog";
+import { useUiStore } from "@/stores/useUiStore";
+import { createFadeSlideVariants } from "@/lib/motion/variants";
 import type { Contact } from "@/types/contact";
 
 export function ContactsPanel() {
@@ -42,6 +45,10 @@ export function ContactsPanel() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const panelTransition = createFadeSlideVariants(effectiveAnimationMode, "x");
+  const PanelContainer = shouldAnimate ? motion.div : "div";
 
   const { data, isLoading, error } = useContacts(search || undefined);
   const createContact = useCreateContact();
@@ -144,7 +151,18 @@ export function ContactsPanel() {
   }, []);
 
   return (
-    <div className="flex h-full min-w-0 flex-1">
+    <PanelContainer
+      {...(shouldAnimate
+        ? {
+            "data-testid": "contacts-panel-transition",
+            "data-motion-props": JSON.stringify(panelTransition),
+            initial: panelTransition.initial,
+            animate: panelTransition.animate,
+            exit: panelTransition.exit,
+          }
+        : {})}
+      className="flex h-full min-w-0 flex-1"
+    >
       {/* Contact list */}
       <div className="flex w-[360px] shrink-0 flex-col border-r border-border">
         {/* Header */}
@@ -363,7 +381,44 @@ export function ContactsPanel() {
 
       {/* Detail pane */}
       <div className="flex min-w-0 flex-1 items-center justify-center">
-        {selectedContact ? (
+        {shouldAnimate ? (
+          <AnimatePresence mode="wait" initial={false}>
+            {selectedContact ? (
+              <motion.div
+                key={`contact-detail-${selectedContact.id}`}
+                data-testid="contacts-detail-transition"
+                data-motion-props={JSON.stringify(panelTransition)}
+                initial={panelTransition.initial}
+                animate={panelTransition.animate}
+                exit={panelTransition.exit}
+                className="w-full max-w-lg p-6"
+              >
+                <ContactCard
+                  contact={selectedContact}
+                  onDelete={handleDelete}
+                  isDeleting={deleteContact.isPending}
+                  groups={groups}
+                  activeGroupId={activeGroupId}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="contacts-detail-empty"
+                data-testid="contacts-empty-transition"
+                data-motion-props={JSON.stringify(panelTransition)}
+                initial={panelTransition.initial}
+                animate={panelTransition.animate}
+                exit={panelTransition.exit}
+                className="flex flex-col items-center gap-2"
+              >
+                <Users className="size-12 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">
+                  Select a contact to view details
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        ) : selectedContact ? (
           <div className="w-full max-w-lg p-6">
             <ContactCard
               contact={selectedContact}
@@ -409,6 +464,6 @@ export function ContactsPanel() {
         initialName={editingGroup?.name ?? ""}
         title="Rename Group"
       />
-    </div>
+    </PanelContainer>
   );
 }
