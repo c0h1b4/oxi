@@ -73,10 +73,17 @@ export function SearchBar() {
     [cancelDebounce, clearSearch, setSearchActive, setSearchQuery],
   );
 
-  // Clear search on Escape
+  // Handle Enter to commit and blur, Escape to clear
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
+      if (e.key === "Enter") {
+        const normalizedValue = normalizeSearchQuery(inputValue);
+        if (isValidCommittedSearch(normalizedValue)) {
+          setSearchQuery(normalizedValue);
+          setSearchActive(true);
+        }
+        inputRef.current?.blur();
+      } else if (e.key === "Escape") {
         setInputValue("");
         cancelDebounce();
         clearSearch();
@@ -84,7 +91,7 @@ export function SearchBar() {
         inputRef.current?.blur();
       }
     },
-    [cancelDebounce, clearSearch],
+    [cancelDebounce, clearSearch, inputValue, setSearchActive, setSearchQuery],
   );
 
   // Clear button handler

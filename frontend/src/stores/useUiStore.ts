@@ -71,6 +71,7 @@ export interface UiState {
   composeFormat: "html" | "text";
   storedAnimationMode: AnimationMode | null;
   effectiveAnimationMode: AnimationMode;
+  searchSortOrder: "date_desc" | "date_asc";
 
   setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
@@ -94,6 +95,7 @@ export interface UiState {
   setComposeFormat: (format: "html" | "text") => void;
   setAnimationModeState: (state: AnimationModeState) => void;
   isAnimationOff: () => boolean;
+  setSearchSortOrder: (order: "date_desc" | "date_asc") => void;
 }
 
 const initial = loadSettings();
@@ -118,6 +120,7 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   composeFormat: "html",
   storedAnimationMode: null,
   effectiveAnimationMode: DEFAULT_EFFECTIVE_ANIMATION_MODE,
+  searchSortOrder: "date_desc",
 
   setActiveTag: (tagId) =>
     set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -164,4 +167,5 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
       effectiveAnimationMode: effectiveMode,
     }),
   isAnimationOff: () => useUiStore.getState().effectiveAnimationMode === "off",
+  setSearchSortOrder: (order) => set({ searchSortOrder: order }),
 }));

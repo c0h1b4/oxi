@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -139,6 +139,8 @@ export function SearchResults() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const searchSortOrder = useUiStore((s) => s.searchSortOrder);
+  const setSearchSortOrder = useUiStore((s) => s.setSearchSortOrder);
   const shouldAnimate = effectiveAnimationMode !== "off";
 
   const listTransition = {
@@ -169,7 +171,6 @@ export function SearchResults() {
     },
   };
 
-  const [sortOrder, setSortOrder] = useState<"date_desc" | "date_asc">("date_desc");
   const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
   const hasValidCommittedSearch = isValidCommittedSearch(normalizedSearchQuery);
 
@@ -177,7 +178,7 @@ export function SearchResults() {
     data,
     isLoading,
     isError,
-  } = useSearch(searchQuery, undefined, sortOrder);
+  } = useSearch(searchQuery, undefined, searchSortOrder);
 
   // Parse filters for display in the results header
   const parsed = parseSearchQuery(normalizedSearchQuery);
@@ -244,11 +245,11 @@ export function SearchResults() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
+                  onClick={() => setSearchSortOrder(searchSortOrder === "date_desc" ? "date_asc" : "date_desc")}
                   className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
+                  title={searchSortOrder === "date_desc" ? "Newest first" : "Oldest first"}
                 >
-                  {sortOrder === "date_desc" ? (
+                  {searchSortOrder === "date_desc" ? (
                     <ArrowDown className="size-3" />
                   ) : (
                     <ArrowUp className="size-3" />
