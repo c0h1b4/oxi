@@ -494,6 +494,7 @@ export function MessageList() {
                           isBulkSelected={selectedMessageUids.includes(message.uid)}
                           onBulkToggle={toggleBulkSelect}
                           suppressHover={keyboardNav}
+                          effectiveAnimationMode={effectiveAnimationMode}
                         />
                       </div>
                     );
@@ -531,6 +532,7 @@ export function MessageList() {
                         isBulkSelected={selectedMessageUids.includes(message.uid)}
                         onBulkToggle={toggleBulkSelect}
                         suppressHover={keyboardNav}
+                        effectiveAnimationMode={effectiveAnimationMode}
                       />
                     </motion.div>
                   );
