@@ -44,6 +44,7 @@ pub struct SessionStore {
     sessions: Arc<DashMap<SessionId, AccountSession>>,
     browsers: Arc<DashMap<BrowserId, Vec<AccountId>>>,
     account_to_session: Arc<DashMap<AccountId, SessionId>>,
+    account_to_browser: Arc<DashMap<AccountId, BrowserId>>,
     timeout: Duration,
 }
 
@@ -53,6 +54,7 @@ impl SessionStore {
             sessions: Arc::new(DashMap::new()),
             browsers: Arc::new(DashMap::new()),
             account_to_session: Arc::new(DashMap::new()),
+            account_to_browser: Arc::new(DashMap::new()),
             timeout,
         }
     }
@@ -119,13 +121,24 @@ impl SessionStore {
             std::panic::resume_unwind(payload);
         }
 
-        // Insert into browsers; rollback both prior maps on panic.
+        // Insert into account_to_browser; rollback prior maps on panic.
+        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.account_to_browser
+                .insert(account_id.clone(), browser_id.to_string());
+        })) {
+            self.account_to_session.remove(&account_id);
+            self.sessions.remove(&token);
+            std::panic::resume_unwind(payload);
+        }
+
+        // Insert into browsers; rollback all prior maps on panic.
         if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.browsers
                 .entry(browser_id.to_string())
                 .or_default()
                 .push(account_id.clone());
         })) {
+            self.account_to_browser.remove(&account_id);
             self.account_to_session.remove(&account_id);
             self.sessions.remove(&token);
             std::panic::resume_unwind(payload);
@@ -186,15 +199,12 @@ impl SessionStore {
                 std::panic::resume_unwind(payload);
             }
 
-            // Remove from browsers list; best-effort since the critical
-            // session data is already removed. A stale account_id in the
-            // browsers vec is harmless -- lookups will find no matching
-            // session and return None.
-            for mut entry in self.browsers.iter_mut() {
-                if let Some(pos) = entry.value().iter().position(|id| id == account_id) {
-                    entry.value_mut().remove(pos);
-                    break;
-                }
+            // Use reverse index for O(1) browser lookup instead of iterating.
+            if let Some((_, browser_id)) = self.account_to_browser.remove(account_id)
+                && let Some(mut entry) = self.browsers.get_mut(&browser_id)
+                && let Some(pos) = entry.value().iter().position(|id| id == account_id)
+            {
+                entry.value_mut().remove(pos);
             }
             true
         } else {
@@ -209,6 +219,7 @@ impl SessionStore {
             // unreachable via browser lookups. They will be reaped by
             // purge_expired or a subsequent remove_account call.
             for account_id in account_ids {
+                self.account_to_browser.remove(&account_id);
                 if let Some((_, session_id)) = self.account_to_session.remove(&account_id) {
                     self.sessions.remove(&session_id);
                 }
@@ -267,7 +278,7 @@ impl SessionStore {
         let now = Instant::now();
 
         // Collect expired session tokens and their account IDs before removal
-        // so we can clean up the secondary maps.
+        // so we can clean up all secondary maps including the reverse index.
         let expired: Vec<(SessionId, AccountId)> = self
             .sessions
             .iter()
@@ -281,6 +292,7 @@ impl SessionStore {
         for (token, account_id) in &expired {
             self.sessions.remove(token);
             self.account_to_session.remove(account_id);
+            self.account_to_browser.remove(account_id);
         }
 
         // Remove expired account IDs from browser lists.
@@ -295,7 +307,7 @@ impl SessionStore {
         }
     }
 
-    /// Verify internal consistency across all three maps. Returns a list of
+    /// Verify internal consistency across all four maps. Returns a list of
     /// inconsistency descriptions. An empty vec means the store is consistent.
     /// Intended for testing and diagnostics.
     #[allow(dead_code)]
@@ -899,5 +911,133 @@ mod tests {
         // Only b@example.com should remain.
         assert_eq!(store.sessions.len(), 1);
         assert_eq!(store.account_to_session.len(), 1);
+    }
+
+    // --- Reverse index tests ---
+
+    #[test]
+    fn remove_account_uses_reverse_index() {
+        let store = long_lived_store();
+
+        // Create many browsers to demonstrate the O(1) lookup
+        let mut other_browsers = Vec::new();
+        for _ in 0..100 {
+            let bid = store.create_browser();
+            store.add_account_to_browser(
+                &bid,
+                "other@example.com".into(),
+                "pass".into(),
+                "hash".into(),
+                "imap.example.com".into(),
+                993,
+                true,
+                "smtp.example.com".into(),
+                587,
+                true,
+            );
+            other_browsers.push(bid);
+        }
+
+        let target_browser = store.create_browser();
+        let (token, account_id) = store.add_account_to_browser(
+            &target_browser,
+            "target@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        // Verify reverse index was populated
+        assert!(store.account_to_browser.contains_key(&account_id));
+        assert_eq!(
+            store.account_to_browser.get(&account_id).unwrap().value(),
+            &target_browser
+        );
+
+        // Remove the account -- uses O(1) reverse index, not O(n) iteration
+        assert!(store.remove_account(&account_id));
+
+        // Verify full cleanup
+        assert!(store.get(&token).is_none());
+        assert!(!store.account_to_session.contains_key(&account_id));
+        assert!(!store.account_to_browser.contains_key(&account_id));
+        assert!(store.get_browser_accounts(&target_browser).is_empty());
+
+        // Other browsers are untouched
+        for bid in &other_browsers {
+            assert_eq!(store.get_browser_accounts(bid).len(), 1);
+        }
+    }
+
+    #[test]
+    fn remove_browser_cleans_up_reverse_index() {
+        let store = long_lived_store();
+        let browser_id = store.create_browser();
+
+        let (_, account1) = store.add_account_to_browser(
+            &browser_id,
+            "user1@example.com".into(),
+            "pass".into(),
+            "hash1".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+        let (_, account2) = store.add_account_to_browser(
+            &browser_id,
+            "user2@example.com".into(),
+            "pass".into(),
+            "hash2".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        assert!(store.account_to_browser.contains_key(&account1));
+        assert!(store.account_to_browser.contains_key(&account2));
+
+        store.remove_browser(&browser_id);
+
+        assert!(!store.account_to_browser.contains_key(&account1));
+        assert!(!store.account_to_browser.contains_key(&account2));
+    }
+
+    #[test]
+    fn purge_expired_cleans_up_reverse_index() {
+        let store = short_lived_store();
+        let browser_id = store.create_browser();
+
+        let (_, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        assert!(store.account_to_browser.contains_key(&account_id));
+
+        thread::sleep(Duration::from_millis(100));
+        store.purge_expired();
+
+        assert!(!store.account_to_browser.contains_key(&account_id));
+        assert!(!store.account_to_session.contains_key(&account_id));
+        assert!(store.get_browser_accounts(&browser_id).is_empty());
     }
 }
