@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { useUiStore } from "@/stores/useUiStore";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { SearchBar } from "@/components/mail/SearchBar";
 import { SearchResults } from "@/components/mail/SearchResults";
 import { MessageActionBar } from "@/components/mail/MessageActionBar";
@@ -42,9 +43,6 @@ const readingPaneTransition = {
     transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
   },
 };
-
-const serializedCenterTransition = JSON.stringify(centerTransition);
-const serializedReadingPaneTransition = JSON.stringify(readingPaneTransition);
 
 const MIN_SIDEBAR_WIDTH = 140;
 const MAX_SIDEBAR_WIDTH = 400;
@@ -119,8 +117,6 @@ export function ThreePanelLayout({
   const searchActive = useUiStore((s) => s.searchActive);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const readingPaneVisible = useUiStore((s) => s.readingPaneVisible);
-  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const hasValidCommittedSearch = isValidCommittedSearch(searchQuery);
   const showSearchResults = searchActive && hasValidCommittedSearch;
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
@@ -213,74 +209,48 @@ export function ThreePanelLayout({
         style={readingPaneVisible ? { width: resolvedMessageListWidth ?? messageListWidth } : undefined}
       >
         <SearchBar />
-        {shouldAnimate ? (
-          <AnimatePresence mode="wait" initial={false}>
-            {showSearchResults ? (
-              <motion.div
-                key="search"
-                data-testid="three-panel-search-transition"
-                data-motion-props={serializedCenterTransition}
-                initial={centerTransition.initial}
-                animate={centerTransition.animate}
-                exit={centerTransition.exit}
-                className="flex min-h-0 flex-1 flex-col"
-              >
-                <SearchResults />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="list"
-                data-testid="three-panel-list-transition"
-                data-motion-props={serializedCenterTransition}
-                initial={centerTransition.initial}
-                animate={centerTransition.animate}
-                exit={centerTransition.exit}
-                className="flex-1 overflow-y-auto"
-              >
-                {messageList}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        ) : showSearchResults ? (
-          <SearchResults />
-        ) : (
-          <div className="flex-1 overflow-y-auto">{messageList}</div>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {showSearchResults ? (
+            <AnimatedDiv
+              key="search"
+              data-testid="three-panel-search-transition"
+              variants={centerTransition}
+              initial={centerTransition.initial}
+              animate={centerTransition.animate}
+              exit={centerTransition.exit}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <SearchResults />
+            </AnimatedDiv>
+          ) : (
+            <AnimatedDiv
+              key="list"
+              data-testid="three-panel-list-transition"
+              variants={centerTransition}
+              initial={centerTransition.initial}
+              animate={centerTransition.animate}
+              exit={centerTransition.exit}
+              className="flex-1 overflow-y-auto"
+            >
+              {messageList}
+            </AnimatedDiv>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* Resize handle: message list | reading pane */}
-      {shouldAnimate ? (
-        <AnimatePresence initial={false}>
-          {readingPaneVisible && (
-            <motion.div
-              key="reading-pane"
-              data-testid="three-panel-reading-pane-transition"
-              data-motion-props={serializedReadingPaneTransition}
-              initial={readingPaneTransition.initial}
-              animate={readingPaneTransition.animate}
-              exit={readingPaneTransition.exit}
-              className="flex min-h-0 min-w-0 flex-1"
-            >
-              <ResizeHandle onDrag={handleMessageListDrag} />
-              <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <MessageActionBar />
-                {selectedMessageUid !== null ? (
-                  <div className="flex min-h-0 flex-1">{readingPane}</div>
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center">
-                    <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">
-                      oxi<span className="text-primary/40">.email</span>
-                    </span>
-                  </div>
-                )}
-              </section>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      ) : (
-        <>
-          {readingPaneVisible && <ResizeHandle onDrag={handleMessageListDrag} />}
-          {readingPaneVisible && (
+      <AnimatePresence initial={false}>
+        {readingPaneVisible && (
+          <AnimatedDiv
+            key="reading-pane"
+            data-testid="three-panel-reading-pane-transition"
+            variants={readingPaneTransition}
+            initial={readingPaneTransition.initial}
+            animate={readingPaneTransition.animate}
+            exit={readingPaneTransition.exit}
+            className="flex min-h-0 min-w-0 flex-1"
+          >
+            <ResizeHandle onDrag={handleMessageListDrag} />
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
               <MessageActionBar />
               {selectedMessageUid !== null ? (
@@ -293,9 +263,9 @@ export function ThreePanelLayout({
                 </div>
               )}
             </section>
-          )}
-        </>
-      )}
+          </AnimatedDiv>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

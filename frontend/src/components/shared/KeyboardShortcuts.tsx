@@ -2,8 +2,9 @@
 
 import { useMemo } from "react";
 import { Dialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { useUiStore } from "@/stores/useUiStore";
 
 const shortcuts = [
@@ -22,12 +23,8 @@ export function KeyboardShortcuts() {
   const open = useUiStore((s) => s.shortcutsOpen);
   const setOpen = useUiStore((s) => s.setShortcutsOpen);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
-  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -35,42 +32,24 @@ export function KeyboardShortcuts() {
         <AnimatePresence>
           {open ? (
             <>
-              <Dialog.Overlay asChild={shouldAnimate}>
-                {shouldAnimate ? (
-                  <motion.div
-                    data-testid="keyboard-shortcuts-overlay-transition"
-                    data-motion-props={serializedOverlayMotionProps}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    variants={overlayMotionProps}
-                    className="fixed inset-0 z-50 bg-black/40"
-                  />
-                ) : (
-                  <div className="fixed inset-0 z-50 bg-black/40" />
-                )}
+              <Dialog.Overlay asChild>
+                <AnimatedDiv
+                  data-testid="keyboard-shortcuts-overlay-transition"
+                  variants={overlayMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed inset-0 z-50 bg-black/40"
+                />
               </Dialog.Overlay>
-              <Dialog.Content
-                asChild={shouldAnimate}
-                className={
-                  shouldAnimate
-                    ? undefined
-                    : "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
-                }
-              >
-                <ContentContainer
-                  {...(shouldAnimate
-                    ? {
-                        "data-testid": "keyboard-shortcuts-content-transition",
-                        "data-motion-props": serializedContentMotionProps,
-                        initial: "initial",
-                        animate: "animate",
-                        exit: "exit",
-                        variants: contentMotionProps,
-                        className:
-                          "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl",
-                      }
-                    : {})}
+              <Dialog.Content asChild>
+                <AnimatedDiv
+                  data-testid="keyboard-shortcuts-content-transition"
+                  variants={contentMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
                 >
                   <Dialog.Title className="mb-4 text-lg font-semibold">
                     Keyboard Shortcuts
@@ -106,7 +85,7 @@ export function KeyboardShortcuts() {
                       Close
                     </button>
                   </Dialog.Close>
-                </ContentContainer>
+                </AnimatedDiv>
               </Dialog.Content>
             </>
           ) : null}

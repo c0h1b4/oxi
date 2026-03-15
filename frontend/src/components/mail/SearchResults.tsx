@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
@@ -132,37 +133,6 @@ function SearchResultRow({
   );
 }
 
-const listTransition = {
-  initial: { opacity: 0, y: 6 },
-  animate: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
-  },
-  exit: {
-    opacity: 0,
-    y: 3,
-    transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
-  },
-};
-
-const itemTransition = {
-  initial: { opacity: 0, x: 6 },
-  animate: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
-  },
-  exit: {
-    opacity: 0,
-    x: -3,
-    transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
-  },
-};
-
-const serializedListTransition = JSON.stringify(listTransition);
-const serializedItemTransition = JSON.stringify(itemTransition);
-
 export function SearchResults() {
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
@@ -171,11 +141,36 @@ export function SearchResults() {
   const selectMessage = useUiStore((s) => s.selectMessage);
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
-  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const searchSortOrder = useUiStore((s) => s.searchSortOrder);
   const setSearchSortOrder = useUiStore((s) => s.setSearchSortOrder);
   const setSearchResultCount = useUiStore((s) => s.setSearchResultCount);
-  const shouldAnimate = effectiveAnimationMode !== "off";
+  const listTransition = {
+    initial: { opacity: 0, y: 6 },
+    animate: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
+    },
+    exit: {
+      opacity: 0,
+      y: 3,
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
+    },
+  };
+
+  const itemTransition = {
+    initial: { opacity: 0, x: 6 },
+    animate: {
+      opacity: 1,
+      x: 0,
+      transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
+    },
+    exit: {
+      opacity: 0,
+      x: -3,
+      transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
+    },
+  };
 
   const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
   const hasValidCommittedSearch = isValidCommittedSearch(normalizedSearchQuery);
@@ -324,60 +319,42 @@ export function SearchResults() {
             </div>
           )}
 
-          {shouldAnimate ? (
-            <AnimatePresence initial={false}>
-              {results.length > 0 && (
-                <motion.div
-                  key="search-results-list"
-                  ref={scrollRef}
-                  data-testid="search-results-list-transition"
-                  data-motion-props={serializedListTransition}
-                  initial={listTransition.initial}
-                  animate={listTransition.animate}
-                  exit={listTransition.exit}
-                  className="min-h-0 flex-1 overflow-y-auto"
-                >
-                  <AnimatePresence initial={false}>
-                    {results.map((result) => (
-                      <motion.div
-                        key={`${result.folder}-${result.uid}`}
-                        data-testid="search-results-item-transition"
-                        data-motion-props={serializedItemTransition}
-                        initial={itemTransition.initial}
-                        animate={itemTransition.animate}
-                        exit={itemTransition.exit}
-                      >
-                        <SearchResultRow
-                          result={result}
-                          isSelected={
-                            activeFolder === result.folder &&
-                            selectedMessageUid === result.uid
-                          }
-                          onClick={() => handleResultClick(result)}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          ) : (
-            results.length > 0 && (
-              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-                {results.map((result) => (
-                  <SearchResultRow
-                    key={`${result.folder}-${result.uid}`}
-                    result={result}
-                    isSelected={
-                      activeFolder === result.folder &&
-                      selectedMessageUid === result.uid
-                    }
-                    onClick={() => handleResultClick(result)}
-                  />
-                ))}
-              </div>
-            )
-          )}
+          <AnimatePresence initial={false}>
+            {results.length > 0 && (
+              <AnimatedDiv
+                key="search-results-list"
+                ref={scrollRef}
+                data-testid="search-results-list-transition"
+                variants={listTransition}
+                initial={listTransition.initial}
+                animate={listTransition.animate}
+                exit={listTransition.exit}
+                className="min-h-0 flex-1 overflow-y-auto"
+              >
+                <AnimatePresence initial={false}>
+                  {results.map((result) => (
+                    <AnimatedDiv
+                      key={`${result.folder}-${result.uid}`}
+                      data-testid="search-results-item-transition"
+                      variants={itemTransition}
+                      initial={itemTransition.initial}
+                      animate={itemTransition.animate}
+                      exit={itemTransition.exit}
+                    >
+                      <SearchResultRow
+                        result={result}
+                        isSelected={
+                          activeFolder === result.folder &&
+                          selectedMessageUid === result.uid
+                        }
+                        onClick={() => handleResultClick(result)}
+                      />
+                    </AnimatedDiv>
+                  ))}
+                </AnimatePresence>
+              </AnimatedDiv>
+            )}
+          </AnimatePresence>
         </>
       )}
     </div>

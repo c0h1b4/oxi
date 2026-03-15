@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Dialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   Paperclip,
   X,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { useUiStore } from "@/stores/useUiStore";
 import { formatFileSize } from "./utils";
 import { IcsPreview } from "./IcsPreview";
@@ -42,12 +43,8 @@ export function AttachmentPreviewer({
   onClose,
 }: AttachmentPreviewerProps) {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
-  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
   const [index, setIndex] = useState(initialIndex);
   const att = attachments[index];
   const url = `${baseUrl}/${att.id}`;
@@ -72,41 +69,24 @@ export function AttachmentPreviewer({
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
         <AnimatePresence>
-          <Dialog.Overlay asChild={shouldAnimate}>
-            {shouldAnimate ? (
-              <motion.div
-                data-testid="reading-pane-attachment-overlay-transition"
-                data-motion-props={serializedOverlayMotionProps}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                variants={overlayMotionProps}
-                className="fixed inset-0 z-50 bg-black/70"
-              />
-            ) : (
-              <div className="fixed inset-0 z-50 bg-black/70" />
-            )}
+          <Dialog.Overlay asChild>
+            <AnimatedDiv
+              data-testid="reading-pane-attachment-overlay-transition"
+              variants={overlayMotionProps}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="fixed inset-0 z-50 bg-black/70"
+            />
           </Dialog.Overlay>
-          <Dialog.Content
-            asChild={shouldAnimate}
-            className={
-              shouldAnimate
-                ? undefined
-                : "fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl"
-            }
-          >
-            <ContentContainer
-              {...(shouldAnimate
-                ? {
-                    "data-testid": "reading-pane-attachment-content-transition",
-                    "data-motion-props": serializedContentMotionProps,
-                    initial: "initial",
-                    animate: "animate",
-                    exit: "exit",
-                    variants: contentMotionProps,
-                    className: "fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
-                  }
-                : {})}
+          <Dialog.Content asChild>
+            <AnimatedDiv
+              data-testid="reading-pane-attachment-content-transition"
+              variants={contentMotionProps}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl"
             >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -234,7 +214,7 @@ export function AttachmentPreviewer({
               </div>
             )}
           </div>
-            </ContentContainer>
+            </AnimatedDiv>
           </Dialog.Content>
         </AnimatePresence>
       </Dialog.Portal>

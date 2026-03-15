@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   Search,
   UserPlus,
@@ -32,6 +32,7 @@ import { ContactDialog } from "@/components/contacts/ContactDialog";
 import { GroupDialog } from "@/components/contacts/GroupDialog";
 import { useUiStore } from "@/stores/useUiStore";
 import { createFadeSlideVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import type { Contact } from "@/types/contact";
 
 export function ContactsPanel() {
@@ -46,10 +47,7 @@ export function ContactsPanel() {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const panelTransition = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
-  const serializedPanelTransition = useMemo(() => JSON.stringify(panelTransition), [panelTransition]);
-  const PanelContainer = shouldAnimate ? motion.div : "div";
 
   const { data, isLoading, error } = useContacts(search || undefined);
   const createContact = useCreateContact();
@@ -152,16 +150,12 @@ export function ContactsPanel() {
   }, []);
 
   return (
-    <PanelContainer
-      {...(shouldAnimate
-        ? {
-            "data-testid": "contacts-panel-transition",
-            "data-motion-props": serializedPanelTransition,
-            initial: panelTransition.initial,
-            animate: panelTransition.animate,
-            exit: panelTransition.exit,
-          }
-        : {})}
+    <AnimatedDiv
+      data-testid="contacts-panel-transition"
+      variants={panelTransition}
+      initial={panelTransition.initial}
+      animate={panelTransition.animate}
+      exit={panelTransition.exit}
       className="flex h-full min-w-0 flex-1"
     >
       {/* Contact list */}
@@ -382,61 +376,42 @@ export function ContactsPanel() {
 
       {/* Detail pane */}
       <div className="flex min-w-0 flex-1 items-center justify-center">
-        {shouldAnimate ? (
-          <AnimatePresence mode="wait" initial={false}>
-            {selectedContact ? (
-              <motion.div
-                key={`contact-detail-${selectedContact.id}`}
-                data-testid="contacts-detail-transition"
-                data-motion-props={serializedPanelTransition}
-                initial={panelTransition.initial}
-                animate={panelTransition.animate}
-                exit={panelTransition.exit}
-                className="w-full max-w-lg p-6"
-              >
-                <ContactCard
-                  contact={selectedContact}
-                  onDelete={handleDelete}
-                  isDeleting={deleteContact.isPending}
-                  groups={groups}
-                  activeGroupId={activeGroupId}
-                />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="contacts-detail-empty"
-                data-testid="contacts-empty-transition"
-                data-motion-props={serializedPanelTransition}
-                initial={panelTransition.initial}
-                animate={panelTransition.animate}
-                exit={panelTransition.exit}
-                className="flex flex-col items-center gap-2"
-              >
-                <Users className="size-12 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">
-                  Select a contact to view details
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        ) : selectedContact ? (
-          <div className="w-full max-w-lg p-6">
-            <ContactCard
-              contact={selectedContact}
-              onDelete={handleDelete}
-              isDeleting={deleteContact.isPending}
-              groups={groups}
-              activeGroupId={activeGroupId}
-            />
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-2">
-            <Users className="size-12 text-muted-foreground/30" />
-            <p className="text-sm text-muted-foreground">
-              Select a contact to view details
-            </p>
-          </div>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {selectedContact ? (
+            <AnimatedDiv
+              key={`contact-detail-${selectedContact.id}`}
+              data-testid="contacts-detail-transition"
+              variants={panelTransition}
+              initial={panelTransition.initial}
+              animate={panelTransition.animate}
+              exit={panelTransition.exit}
+              className="w-full max-w-lg p-6"
+            >
+              <ContactCard
+                contact={selectedContact}
+                onDelete={handleDelete}
+                isDeleting={deleteContact.isPending}
+                groups={groups}
+                activeGroupId={activeGroupId}
+              />
+            </AnimatedDiv>
+          ) : (
+            <AnimatedDiv
+              key="contacts-detail-empty"
+              data-testid="contacts-empty-transition"
+              variants={panelTransition}
+              initial={panelTransition.initial}
+              animate={panelTransition.animate}
+              exit={panelTransition.exit}
+              className="flex flex-col items-center gap-2"
+            >
+              <Users className="size-12 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">
+                Select a contact to view details
+              </p>
+            </AnimatedDiv>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Create contact dialog */}
@@ -465,6 +440,6 @@ export function ContactsPanel() {
         initialName={editingGroup?.name ?? ""}
         title="Rename Group"
       />
-    </PanelContainer>
+    </AnimatedDiv>
   );
 }

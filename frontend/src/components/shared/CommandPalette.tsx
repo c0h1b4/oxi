@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Command } from "cmdk";
 import { Dialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   PenSquare,
   Inbox,
@@ -22,6 +22,7 @@ import { useComposeStore } from "@/stores/useComposeStore";
 import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 function useResolvedTheme() {
   const theme = useUiStore((s) => s.theme);
@@ -39,12 +40,8 @@ export function CommandPalette() {
   const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
   const setTheme = useUiStore((s) => s.setTheme);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedOverlayMotionProps = useMemo(() => JSON.stringify(overlayMotionProps), [overlayMotionProps]);
-  const serializedContentMotionProps = useMemo(() => JSON.stringify(contentMotionProps), [contentMotionProps]);
-  const PaletteContainer = shouldAnimate ? motion.div : "div";
   const updatePrefs = useUpdateDisplayPreferences();
   const resolvedTheme = useResolvedTheme();
 
@@ -71,43 +68,25 @@ export function CommandPalette() {
         <AnimatePresence>
           {open ? (
             <>
-              <Dialog.Overlay asChild={shouldAnimate}>
-                {shouldAnimate ? (
-                  <motion.div
-                    key="command-palette-overlay"
-                    data-testid="command-palette-overlay-transition"
-                    data-motion-props={serializedOverlayMotionProps}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    variants={overlayMotionProps}
-                    className="fixed inset-0 z-50 bg-black/40"
-                  />
-                ) : (
-                  <div className="fixed inset-0 z-50 bg-black/40" />
-                )}
+              <Dialog.Overlay asChild>
+                <AnimatedDiv
+                  key="command-palette-overlay"
+                  data-testid="command-palette-overlay-transition"
+                  variants={overlayMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed inset-0 z-50 bg-black/40"
+                />
               </Dialog.Overlay>
-              <Dialog.Content
-                asChild={shouldAnimate}
-                className={
-                  shouldAnimate
-                    ? undefined
-                    : "fixed left-1/2 top-[20%] z-50 w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-                }
-              >
-                <PaletteContainer
-                  {...(shouldAnimate
-                    ? {
-                        "data-testid": "command-palette-content-transition",
-                        "data-motion-props": serializedContentMotionProps,
-                        initial: "initial",
-                        animate: "animate",
-                        exit: "exit",
-                        variants: contentMotionProps,
-                        className:
-                          "fixed left-1/2 top-[20%] z-50 w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-background shadow-2xl",
-                      }
-                    : {})}
+              <Dialog.Content asChild>
+                <AnimatedDiv
+                  data-testid="command-palette-content-transition"
+                  variants={contentMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed left-1/2 top-[20%] z-50 w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
                 >
                   <Command className="flex flex-col" label="Command palette">
             <div className="flex items-center border-b border-border px-3">
@@ -221,7 +200,7 @@ export function CommandPalette() {
               </Command.Group>
             </Command.List>
                   </Command>
-                </PaletteContainer>
+                </AnimatedDiv>
               </Dialog.Content>
             </>
           ) : null}

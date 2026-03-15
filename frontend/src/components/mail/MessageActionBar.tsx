@@ -40,6 +40,7 @@ import type { EmailAddress } from "@/types/message";
 import { useIdentities } from "@/hooks/useIdentities";
 import type { Identity } from "@/types/identity";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 /** Find the identity whose email matches one of the To/CC addresses. */
 function findMatchingIdentity(
@@ -78,9 +79,7 @@ export function MessageActionBar() {
   const shouldAnimate = effectiveAnimationMode !== "off";
   const barMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const feedbackMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
-  const serializedBarMotionProps = useMemo(() => JSON.stringify(barMotionProps), [barMotionProps]);
   const serializedFeedbackMotionProps = useMemo(() => JSON.stringify(feedbackMotionProps), [feedbackMotionProps]);
-  const ActionContainer = shouldAnimate ? motion.div : "div";
   const [actionFeedback, setActionFeedback] = useState<"delete" | "archive" | "move" | null>(null);
 
   const isSeen = data?.flags.includes("\\Seen") ?? false;
@@ -213,17 +212,12 @@ export function MessageActionBar() {
   };
 
   return (
-    <ActionContainer
-      {...(shouldAnimate
-        ? {
-            "data-testid": "message-action-bar-transition",
-            "data-motion-props": serializedBarMotionProps,
-            initial: "initial",
-            animate: "animate",
-            exit: "exit",
-            variants: barMotionProps,
-          }
-        : {})}
+    <AnimatedDiv
+      data-testid="message-action-bar-transition"
+      variants={barMotionProps}
+      initial="initial"
+      animate="animate"
+      exit="exit"
       className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1"
     >
       {/* Reply */}
@@ -417,6 +411,6 @@ export function MessageActionBar() {
       {data && (
         <TagPicker folder={activeFolder} uid={data.uid} />
       )}
-    </ActionContainer>
+    </AnimatedDiv>
   );
 }
