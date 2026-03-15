@@ -375,14 +375,13 @@ fn parse_vcards(data: &str) -> Vec<ParsedVCard> {
             .replace("\\\\", "\\");
 
         match field_name.as_str() {
-            "FN" => {
-                if name.is_empty() {
+            "FN"
+                if name.is_empty() => {
                     name = value;
                 }
-            }
-            "N" => {
+            "N"
                 // N:Last;First;Middle;Prefix;Suffix — use FN if available, else reconstruct
-                if name.is_empty() {
+                if name.is_empty() => {
                     let parts: Vec<&str> = value.splitn(5, ';').collect();
                     let last = parts.first().unwrap_or(&"").trim();
                     let first = parts.get(1).unwrap_or(&"").trim();
@@ -391,22 +390,18 @@ fn parse_vcards(data: &str) -> Vec<ParsedVCard> {
                         name = combined;
                     }
                 }
-            }
-            "EMAIL" => {
-                if email.is_empty() {
+            "EMAIL"
+                if email.is_empty() => {
                     email = value;
                 }
-            }
-            "ORG" => {
-                if company.is_empty() {
+            "ORG"
+                if company.is_empty() => {
                     company = value;
                 }
-            }
-            "NOTE" => {
-                if notes.is_empty() {
+            "NOTE"
+                if notes.is_empty() => {
                     notes = value;
                 }
-            }
             _ => {}
         }
     }

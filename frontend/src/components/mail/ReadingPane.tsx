@@ -9,6 +9,9 @@ import {
   Type,
   FileCode,
   ShieldAlert,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
@@ -36,6 +39,7 @@ export function ReadingPane() {
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
   const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
+  const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
     new Set()
   );
@@ -63,6 +67,17 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["folders"] });
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
+
+  // Auto-switch to plain text mode for plaintext-only emails
+  useEffect(() => {
+    if (data && !data.html && data.text) {
+      setBodyMode("plain");
+    } else {
+      setBodyMode("html");
+    }
+    setEmailTheme("auto");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.uid]);
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
@@ -169,6 +184,7 @@ export function ReadingPane() {
         <div className="flex gap-1 pt-1">
           {/* Details / Summary toggle */}
           <button
+            type="button"
             onClick={() =>
               setHeaderMode(headerMode === "details" ? "summary" : "details")
             }
@@ -184,6 +200,7 @@ export function ReadingPane() {
 
           {/* Plain text / HTML toggle */}
           <button
+            type="button"
             onClick={() => {
               setBodyMode(bodyMode === "html" ? "plain" : "html");
               setShowHeaders(false);
@@ -200,6 +217,7 @@ export function ReadingPane() {
 
           {/* Headers toggle (shows as selected when active) */}
           <button
+            type="button"
             onClick={() => setShowHeaders(!showHeaders)}
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
               showHeaders
@@ -210,6 +228,26 @@ export function ReadingPane() {
             <FileCode className="size-3" />
             Headers
           </button>
+
+          {/* Email Theme toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              if (emailTheme === "auto") setEmailTheme("light");
+              else if (emailTheme === "light") setEmailTheme("dark");
+              else setEmailTheme("auto");
+            }}
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
+              emailTheme !== "auto"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {emailTheme === "auto" && <Monitor className="size-3" />}
+            {emailTheme === "light" && <Sun className="size-3" />}
+            {emailTheme === "dark" && <Moon className="size-3" />}
+            {emailTheme === "auto" ? "Auto theme" : emailTheme === "light" ? "Light mode" : "Dark mode"}
+          </button>
         </div>
       </div>
 
@@ -219,6 +257,7 @@ export function ReadingPane() {
           {data.attachments.map((att, i) => (
             <button
               key={att.id}
+              type="button"
               onClick={() => setPreviewIndex(i)}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
             >
@@ -275,7 +314,7 @@ export function ReadingPane() {
       )}
 
       {/* Body area — fills remaining space */}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1" key={data.uid}>
         {showHeaders ? (
           <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-foreground">
             {data.raw_headers || "No headers available"}
@@ -289,6 +328,7 @@ export function ReadingPane() {
             html={data.html}
             text={data.text}
             blockRemoteResources={!remoteAllowed}
+            theme={emailTheme}
           />
         )}
       </div>

@@ -130,8 +130,8 @@ export function TagSection() {
 
           {/* Inline create form */}
           {isCreating && (
-            <div className="flex flex-col gap-1.5 px-3 py-1.5">
-              <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-1.5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <input
                   ref={inputRef}
                   type="text"
@@ -145,7 +145,7 @@ export function TagSection() {
                     }
                   }}
                   placeholder="Tag name"
-                  className="flex-1 rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-1 focus:ring-ring/50"
+                  className="min-w-0 flex-1 truncate rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-1 focus:ring-ring/50"
                   autoComplete="off"
                   spellCheck={false}
                 />

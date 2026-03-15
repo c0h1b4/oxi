@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::Path;
@@ -34,24 +33,6 @@ fn build_creds(session: &SessionState, config: &AppConfig) -> Result<ImapCredent
         email: session.email.clone(),
         password: session.password.clone(),
     })
-}
-
-/// Sanitize HTML email content with ammonia.
-fn sanitize_html(html: &str) -> String {
-    ammonia::Builder::default()
-        .add_tags(&[
-            "img", "a", "p", "br", "div", "span", "table", "tr", "td", "th",
-            "thead", "tbody", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6",
-            "b", "i", "u", "strong", "em", "blockquote", "pre", "code", "hr",
-        ])
-        .add_tag_attributes("a", &["href", "title"])
-        .add_tag_attributes("img", &["src", "alt", "width", "height"])
-        .add_tag_attributes("div", &["style"])
-        .add_tag_attributes("span", &["style"])
-        .add_tag_attributes("table", &["style", "width"])
-        .url_schemes(HashSet::from(["https", "http", "cid"]))
-        .clean(html)
-        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -495,8 +476,8 @@ pub async fn get_message(
                 }
             })?;
 
-        // Sanitize HTML.
-        let sanitized_html = body.text_html.as_deref().map(sanitize_html);
+        // Use HTML directly (frontend sandbox handles security).
+        let sanitized_html = body.text_html.clone();
 
         let attachment_meta: Vec<AttachmentMeta> = body
             .attachments
