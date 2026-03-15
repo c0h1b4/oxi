@@ -220,7 +220,7 @@ export function SearchResults() {
 
       {/* Empty state */}
       {!isLoading && !isError && results.length === 0 && (
-        <div className="flex flex-1 items-center justify-center px-4 text-center">
+        <div className="flex flex-1 items-center justify-center px-4 pt-4 text-center">
           <p className="text-sm text-muted-foreground">No results found</p>
         </div>
       )}
