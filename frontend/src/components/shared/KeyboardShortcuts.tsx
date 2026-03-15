@@ -1,6 +1,8 @@
 "use client";
 
 import { Dialog } from "radix-ui";
+import { AnimatePresence, motion } from "framer-motion";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 import { useUiStore } from "@/stores/useUiStore";
 
 const shortcuts = [
@@ -18,44 +20,94 @@ const shortcuts = [
 export function KeyboardShortcuts() {
   const open = useUiStore((s) => s.shortcutsOpen);
   const setOpen = useUiStore((s) => s.setShortcutsOpen);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl">
-          <Dialog.Title className="mb-4 text-lg font-semibold">
-            Keyboard Shortcuts
-          </Dialog.Title>
-          <div className="space-y-2">
-            {shortcuts.map((s) => (
-              <div
-                key={s.description}
-                className="flex items-center justify-between py-1.5"
+        <AnimatePresence>
+          {open ? (
+            <>
+              <Dialog.Overlay asChild={shouldAnimate}>
+                {shouldAnimate ? (
+                  <motion.div
+                    data-testid="keyboard-shortcuts-overlay-transition"
+                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    variants={overlayMotionProps}
+                    className="fixed inset-0 z-50 bg-black/40"
+                  />
+                ) : (
+                  <div className="fixed inset-0 z-50 bg-black/40" />
+                )}
+              </Dialog.Overlay>
+              <Dialog.Content
+                asChild={shouldAnimate}
+                className={
+                  shouldAnimate
+                    ? undefined
+                    : "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
+                }
               >
-                <span className="text-sm text-foreground">{s.description}</span>
-                <div className="flex items-center gap-1">
-                  {s.keys.map((key, i) => (
-                    <span key={i}>
-                      {key === "/" ? (
-                        <span className="px-1 text-xs text-muted-foreground">/</span>
-                      ) : (
-                        <kbd className="inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                          {key}
-                        </kbd>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          <Dialog.Close asChild>
-            <button className="mt-4 w-full rounded-lg bg-accent py-2 text-sm text-accent-foreground hover:bg-accent/80">
-              Close
-            </button>
-          </Dialog.Close>
-        </Dialog.Content>
+                <ContentContainer
+                  {...(shouldAnimate
+                    ? {
+                        "data-testid": "keyboard-shortcuts-content-transition",
+                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        initial: "initial",
+                        animate: "animate",
+                        exit: "exit",
+                        variants: contentMotionProps,
+                        className:
+                          "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl",
+                      }
+                    : {})}
+                >
+                  <Dialog.Title className="mb-4 text-lg font-semibold">
+                    Keyboard Shortcuts
+                  </Dialog.Title>
+                  <Dialog.Description className="sr-only">
+                    Available keyboard shortcuts for navigating and acting on mail.
+                  </Dialog.Description>
+                  <div className="space-y-2">
+                    {shortcuts.map((s) => (
+                      <div
+                        key={s.description}
+                        className="flex items-center justify-between py-1.5"
+                      >
+                        <span className="text-sm text-foreground">{s.description}</span>
+                        <div className="flex items-center gap-1">
+                          {s.keys.map((key, i) => (
+                            <span key={i}>
+                              {key === "/" ? (
+                                <span className="px-1 text-xs text-muted-foreground">/</span>
+                              ) : (
+                                <kbd className="inline-flex min-w-[24px] items-center justify-center rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                                  {key}
+                                </kbd>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Dialog.Close asChild>
+                    <button className="mt-4 w-full rounded-lg bg-accent py-2 text-sm text-accent-foreground hover:bg-accent/80">
+                      Close
+                    </button>
+                  </Dialog.Close>
+                </ContentContainer>
+              </Dialog.Content>
+            </>
+          ) : null}
+        </AnimatePresence>
       </Dialog.Portal>
     </Dialog.Root>
   );

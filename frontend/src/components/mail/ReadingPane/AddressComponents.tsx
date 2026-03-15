@@ -2,9 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { Popover, Dialog } from "radix-ui";
+import { AnimatePresence, motion } from "framer-motion";
 import { Send, Copy, Check, UserPlus, X, Search } from "lucide-react";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useCreateContact } from "@/hooks/useContacts";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { useUiStore } from "@/stores/useUiStore";
 import type { EmailAddress } from "@/types/message";
 
 export function AddressChip({
@@ -237,6 +240,11 @@ function RecipientModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
   const [filter, setFilter] = useState("");
 
   const handleEscapeKeyDown = useCallback(
@@ -264,79 +272,119 @@ function RecipientModal({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
-        <Dialog.Content
-          onEscapeKeyDown={handleEscapeKeyDown}
-          className="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
-        >
-          <div className="flex flex-col space-y-1.5 text-center sm:text-left">
-            <Dialog.Title className="text-lg font-semibold leading-none tracking-tight">
-              {addresses.length} Recipients
-            </Dialog.Title>
-            <Dialog.Description className="text-sm text-muted-foreground">
-              All recipients for this email.
-            </Dialog.Description>
-          </div>
-
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Find recipient..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            />
-            {filter && (
-              <button
-                type="button"
-                onClick={() => setFilter("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground"
+        <AnimatePresence>
+          {open ? (
+            <>
+              <Dialog.Overlay asChild={shouldAnimate}>
+                {shouldAnimate ? (
+                  <motion.div
+                    data-testid="recipient-modal-overlay-transition"
+                    data-motion-props={JSON.stringify(overlayMotionProps)}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    variants={overlayMotionProps}
+                    className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+                  />
+                ) : (
+                  <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+                )}
+              </Dialog.Overlay>
+              <Dialog.Content
+                asChild={shouldAnimate}
+                onEscapeKeyDown={handleEscapeKeyDown}
+                className={
+                  shouldAnimate
+                    ? undefined
+                    : "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
+                }
               >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          <div className="max-h-[50vh] overflow-y-auto pr-2 flex flex-col gap-2">
-            {filteredAddresses.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No recipients match your search.
-              </p>
-            ) : (
-              filteredAddresses.map((a, i) => (
-                <div
-                  key={`${a.address}-${i}`}
-                  className="flex flex-col text-sm border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                <ContentContainer
+                  {...(shouldAnimate
+                    ? {
+                        "data-testid": "recipient-modal-content-transition",
+                        "data-motion-props": JSON.stringify(contentMotionProps),
+                        initial: "initial",
+                        animate: "animate",
+                        exit: "exit",
+                        variants: contentMotionProps,
+                        className:
+                          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg",
+                      }
+                    : {})}
                 >
-                  <div className="font-medium text-foreground">
-                    <HighlightedRecipient
-                      address={a.address}
-                      name={a.name}
-                      query={filter}
-                    />
+                  <div className="flex flex-col space-y-1.5 text-center sm:text-left">
+                    <Dialog.Title className="text-lg font-semibold leading-none tracking-tight">
+                      {addresses.length} Recipients
+                    </Dialog.Title>
+                    <Dialog.Description className="text-sm text-muted-foreground">
+                      All recipients for this email.
+                    </Dialog.Description>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
 
-          {filter && (
-            <p className="text-xs text-muted-foreground text-center">
-              Showing {filteredAddresses.length} of {addresses.length} recipients
-            </p>
-          )}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Find recipient..."
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                      className="w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    />
+                    {filter && (
+                      <button
+                        type="button"
+                        onClick={() => setFilter("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
 
-          <Dialog.Close asChild>
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
-            >
-              <X className="h-4 w-4" />
-              <span className="sr-only">Close</span>
-            </button>
-          </Dialog.Close>
-        </Dialog.Content>
+                  <div className="max-h-[50vh] overflow-y-auto pr-2 flex flex-col gap-2">
+                    {filteredAddresses.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No recipients match your search.
+                      </p>
+                    ) : (
+                      filteredAddresses.map((a, i) => (
+                        <div
+                          key={`${a.address}-${i}`}
+                          className="flex flex-col text-sm border-b border-border/40 pb-2 last:border-0 last:pb-0"
+                        >
+                          <div className="font-medium text-foreground">
+                            <HighlightedRecipient
+                              address={a.address}
+                              name={a.name}
+                              query={filter}
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {filter && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      Showing {filteredAddresses.length} of {addresses.length} recipients
+                    </p>
+                  )}
+
+                  <Dialog.Close asChild>
+                    <button
+                      type="button"
+                      className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
+                    >
+                      <X className="h-4 w-4" />
+                      <span className="sr-only">Close</span>
+                    </button>
+                  </Dialog.Close>
+                </ContentContainer>
+              </Dialog.Content>
+            </>
+          ) : null}
+        </AnimatePresence>
       </Dialog.Portal>
     </Dialog.Root>
   );

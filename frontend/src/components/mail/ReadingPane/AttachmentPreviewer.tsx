@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Dialog } from "radix-ui";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Paperclip,
   X,
@@ -13,6 +14,8 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { useUiStore } from "@/stores/useUiStore";
 import { formatFileSize } from "./utils";
 import { IcsPreview } from "./IcsPreview";
 import type { Attachment } from "@/types/message";
@@ -38,14 +41,19 @@ export function AttachmentPreviewer({
   initialIndex,
   onClose,
 }: AttachmentPreviewerProps) {
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
   const [index, setIndex] = useState(initialIndex);
   const att = attachments[index];
   const url = `${baseUrl}/${att.id}`;
 
-  const goPrev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
+  const goPrev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), [setIndex]);
   const goNext = useCallback(
     () => setIndex((i) => Math.min(attachments.length - 1, i + 1)),
-    [attachments.length],
+    [attachments.length, setIndex],
   );
 
   useEffect(() => {
@@ -61,8 +69,43 @@ export function AttachmentPreviewer({
   return (
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Content className="fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl">
+        <AnimatePresence>
+          <Dialog.Overlay asChild={shouldAnimate}>
+            {shouldAnimate ? (
+              <motion.div
+                data-testid="reading-pane-attachment-overlay-transition"
+                data-motion-props={JSON.stringify(overlayMotionProps)}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                variants={overlayMotionProps}
+                className="fixed inset-0 z-50 bg-black/70"
+              />
+            ) : (
+              <div className="fixed inset-0 z-50 bg-black/70" />
+            )}
+          </Dialog.Overlay>
+          <Dialog.Content
+            asChild={shouldAnimate}
+            className={
+              shouldAnimate
+                ? undefined
+                : "fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl"
+            }
+          >
+            <ContentContainer
+              {...(shouldAnimate
+                ? {
+                    "data-testid": "reading-pane-attachment-content-transition",
+                    "data-motion-props": JSON.stringify(contentMotionProps),
+                    initial: "initial",
+                    animate: "animate",
+                    exit: "exit",
+                    variants: contentMotionProps,
+                    className: "fixed inset-4 z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+                  }
+                : {})}
+            >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <Dialog.Title className="flex items-center gap-2 text-sm font-semibold">
@@ -189,7 +232,9 @@ export function AttachmentPreviewer({
               </div>
             )}
           </div>
-        </Dialog.Content>
+            </ContentContainer>
+          </Dialog.Content>
+        </AnimatePresence>
       </Dialog.Portal>
     </Dialog.Root>
   );
