@@ -477,6 +477,45 @@ export function EmailRenderer({
             <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
           </div>
         )}
+        {/*
+         * SECURITY: iframe sandbox attribute rationale
+         *
+         * allow-same-origin — Required so the parent can access iframe.contentDocument
+         *   to measure content height (ResizeObserver, scrollHeight), attach image
+         *   load listeners, and dynamically resize the iframe. Without it, the
+         *   browser blocks all cross-document DOM access and the auto-height logic
+         *   in handleIframeLoad breaks entirely.
+         *
+         * allow-popups / allow-popups-to-escape-sandbox — Lets mailto: and http(s)
+         *   links open in new tabs/windows as users expect.
+         *
+         * RISK: allow-same-origin combined with allow-scripts would let embedded
+         *   content access the parent page's cookies, localStorage, and DOM — a
+         *   full same-origin escalation. This is safe ONLY because allow-scripts
+         *   is deliberately omitted: the sandbox blocks all script execution
+         *   (<script> tags, inline handlers, javascript: URLs, etc.), so even if
+         *   email HTML contains malicious JS it cannot run.
+         *
+         * If a future browser bug or spec change weakens the script-blocking
+         *   guarantee, this would become exploitable. Mitigations considered:
+         *
+         *   - Removing allow-same-origin and using postMessage for height: would
+         *     require injecting a <script> into srcdoc (reintroducing allow-scripts),
+         *     which is strictly worse — it trades a theoretical risk for a concrete one.
+         *
+         *   - Serving email HTML from a separate origin (e.g., blob: URL on a
+         *     different subdomain): adds deployment complexity and CORS overhead
+         *     for marginal benefit given the current sandbox guarantees.
+         *
+         *   - Using shadow DOM instead of an iframe: does not provide the same
+         *     style/script isolation as the sandbox attribute.
+         *
+         * Conclusion: the current sandbox="allow-popups allow-popups-to-escape-sandbox
+         *   allow-same-origin" (without allow-scripts) is the best tradeoff. It
+         *   provides full script isolation while preserving the DOM access needed
+         *   for responsive iframe sizing. Re-evaluate if the HTML Sandbox spec
+         *   changes or if we move to a separate-origin rendering service.
+         */}
         <iframe
           key={iframeKey}
           ref={iframeRef}
