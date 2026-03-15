@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 import { Popover, Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
 import { Send, Copy, Check, UserPlus, X, Search } from "lucide-react";
@@ -10,14 +10,15 @@ import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/v
 import { useUiStore } from "@/stores/useUiStore";
 import type { EmailAddress } from "@/types/message";
 
-export function AddressChip({
+function AddressPopover({
   address,
   name,
+  children,
 }: {
   address: string;
   name?: string | null;
+  children: ReactNode;
 }) {
-  const displayName = name || address;
   const createContact = useCreateContact();
   const [contactAdded, setContactAdded] = useState(false);
 
@@ -27,11 +28,7 @@ export function AddressChip({
         if (!open) setContactAdded(false);
       }}
     >
-      <Popover.Trigger asChild>
-        <button type="button" className="inline rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground">
-          {displayName}
-        </button>
-      </Popover.Trigger>
+      <Popover.Trigger asChild>{children}</Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
           className="z-50 w-56 rounded-lg border border-border bg-background p-1 shadow-lg"
@@ -95,6 +92,24 @@ export function AddressChip({
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+export function AddressChip({
+  address,
+  name,
+}: {
+  address: string;
+  name?: string | null;
+}) {
+  const displayName = name || address;
+
+  return (
+    <AddressPopover address={address} name={name}>
+      <button type="button" className="inline rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground">
+        {displayName}
+      </button>
+    </AddressPopover>
   );
 }
 
@@ -137,97 +152,26 @@ function HighlightedRecipient({
   name?: string | null;
   query: string;
 }) {
-  const createContact = useCreateContact();
-  const [contactAdded, setContactAdded] = useState(false);
-
   return (
-    <Popover.Root
-      onOpenChange={(open) => {
-        if (!open) setContactAdded(false);
-      }}
-    >
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="inline rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground text-left"
-        >
-          {name ? (
-            <span>
-              <HighlightedText text={name} query={query} />
-              {" <"}
-              <span className="text-muted-foreground">
-                <HighlightedText text={address} query={query} />
-              </span>
-              {">"}
+    <AddressPopover address={address} name={name}>
+      <button
+        type="button"
+        className="inline rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground text-left"
+      >
+        {name ? (
+          <span>
+            <HighlightedText text={name} query={query} />
+            {" <"}
+            <span className="text-muted-foreground">
+              <HighlightedText text={address} query={query} />
             </span>
-          ) : (
-            <HighlightedText text={address} query={query} />
-          )}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className="z-50 w-56 rounded-lg border border-border bg-background p-1 shadow-lg"
-          sideOffset={4}
-          align="start"
-        >
-          <div className="border-b border-border px-3 py-2">
-            {name && (
-              <p className="text-sm font-medium truncate">{name}</p>
-            )}
-            <p className="text-xs text-muted-foreground truncate">
-              {address}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              useComposeStore.getState().openCompose();
-              useComposeStore.setState({ to: address });
-            }}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
-          >
-            <Send className="size-3.5 text-muted-foreground" />
-            Compose email to
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              navigator.clipboard.writeText(
-                name ? `${name} <${address}>` : address,
-              );
-            }}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent"
-          >
-            <Copy className="size-3.5 text-muted-foreground" />
-            Copy address
-          </button>
-          <button
-            type="button"
-            disabled={contactAdded || createContact.isPending}
-            onClick={() => {
-              createContact.mutate(
-                { email: address, name: name ?? "" },
-                { onSuccess: () => setContactAdded(true) },
-              );
-            }}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
-          >
-            {contactAdded ? (
-              <>
-                <Check className="size-3.5 text-green-500" />
-                Contact added
-              </>
-            ) : (
-              <>
-                <UserPlus className="size-3.5 text-muted-foreground" />
-                Add to contacts
-              </>
-            )}
-          </button>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+            {">"}
+          </span>
+        ) : (
+          <HighlightedText text={address} query={query} />
+        )}
+      </button>
+    </AddressPopover>
   );
 }
 
