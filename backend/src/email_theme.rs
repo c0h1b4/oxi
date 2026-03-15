@@ -51,6 +51,18 @@ static TD_TAG_RE: LazyLock<Regex> =
 static DIV_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<div\b[^>]*>"#).unwrap());
 
+/// Compiled word-boundary regexes for each named CSS color, ensuring exact
+/// matching so that e.g. "white" does not match inside "whitesmoke".
+static NAMED_COLOR_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    NAMED_COLORS
+        .iter()
+        .map(|(name, _)| {
+            let pattern = format!(r#"(?i)\b{name}\b"#);
+            (*name, Regex::new(&pattern).unwrap())
+        })
+        .collect()
+});
+
 /// Named CSS colors mapped to RGB values.
 type NamedColorList = Vec<(&'static str, (u8, u8, u8))>;
 static NAMED_COLORS: LazyLock<NamedColorList> = LazyLock::new(|| {
@@ -390,9 +402,10 @@ fn extract_all_colors_from_css(css: &str, weight: f32, colors: &mut Vec<Backgrou
             }
         }
 
-        // Check for named colors
-        for (name, _rgb) in NAMED_COLORS.iter() {
-            if bg_value.contains(name) {
+        // Check for named colors using word-boundary matching to avoid
+        // false positives (e.g. "white" matching inside "whitesmoke").
+        for (name, re) in NAMED_COLOR_REGEXES.iter() {
+            if re.is_match(bg_value) {
                 colors.push(BackgroundColor {
                     color: name.to_string(),
                     element_weight: weight,
@@ -459,9 +472,10 @@ fn extract_colors_from_style(tag_content: &str) -> Vec<String> {
                 ));
             }
 
-            // Check for named colors
-            for (name, _rgb) in NAMED_COLORS.iter() {
-                if bg_value.contains(name) {
+            // Check for named colors using word-boundary matching to avoid
+            // false positives (e.g. "white" matching inside "whitesmoke").
+            for (name, re) in NAMED_COLOR_REGEXES.iter() {
+                if re.is_match(bg_value) {
                     colors.push(name.to_string());
                     break;
                 }
@@ -674,5 +688,71 @@ mod tests {
     fn test_detect_dark_with_style_tag() {
         let html = r#"<html><head><style>body { background-color: #101519; }</style></head><body>Dark</body></html>"#;
         assert_eq!(detect_email_theme(html), Some(EmailTheme::Dark));
+    }
+
+    #[test]
+    fn test_white_does_not_match_whitesmoke() {
+        // "whitesmoke" is a distinct named color (very light gray, RGB 245,245,245).
+        // It must NOT be misidentified as "white".
+        let html = r#"<html><body style="background-color: whitesmoke">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "whitesmoke");
+    }
+
+    #[test]
+    fn test_white_does_not_match_ghostwhite() {
+        let html = r#"<html><body style="background-color: ghostwhite">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "ghostwhite");
+    }
+
+    #[test]
+    fn test_white_does_not_match_floralwhite() {
+        let html = r#"<html><body style="background-color: floralwhite">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "floralwhite");
+    }
+
+    #[test]
+    fn test_gray_does_not_match_darkgray() {
+        let html = r#"<html><body style="background-color: darkgray">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "darkgray");
+    }
+
+    #[test]
+    fn test_gray_does_not_match_lightgray() {
+        let html = r#"<html><body style="background-color: lightgray">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "lightgray");
+    }
+
+    #[test]
+    fn test_exact_white_still_matches() {
+        let html = r#"<html><body style="background-color: white">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(colors[0].color, "white");
+    }
+
+    #[test]
+    fn test_named_color_in_style_tag_exact_match() {
+        // Ensure style-tag extraction also uses exact matching
+        let html = r#"<html><head><style>body { background-color: whitesmoke; }</style></head><body>Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert!(
+            colors.iter().any(|c| c.color == "whitesmoke"),
+            "expected whitesmoke, got: {:?}",
+            colors
+        );
+        assert!(
+            !colors.iter().any(|c| c.color == "white"),
+            "white should not match whitesmoke"
+        );
     }
 }
