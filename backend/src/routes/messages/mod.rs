@@ -274,6 +274,10 @@ fn upsert_and_index_headers(
             header.has_attachments, "", header.reaction.as_deref(),
         )
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+        // Populate denormalized known_addresses table.
+        db::contacts::populate_known_addresses(conn, from_address, from_name, &to_json, &cc_json)
+            .map_err(|e| AppError::InternalError(format!("Known addresses error: {e}")))?;
     }
 
     // Index for search (skip Spam/Junk/Trash).
@@ -364,6 +368,10 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
                 header.has_attachments, "", header.reaction.as_deref(),
             )
             .map_err(|e| format!("Database error: {e}"))?;
+
+            // Populate denormalized known_addresses table.
+            db::contacts::populate_known_addresses(&conn, from_address, from_name, &to_json, &cc_json)
+                .map_err(|e| format!("Known addresses error: {e}"))?;
         }
 
         // Index for search.
