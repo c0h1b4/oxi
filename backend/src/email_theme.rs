@@ -10,8 +10,10 @@ static HEX_COLOR_RE: LazyLock<Regex> =
 static RGB_COLOR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)"#).unwrap());
 
-static RGBA_COLOR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"#).unwrap());
+static RGBA_COLOR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)"#)
+        .unwrap()
+});
 
 static STYLE_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)<style[^>]*>(.*?)</style>"#).unwrap());
@@ -305,13 +307,16 @@ fn extract_inline_style_colors(html: &str, colors: &mut Vec<BackgroundColor>) {
         for m in tag_re.find_iter(html) {
             let tag_content = m.as_str();
             let extracted = extract_colors_from_style(tag_content);
-            for color in extracted {
-                if !is_transparent(&color) {
-                    let normalized = normalize_color(&color);
+            for ec in extracted {
+                if ec.alpha < 0.1 {
+                        continue;
+                    }
+                    if !is_transparent(&ec.color) {
+                    let normalized = normalize_color(&ec.color);
                     if !normalized.is_empty() {
                         colors.push(BackgroundColor {
                             color: normalized,
-                            element_weight: *weight,
+                            element_weight: *weight * ec.alpha,
                         });
                     }
                 }
@@ -393,11 +398,15 @@ fn extract_all_colors_from_css(css: &str, weight: f32, colors: &mut Vec<Backgrou
         }
 
         for rgba_cap in RGBA_COLOR_RE.captures_iter(bg_value) {
+            let alpha: f32 = rgba_cap[4].parse().unwrap_or(1.0);
+            if alpha < 0.1 {
+                continue;
+            }
             let color = format!("rgb({}, {}, {})", &rgba_cap[1], &rgba_cap[2], &rgba_cap[3]);
             if !is_transparent(&color) {
                 colors.push(BackgroundColor {
                     color,
-                    element_weight: weight,
+                    element_weight: weight * alpha,
                 });
             }
         }
@@ -439,7 +448,13 @@ fn extract_bgcolor_attrs(html: &str, colors: &mut Vec<BackgroundColor>) {
     }
 }
 
-fn extract_colors_from_style(tag_content: &str) -> Vec<String> {
+/// A color extracted from an inline style, with its alpha value.
+struct ExtractedColor {
+    color: String,
+    alpha: f32,
+}
+
+fn extract_colors_from_style(tag_content: &str) -> Vec<ExtractedColor> {
     let mut colors = Vec::new();
 
     if let Some(cap) = STYLE_ATTR_RE.captures(tag_content) {
@@ -455,28 +470,37 @@ fn extract_colors_from_style(tag_content: &str) -> Vec<String> {
             let bg_value = bg_cap[1].trim();
 
             for hex_cap in HEX_COLOR_RE.captures_iter(bg_value) {
-                colors.push(hex_cap[0].to_string());
+                let raw = hex_cap[0].to_string();
+                let alpha = parse_hex_alpha(&raw);
+                colors.push(ExtractedColor { color: raw, alpha });
             }
 
             for rgb_cap in RGB_COLOR_RE.captures_iter(bg_value) {
-                colors.push(format!(
-                    "rgb({}, {}, {})",
-                    &rgb_cap[1], &rgb_cap[2], &rgb_cap[3]
-                ));
+                colors.push(ExtractedColor {
+                    color: format!("rgb({}, {}, {})", &rgb_cap[1], &rgb_cap[2], &rgb_cap[3]),
+                    alpha: 1.0,
+                });
             }
 
             for rgba_cap in RGBA_COLOR_RE.captures_iter(bg_value) {
-                colors.push(format!(
-                    "rgb({}, {}, {})",
-                    &rgba_cap[1], &rgba_cap[2], &rgba_cap[3]
-                ));
+                let alpha: f32 = rgba_cap[4].parse().unwrap_or(1.0);
+                colors.push(ExtractedColor {
+                    color: format!(
+                        "rgb({}, {}, {})",
+                        &rgba_cap[1], &rgba_cap[2], &rgba_cap[3]
+                    ),
+                    alpha,
+                });
             }
 
             // Check for named colors using word-boundary matching to avoid
             // false positives (e.g. "white" matching inside "whitesmoke").
             for (name, re) in NAMED_COLOR_REGEXES.iter() {
                 if re.is_match(bg_value) {
-                    colors.push(name.to_string());
+                    colors.push(ExtractedColor {
+                        color: name.to_string(),
+                        alpha: 1.0,
+                    });
                     break;
                 }
             }
@@ -484,6 +508,18 @@ fn extract_colors_from_style(tag_content: &str) -> Vec<String> {
     }
 
     colors
+}
+
+/// Parse the alpha channel from an 8-digit hex color (e.g. `#rrggbbaa`).
+/// Returns 1.0 for 3/6-digit hex or if parsing fails.
+fn parse_hex_alpha(color: &str) -> f32 {
+    let c = color.trim().to_lowercase();
+    if let Some(hex) = c.strip_prefix('#')
+        && hex.len() == 8
+    {
+        return u8::from_str_radix(&hex[6..8], 16).unwrap_or(255) as f32 / 255.0;
+    }
+    1.0
 }
 
 fn is_transparent(color: &str) -> bool {
@@ -753,6 +789,80 @@ mod tests {
         assert!(
             !colors.iter().any(|c| c.color == "white"),
             "white should not match whitesmoke"
+        );
+    }
+
+    #[test]
+    fn test_rgba_half_alpha_reduced_weight() {
+        // rgba(0,0,0,0.5) on body should have weight 1.0 * 0.5 = 0.5
+        // compared to rgb(0,0,0) which would have weight 1.0
+        let html_rgba =
+            r#"<html><body style="background-color: rgba(0,0,0,0.5)">Content</body></html>"#;
+        let html_rgb =
+            r#"<html><body style="background-color: rgb(0,0,0)">Content</body></html>"#;
+
+        let colors_rgba = extract_background_colors(html_rgba);
+        let colors_rgb = extract_background_colors(html_rgb);
+
+        assert_eq!(colors_rgba.len(), 1);
+        assert_eq!(colors_rgb.len(), 1);
+        assert!(
+            (colors_rgba[0].element_weight - 0.5).abs() < 0.01,
+            "rgba(0,0,0,0.5) on body should have weight ~0.5, got {}",
+            colors_rgba[0].element_weight
+        );
+        assert!(
+            (colors_rgb[0].element_weight - 1.0).abs() < 0.01,
+            "rgb(0,0,0) on body should have weight 1.0, got {}",
+            colors_rgb[0].element_weight
+        );
+    }
+
+    #[test]
+    fn test_rgba_fully_transparent_ignored() {
+        // rgba(0,0,0,0) should be skipped entirely (alpha < 0.1)
+        let html =
+            r#"<html><body style="background-color: rgba(0,0,0,0)">Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert!(
+            colors.is_empty(),
+            "Fully transparent rgba should produce no colors, got {:?}",
+            colors
+        );
+    }
+
+    #[test]
+    fn test_rgba_full_alpha_same_as_rgb() {
+        // rgba(255,255,255,1.0) should behave identically to rgb(255,255,255)
+        let html_rgba =
+            r#"<html><body style="background-color: rgba(255,255,255,1.0)">Content</body></html>"#;
+        let html_rgb =
+            r#"<html><body style="background-color: rgb(255,255,255)">Content</body></html>"#;
+
+        assert_eq!(detect_email_theme(html_rgba), Some(EmailTheme::Light));
+        assert_eq!(detect_email_theme(html_rgb), Some(EmailTheme::Light));
+
+        let colors_rgba = extract_background_colors(html_rgba);
+        let colors_rgb = extract_background_colors(html_rgb);
+
+        assert_eq!(colors_rgba.len(), 1);
+        assert_eq!(colors_rgb.len(), 1);
+        assert!(
+            (colors_rgba[0].element_weight - colors_rgb[0].element_weight).abs() < 0.01,
+            "rgba with alpha=1.0 should have same weight as rgb"
+        );
+    }
+
+    #[test]
+    fn test_rgba_in_style_tag() {
+        // RGBA in a <style> block should also have reduced weight
+        let html = r#"<html><head><style>body { background-color: rgba(0,0,0,0.5); }</style></head><body>Content</body></html>"#;
+        let colors = extract_background_colors(html);
+        assert_eq!(colors.len(), 1);
+        assert!(
+            (colors[0].element_weight - 0.5).abs() < 0.01,
+            "rgba in style tag on body should have weight ~0.5, got {}",
+            colors[0].element_weight
         );
     }
 }
