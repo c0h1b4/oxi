@@ -78,6 +78,20 @@ function tokenize(input: string): Array<{ token: string; raw: string }> {
 }
 
 /**
+ * Normalize a search query by trimming whitespace and collapsing multiple spaces.
+ */
+export function normalizeSearchQuery(query: string): string {
+  return query.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Check if a search query is valid for commitment (length >= 2 after normalization).
+ */
+export function isValidCommittedSearch(query: string): boolean {
+  return normalizeSearchQuery(query).length >= 2;
+}
+
+/**
  * Parse a search query string, extracting known operators into filters
  * and leaving the rest as free text.
  */

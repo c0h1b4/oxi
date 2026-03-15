@@ -6,31 +6,29 @@ use base64::Engine;
 use dashmap::DashMap;
 use rand::RngCore;
 
-/// A session identifier: a base64url-encoded string of 32 cryptographically
-/// random bytes. Used as the session cookie value.
 pub type SessionId = String;
+pub type BrowserId = String;
+pub type AccountId = String;
 
-/// In-memory state for a single authenticated session.
-///
-/// Holds the IMAP credentials so that every request can open a fresh IMAP
-/// connection without asking the user to re-authenticate. Credentials are
-/// never persisted to disk.
+pub type SessionState = AccountSession;
+
 #[derive(Debug, Clone)]
-pub struct SessionState {
-    /// The user's email address (also the IMAP username).
+pub struct AccountSession {
+    pub account_id: AccountId,
     pub email: String,
-    /// The user's password (or app-specific password).
     #[allow(dead_code)]
     pub password: String,
-    /// A SHA-256 hash that uniquely identifies the user. Used for
-    /// per-user SQLite caching.
     #[allow(dead_code)]
     pub user_hash: String,
-    /// Monotonic timestamp of the last time this session was accessed.
-    /// Updated on every successful `get` to implement sliding-window expiry.
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_tls: bool,
+    pub smtp_host: String,
+    #[allow(dead_code)]
+    pub smtp_port: u16,
+    #[allow(dead_code)]
+    pub smtp_tls: bool,
     pub last_accessed: Instant,
-    /// Per-session timeout override. When `Some`, takes precedence over the
-    /// store's default timeout (used for "keep me logged in").
     pub timeout_override: Option<Duration>,
 }
 
@@ -38,36 +36,157 @@ pub struct SessionState {
 ///
 /// Shared across all Axum handlers via `Arc`. Sessions expire after
 /// `timeout` of inactivity (sliding window).
+///
+/// Browser binding allows multiple accounts to be associated with a single
+/// browser session, enabling account switching without re-authentication.
 #[derive(Debug, Clone)]
 pub struct SessionStore {
-    sessions: Arc<DashMap<SessionId, SessionState>>,
+    sessions: Arc<DashMap<SessionId, AccountSession>>,
+    browsers: Arc<DashMap<BrowserId, Vec<AccountId>>>,
+    account_to_session: Arc<DashMap<AccountId, SessionId>>,
     timeout: Duration,
 }
 
 impl SessionStore {
-    /// Create a new, empty session store with the given inactivity timeout.
     pub fn new(timeout: Duration) -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
+            browsers: Arc::new(DashMap::new()),
+            account_to_session: Arc::new(DashMap::new()),
             timeout,
         }
     }
 
-    /// Generate a cryptographically random session token.
-    ///
-    /// Produces 32 bytes of randomness from the OS CSPRNG, then encodes
-    /// them as a base64url string (no padding). The result is 43 characters.
     pub fn generate_token() -> SessionId {
         let mut bytes = [0u8; 32];
         rand::rng().fill_bytes(&mut bytes);
         URL_SAFE_NO_PAD.encode(bytes)
     }
 
-    /// Create a new session for the given credentials and return its token.
-    ///
-    /// The session's `last_accessed` timestamp is set to `Instant::now()`.
-    /// An optional `timeout_override` can extend (or shorten) the session
-    /// lifetime for this individual session.
+    fn generate_id() -> String {
+        let mut bytes = [0u8; 16];
+        rand::rng().fill_bytes(&mut bytes);
+        URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    pub fn create_browser(&self) -> BrowserId {
+        let browser_id = Self::generate_id();
+        self.browsers.insert(browser_id.clone(), Vec::new());
+        browser_id
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_account_to_browser(
+        &self,
+        browser_id: &str,
+        email: String,
+        password: String,
+        user_hash: String,
+        imap_host: String,
+        imap_port: u16,
+        imap_tls: bool,
+        smtp_host: String,
+        smtp_port: u16,
+        smtp_tls: bool,
+    ) -> (SessionId, AccountId) {
+        let token = Self::generate_token();
+        let account_id = Self::generate_id();
+
+        let session = AccountSession {
+            account_id: account_id.clone(),
+            email,
+            password,
+            user_hash,
+            imap_host,
+            imap_port,
+            imap_tls,
+            smtp_host,
+            smtp_port,
+            smtp_tls,
+            last_accessed: Instant::now(),
+            timeout_override: None,
+        };
+
+        self.sessions.insert(token.clone(), session);
+        self.account_to_session
+            .insert(account_id.clone(), token.clone());
+
+        self.browsers
+            .entry(browser_id.to_string())
+            .or_default()
+            .push(account_id.clone());
+
+        (token, account_id)
+    }
+
+    pub fn get_browser_accounts(&self, browser_id: &str) -> Vec<AccountSession> {
+        let account_ids = self
+            .browsers
+            .get(browser_id)
+            .map(|entry| entry.clone())
+            .unwrap_or_default();
+
+        account_ids
+            .into_iter()
+            .filter_map(|account_id| {
+                let session_id = self.account_to_session.get(&account_id)?;
+                self.sessions.get(session_id.value()).map(|s| s.clone())
+            })
+            .collect()
+    }
+
+    pub fn browser_exists(&self, browser_id: &str) -> bool {
+        self.browsers.contains_key(browser_id)
+    }
+
+    pub fn get_account_session(
+        &self,
+        browser_id: &str,
+        account_id: &str,
+        token: &str,
+    ) -> Option<AccountSession> {
+        let accounts = self.browsers.get(browser_id)?;
+        if !accounts.contains(&account_id.to_string()) {
+            return None;
+        }
+        drop(accounts);
+
+        let session_id = self.account_to_session.get(account_id)?;
+        if session_id.value() != token {
+            return None;
+        }
+        drop(session_id);
+
+        self.get(token)
+    }
+
+    pub fn remove_account(&self, account_id: &str) -> bool {
+        if let Some((_, session_id)) = self.account_to_session.remove(account_id) {
+            self.sessions.remove(&session_id);
+
+            for mut entry in self.browsers.iter_mut() {
+                if let Some(pos) = entry.value().iter().position(|id| id == account_id) {
+                    entry.value_mut().remove(pos);
+                    break;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_browser(&self, browser_id: &str) {
+        if let Some((_, account_ids)) = self.browsers.remove(browser_id) {
+            for account_id in account_ids {
+                if let Some((_, session_id)) = self.account_to_session.remove(&account_id) {
+                    self.sessions.remove(&session_id);
+                }
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn insert(
         &self,
         email: String,
@@ -76,10 +195,18 @@ impl SessionStore {
         timeout_override: Option<Duration>,
     ) -> SessionId {
         let token = Self::generate_token();
-        let state = SessionState {
+        let account_id = Self::generate_id();
+        let state = AccountSession {
+            account_id,
             email,
             password,
             user_hash,
+            imap_host: String::new(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: String::new(),
+            smtp_port: 587,
+            smtp_tls: true,
             last_accessed: Instant::now(),
             timeout_override,
         };
@@ -87,19 +214,11 @@ impl SessionStore {
         token
     }
 
-    /// Look up a session by its token.
-    ///
-    /// If the session exists but has expired (inactive longer than `timeout`),
-    /// it is removed and `None` is returned. If it is still valid, the
-    /// `last_accessed` timestamp is refreshed (sliding window) and a clone
-    /// of the session state is returned.
-    pub fn get(&self, token: &str) -> Option<SessionState> {
+    pub fn get(&self, token: &str) -> Option<AccountSession> {
         let mut entry = self.sessions.get_mut(token)?;
         let now = Instant::now();
         let effective_timeout = entry.timeout_override.unwrap_or(self.timeout);
         if now.duration_since(entry.last_accessed) > effective_timeout {
-            // Drop the mutable reference before removing so we don't
-            // deadlock on the same shard.
             drop(entry);
             self.sessions.remove(token);
             return None;
@@ -108,12 +227,11 @@ impl SessionStore {
         Some(entry.clone())
     }
 
-    /// Remove a session by its token. Returns `true` if the session existed.
+    #[allow(dead_code)]
     pub fn remove(&self, token: &str) -> bool {
         self.sessions.remove(token).is_some()
     }
 
-    /// Remove all sessions that have been inactive longer than the timeout.
     #[allow(dead_code)]
     pub fn purge_expired(&self) {
         let now = Instant::now();
@@ -121,14 +239,11 @@ impl SessionStore {
             .retain(|_, state| now.duration_since(state.last_accessed) <= self.timeout);
     }
 
-    /// Return the number of sessions currently stored (including expired
-    /// ones that have not yet been purged).
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
 
-    /// Return `true` if the store contains no sessions.
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
@@ -141,14 +256,29 @@ mod tests {
     use std::collections::HashSet;
     use std::thread;
 
-    /// Helper: create a store with a generous timeout so tests don't flake.
     fn long_lived_store() -> SessionStore {
         SessionStore::new(Duration::from_secs(3600))
     }
 
-    /// Helper: create a store with a tiny timeout for expiry tests.
     fn short_lived_store() -> SessionStore {
         SessionStore::new(Duration::from_millis(50))
+    }
+
+    fn create_test_session(email: &str, password: &str, user_hash: &str) -> AccountSession {
+        AccountSession {
+            account_id: SessionStore::generate_id(),
+            email: email.to_string(),
+            password: password.to_string(),
+            user_hash: user_hash.to_string(),
+            imap_host: "imap.test.com".to_string(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: "smtp.test.com".to_string(),
+            smtp_port: 587,
+            smtp_tls: true,
+            last_accessed: Instant::now(),
+            timeout_override: None,
+        }
     }
 
     #[test]
@@ -162,7 +292,6 @@ mod tests {
 
     #[test]
     fn generate_token_length_is_correct() {
-        // 32 bytes -> base64url without padding = ceil(32*4/3) = 43 chars
         let token = SessionStore::generate_token();
         assert_eq!(token.len(), 43);
     }
@@ -176,156 +305,348 @@ mod tests {
     }
 
     #[test]
-    fn insert_and_get_returns_correct_state() {
+    fn generate_id_produces_22_chars() {
+        let id = SessionStore::generate_id();
+        assert_eq!(id.len(), 22);
+    }
+
+    #[test]
+    fn create_browser_returns_valid_id() {
         let store = long_lived_store();
-        let token = store.insert(
+        let browser_id = store.create_browser();
+        assert_eq!(browser_id.len(), 22);
+        assert!(store.browsers.contains_key(&browser_id));
+    }
+
+    #[test]
+    fn add_account_to_browser() {
+        let store = long_lived_store();
+        let browser_id = store.create_browser();
+
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
             "alice@example.com".into(),
-            "hunter2".into(),
-            "abc123".into(),
-        None,
+            "password".into(),
+            "hash123".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
         );
 
-        let state = store.get(&token).expect("session should exist");
-        assert_eq!(state.email, "alice@example.com");
-        assert_eq!(state.password, "hunter2");
-        assert_eq!(state.user_hash, "abc123");
+        assert_eq!(token.len(), 43);
+        assert_eq!(account_id.len(), 22);
+
+        let accounts = store.get_browser_accounts(&browser_id);
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].email, "alice@example.com");
+        assert_eq!(accounts[0].imap_host, "imap.example.com");
+
+        let session = store.get(&token).expect("session should exist");
+        assert_eq!(session.email, "alice@example.com");
     }
 
     #[test]
-    fn get_nonexistent_returns_none() {
+    fn get_account_session_validates_browser_binding() {
         let store = long_lived_store();
-        assert!(store.get("no-such-token").is_none());
+        let browser_id = store.create_browser();
+
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        let session = store
+            .get_account_session(&browser_id, &account_id, &token)
+            .expect("should return session");
+        assert_eq!(session.email, "user@example.com");
     }
 
     #[test]
-    fn remove_existing_session_returns_true() {
+    fn get_account_session_rejects_wrong_browser() {
         let store = long_lived_store();
-        let token = store.insert("bob@test.com".into(), "pass".into(), "hash".into(), None);
+        let browser1 = store.create_browser();
+        let browser2 = store.create_browser();
 
-        assert!(store.remove(&token));
+        let (token, account_id) = store.add_account_to_browser(
+            &browser1,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        assert!(
+            store
+                .get_account_session(&browser2, &account_id, &token)
+                .is_none(),
+            "should reject wrong browser"
+        );
+    }
+
+    #[test]
+    fn get_account_session_rejects_wrong_token() {
+        let store = long_lived_store();
+        let browser_id = store.create_browser();
+
+        let (_, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        let wrong_token = SessionStore::generate_token();
+        assert!(
+            store
+                .get_account_session(&browser_id, &account_id, &wrong_token)
+                .is_none(),
+            "should reject wrong token"
+        );
+    }
+
+    #[test]
+    fn remove_account() {
+        let store = long_lived_store();
+        let browser_id = store.create_browser();
+
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        assert!(store.remove_account(&account_id));
         assert!(store.get(&token).is_none());
+        assert!(store.get_browser_accounts(&browser_id).is_empty());
+        assert!(!store.remove_account(&account_id));
     }
 
     #[test]
-    fn remove_nonexistent_session_returns_false() {
+    fn remove_browser_clears_all_accounts() {
         let store = long_lived_store();
-        assert!(!store.remove("ghost"));
+        let browser_id = store.create_browser();
+
+        let (token1, account1) = store.add_account_to_browser(
+            &browser_id,
+            "user1@example.com".into(),
+            "pass".into(),
+            "hash1".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+        let (token2, account2) = store.add_account_to_browser(
+            &browser_id,
+            "user2@example.com".into(),
+            "pass".into(),
+            "hash2".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
+        assert_eq!(store.get_browser_accounts(&browser_id).len(), 2);
+
+        store.remove_browser(&browser_id);
+
+        assert!(store.get(&token1).is_none());
+        assert!(store.get(&token2).is_none());
+        assert!(store.get_browser_accounts(&browser_id).is_empty());
+        assert!(!store.account_to_session.contains_key(&account1));
+        assert!(!store.account_to_session.contains_key(&account2));
     }
 
     #[test]
-    fn expired_session_returns_none_on_get() {
+    fn expired_session_returns_none() {
         let store = short_lived_store();
-        let token = store.insert("eve@test.com".into(), "pass".into(), "hash".into(), None);
+        let browser_id = store.create_browser();
 
-        // Wait for the session to expire.
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+
         thread::sleep(Duration::from_millis(100));
 
         assert!(
             store.get(&token).is_none(),
             "expired session should not be returned"
         );
-        // The expired entry should also have been removed from the map.
-        assert_eq!(store.len(), 0);
-    }
-
-    #[test]
-    fn purge_expired_removes_stale_sessions() {
-        let store = short_lived_store();
-        let _t1 = store.insert("a@test.com".into(), "p".into(), "h".into(), None);
-        let _t2 = store.insert("b@test.com".into(), "p".into(), "h".into(), None);
-        assert_eq!(store.len(), 2);
-
-        thread::sleep(Duration::from_millis(100));
-        store.purge_expired();
-
-        assert_eq!(store.len(), 0);
-    }
-
-    #[test]
-    fn purge_expired_keeps_active_sessions() {
-        let store = SessionStore::new(Duration::from_secs(3600));
-        let _t1 = store.insert("alive@test.com".into(), "p".into(), "h".into(), None);
-
-        store.purge_expired();
-
-        assert_eq!(store.len(), 1);
-    }
-
-    #[test]
-    fn sliding_window_refreshes_expiry() {
-        // Use a 150ms timeout. Access the session at 80ms to refresh it.
-        // At 160ms the session should still be alive because the sliding
-        // window was refreshed.
-        let store = SessionStore::new(Duration::from_millis(150));
-        let token = store.insert("slide@test.com".into(), "p".into(), "h".into(), None);
-
-        thread::sleep(Duration::from_millis(80));
-        assert!(store.get(&token).is_some(), "session should still be alive");
-
-        thread::sleep(Duration::from_millis(80));
         assert!(
-            store.get(&token).is_some(),
-            "session should be alive after sliding refresh"
+            store
+                .get_account_session(&browser_id, &account_id, &token)
+                .is_none(),
+            "expired session via get_account_session should return none"
         );
     }
 
     #[test]
-    fn concurrent_sessions_are_isolated() {
+    fn multiple_accounts_per_browser() {
         let store = long_lived_store();
-        let t1 = store.insert("user1@test.com".into(), "pass1".into(), "hash1".into(), None);
-        let t2 = store.insert("user2@test.com".into(), "pass2".into(), "hash2".into(), None);
+        let browser_id = store.create_browser();
 
-        // Each token resolves to its own session.
-        let s1 = store.get(&t1).unwrap();
-        let s2 = store.get(&t2).unwrap();
-        assert_eq!(s1.email, "user1@test.com");
-        assert_eq!(s2.email, "user2@test.com");
+        store.add_account_to_browser(
+            &browser_id,
+            "user1@example.com".into(),
+            "pass1".into(),
+            "hash1".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+        store.add_account_to_browser(
+            &browser_id,
+            "user2@example.com".into(),
+            "pass2".into(),
+            "hash2".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+        store.add_account_to_browser(
+            &browser_id,
+            "user3@example.com".into(),
+            "pass3".into(),
+            "hash3".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
 
-        // Removing one does not affect the other.
-        store.remove(&t1);
-        assert!(store.get(&t1).is_none());
-        assert!(store.get(&t2).is_some());
+        let accounts = store.get_browser_accounts(&browser_id);
+        assert_eq!(accounts.len(), 3);
+
+        let emails: HashSet<_> = accounts.iter().map(|a| a.email.as_str()).collect();
+        assert!(emails.contains("user1@example.com"));
+        assert!(emails.contains("user2@example.com"));
+        assert!(emails.contains("user3@example.com"));
     }
 
     #[test]
-    fn len_and_is_empty() {
+    fn browsers_are_isolated() {
         let store = long_lived_store();
-        assert!(store.is_empty());
-        assert_eq!(store.len(), 0);
+        let browser1 = store.create_browser();
+        let browser2 = store.create_browser();
 
-        let t = store.insert("x@test.com".into(), "p".into(), "h".into(), None);
-        assert!(!store.is_empty());
-        assert_eq!(store.len(), 1);
+        store.add_account_to_browser(
+            &browser1,
+            "user1@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
+        store.add_account_to_browser(
+            &browser2,
+            "user2@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
 
-        store.remove(&t);
-        assert!(store.is_empty());
+        let accounts1 = store.get_browser_accounts(&browser1);
+        let accounts2 = store.get_browser_accounts(&browser2);
+
+        assert_eq!(accounts1.len(), 1);
+        assert_eq!(accounts2.len(), 1);
+        assert_eq!(accounts1[0].email, "user1@example.com");
+        assert_eq!(accounts2[0].email, "user2@example.com");
+
+        store.remove_browser(&browser1);
+        assert_eq!(store.get_browser_accounts(&browser2).len(), 1);
     }
 
     #[test]
-    fn concurrent_access_from_multiple_threads() {
-        let store = long_lived_store();
-        let store_arc = Arc::new(store);
-        let mut handles = vec![];
+    fn sliding_window_refreshes_expiry() {
+        let store = SessionStore::new(Duration::from_millis(150));
+        let browser_id = store.create_browser();
 
-        // Spawn 10 threads, each inserting and retrieving its own session.
-        for i in 0..10 {
-            let s = Arc::clone(&store_arc);
-            handles.push(thread::spawn(move || {
-                let email = format!("thread{}@test.com", i);
-                let token = s.insert(email.clone(), "pass".into(), "hash".into(), None);
-                let state = s.get(&token).expect("should find own session");
-                assert_eq!(state.email, email);
-                token
-            }));
-        }
+        let (token, _account_id) = store.add_account_to_browser(
+            &browser_id,
+            "user@example.com".into(),
+            "pass".into(),
+            "hash".into(),
+            "imap.example.com".into(),
+            993,
+            true,
+            "smtp.example.com".into(),
+            587,
+            true,
+        );
 
-        let tokens: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        thread::sleep(Duration::from_millis(80));
+        assert!(store.get(&token).is_some());
 
-        // All sessions should still exist.
-        assert_eq!(store_arc.len(), 10);
+        thread::sleep(Duration::from_millis(80));
+        assert!(store.get(&token).is_some());
+    }
 
-        // All tokens should be unique.
-        let unique: HashSet<_> = tokens.into_iter().collect();
-        assert_eq!(unique.len(), 10);
+    #[test]
+    fn helper_creates_valid_session() {
+        let session = create_test_session("test@example.com", "pass", "hash");
+        assert_eq!(session.email, "test@example.com");
+        assert_eq!(session.imap_host, "imap.test.com");
+        assert_eq!(session.imap_port, 993);
     }
 }

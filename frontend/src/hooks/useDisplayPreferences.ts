@@ -2,12 +2,14 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPut } from "@/lib/api";
+import type { AnimationMode } from "@/lib/motion/config";
 
 export interface DisplayPreferences {
   density: "compact" | "comfortable";
   theme: "light" | "dark" | "system";
   language: string;
   compose_format: "html" | "text";
+  animation_mode?: AnimationMode | null;
   deep_index: boolean;
   updated_at: string;
 }
@@ -17,6 +19,7 @@ interface UpdateDisplayPreferences {
   theme?: "light" | "dark" | "system";
   language?: string;
   compose_format?: "html" | "text";
+  animation_mode?: AnimationMode | null;
   deep_index?: boolean;
 }
 

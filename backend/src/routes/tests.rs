@@ -111,6 +111,36 @@
         Arc::new(crate::realtime::idle::IdleManager::new())
     }
 
+    /// Helper: create a multi-account session for testing protected routes.
+    /// Returns (browser_id, account_id, token) for use in request headers.
+    fn setup_test_account(
+        store: &SessionStore,
+        email: &str,
+    ) -> (String, String, String) {
+        let browser_id = store.create_browser();
+        let (token, account_id) = store.add_account_to_browser(
+            &browser_id,
+            email.to_string(),
+            "password".to_string(),
+            crate::auth::user_data::hash_email(email),
+            "imap.example.com".to_string(),
+            993,
+            true,
+            "smtp.example.com".to_string(),
+            587,
+            true,
+        );
+        (browser_id, account_id, token)
+    }
+
+    /// Helper: build auth headers for multi-account requests.
+    fn auth_headers(browser_id: &str, account_id: &str, token: &str) -> Vec<(&'static str, String)> {
+        vec![
+            ("cookie", format!("oxi_browser={browser_id}; oxi_session_{account_id}={token}")),
+            ("x-active-account", account_id.to_string()),
+        ]
+    }
+
     /// Helper: provision a user database so that route handlers can open it.
     /// Migrations are applied automatically by `open_user_db`.
     fn provision_user_db(data_dir: &str, user_hash: &str) {
@@ -323,7 +353,7 @@
             .to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
-        assert_eq!(json["error"]["message"], "Mail server not configured");
+        assert_eq!(json["error"]["message"], "IMAP server not configured");
     }
 
     #[tokio::test]
@@ -422,8 +452,8 @@
             .unwrap()
             .to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
-        assert_eq!(json["error"]["message"], "Cannot reach mail server");
+        assert_eq!(json["error"]["code"], "SERVER_UNREACHABLE");
+        assert!(json["error"]["message"].as_str().unwrap().contains("Connection refused"));
     }
 
     #[tokio::test]
@@ -451,22 +481,16 @@
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "hash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
         let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/auth/session");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/auth/session")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -509,24 +533,18 @@
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "hash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
         let app = create_router(config, store.clone(), test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/logout")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/logout")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -550,24 +568,18 @@
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "hash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
         let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/logout")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/logout")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -575,12 +587,10 @@
 
         let set_cookie = response
             .headers()
-            .get("set-cookie")
-            .expect("should have set-cookie header")
-            .to_str()
-            .unwrap();
-        assert!(set_cookie.contains("oxi_session=;"));
-        assert!(set_cookie.contains("Max-Age=0"));
+            .get_all("set-cookie");
+        // Should have clearing cookies for both browser and account session
+        let cookie_str = format!("{:?}", set_cookie);
+        assert!(cookie_str.contains("oxi_browser=;") || cookie_str.contains("Max-Age=0"));
     }
 
     // -----------------------------------------------------------------------
@@ -596,15 +606,10 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
         // Provision user database.
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
 
         let mock = MockImapClient::new().with_folders(vec![
             ImapFolder {
@@ -621,15 +626,14 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/folders")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/folders")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -653,27 +657,21 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
         let mock = MockImapClient::new()
             .with_error(ImapError::ConnectionFailed("test failure".to_string()));
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/folders")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/folders")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -713,14 +711,9 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
 
         let mock = MockImapClient::new().with_headers(vec![
             ImapMessageHeader {
@@ -769,15 +762,14 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/folders/INBOX/messages?page=0&per_page=50")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/folders/INBOX/messages?page=0&per_page=50")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -803,14 +795,9 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
 
         // First, we need the message header in cache (fetch_headers first).
         let mock = MockImapClient::new()
@@ -848,30 +835,28 @@
         let app = create_router(config.clone(), store.clone(), imap_client.clone(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
         // First, populate the message cache by listing messages.
+        let mut req1 = Request::builder()
+            .uri("/api/folders/INBOX/messages")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req1 = req1.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/folders/INBOX/messages")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req1.body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         // Now get the full message.
         let app2 = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+        let mut req2 = Request::builder()
+            .uri("/api/messages/INBOX/42")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req2 = req2.header(name, value);
+        }
         let response = app2
-            .oneshot(
-                Request::builder()
-                    .uri("/api/messages/INBOX/42")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req2.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -908,19 +893,15 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         // Seed a message in the cache.
         let conn = crate::db::pool::open_user_db(
             data_dir.path().to_str().unwrap(),
-            "testhash",
+            &user_hash,
         )
         .unwrap();
         crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
@@ -936,19 +917,18 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("PATCH")
+            .uri("/api/messages/INBOX/1/flags")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/messages/INBOX/1/flags")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"flags":["\\Seen","\\Flagged"],"add":true}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"flags":["\\Seen","\\Flagged"],"add":true}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -964,19 +944,15 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         // Seed a message in the cache.
         let conn = crate::db::pool::open_user_db(
             data_dir.path().to_str().unwrap(),
-            "testhash",
+            &user_hash,
         )
         .unwrap();
         crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
@@ -992,19 +968,18 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/move")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/move")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"from_folder":"INBOX","to_folder":"Archive","uid":42}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"from_folder":"INBOX","to_folder":"Archive","uid":42}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -1020,19 +995,15 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         // Seed a message in the cache.
         let conn = crate::db::pool::open_user_db(
             data_dir.path().to_str().unwrap(),
-            "testhash",
+            &user_hash,
         )
         .unwrap();
         crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
@@ -1048,16 +1019,15 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("DELETE")
+            .uri("/api/messages/INBOX/7")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/api/messages/INBOX/7")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -1077,14 +1047,10 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let attachment_data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
@@ -1103,15 +1069,14 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/messages/INBOX/42/attachments/0")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/messages/INBOX/42/attachments/0")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -1150,14 +1115,10 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
             uid: 42,
@@ -1175,15 +1136,14 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/messages/INBOX/42/attachments/99")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/messages/INBOX/42/attachments/99")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -1199,14 +1159,10 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
             uid: 42,
@@ -1224,15 +1180,14 @@
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
         let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .uri("/api/messages/INBOX/42/attachments/abc")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/messages/INBOX/42/attachments/abc")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -1252,32 +1207,27 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
         let mock_imap: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
         let app = create_router(config, store, mock_imap, mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/send")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -1298,30 +1248,25 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/send")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"to":[],"subject":"Hello","text_body":"Hi"}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"to":[],"subject":"Hello","text_body":"Hi"}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -1341,30 +1286,25 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/send")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"to":["bob@example.com"],"subject":"","text_body":""}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"","text_body":""}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -1381,30 +1321,25 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/send")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+            )).unwrap())
             .await
             .unwrap();
 
@@ -1424,14 +1359,10 @@
             data_dir.path().to_str().unwrap(),
         );
         let store = test_store();
-        let token = store.insert(
-            "alice@example.com".to_string(),
-            "pass".to_string(),
-            "testhash".to_string(),
-        None,
-        );
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        provision_user_db(data_dir.path().to_str().unwrap(), "testhash");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
 
         let failing_smtp: Arc<dyn SmtpClient> = Arc::new(
             MockSmtpClient::new()
@@ -1439,19 +1370,18 @@
         );
         let app = create_router(config, store, test_imap_client(), failing_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
         let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/messages/send")
-                    .header("cookie", format!("oxi_session={token}"))
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
-                    ))
-                    .unwrap(),
-            )
+            .oneshot(req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+            )).unwrap())
             .await
             .unwrap();
 

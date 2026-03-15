@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
 import {
   getFilterLabel,
+  isValidCommittedSearch,
+  normalizeSearchQuery,
   parseSearchQuery,
   removeFilterFromQuery,
 } from "@/lib/search-parser";
@@ -72,18 +75,13 @@ function SearchResultRow({
   const isFlagged = result.flags.includes("\\Flagged");
 
   return (
-    <div
-      role="row"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
+      data-search-result-folder={result.folder}
+      data-search-result-uid={result.uid}
       className={cn(
-        "flex cursor-pointer flex-col gap-0.5 border-b border-border px-3 py-2 transition-colors",
+        "flex w-full cursor-pointer flex-col gap-0.5 border-b border-border px-3 py-2 text-left transition-colors",
         "hover:bg-muted",
         isUnread ? "bg-background" : "bg-transparent",
         isSelected && "bg-accent hover:bg-accent",
@@ -130,7 +128,7 @@ function SearchResultRow({
           {result.snippet}
         </p>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -142,31 +140,97 @@ export function SearchResults() {
   const selectMessage = useUiStore((s) => s.selectMessage);
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const searchSortOrder = useUiStore((s) => s.searchSortOrder);
+  const setSearchSortOrder = useUiStore((s) => s.setSearchSortOrder);
+  const shouldAnimate = effectiveAnimationMode !== "off";
 
-  const [sortOrder, setSortOrder] = useState<"date_desc" | "date_asc">("date_desc");
+  const listTransition = {
+    initial: { opacity: 0, y: 6 },
+    animate: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.22, ease: [0.2, 0, 0, 1] as const },
+    },
+    exit: {
+      opacity: 0,
+      y: 3,
+      transition: { duration: 0.14, ease: [0.2, 0, 0, 1] as const },
+    },
+  };
+
+  const itemTransition = {
+    initial: { opacity: 0, x: 6 },
+    animate: {
+      opacity: 1,
+      x: 0,
+      transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const },
+    },
+    exit: {
+      opacity: 0,
+      x: -3,
+      transition: { duration: 0.1, ease: [0.2, 0, 0, 1] as const },
+    },
+  };
+
+  const normalizedSearchQuery = normalizeSearchQuery(searchQuery);
+  const hasValidCommittedSearch = isValidCommittedSearch(normalizedSearchQuery);
 
   const {
     data,
     isLoading,
     isError,
-  } = useSearch(searchQuery, undefined, sortOrder);
+  } = useSearch(searchQuery, undefined, searchSortOrder);
 
   // Parse filters for display in the results header
-  const parsed = parseSearchQuery(searchQuery);
+  const parsed = parseSearchQuery(normalizedSearchQuery);
 
   const handleRemoveFilter = useCallback(
     (filterRaw: string) => {
-      const newQuery = removeFilterFromQuery(searchQuery, filterRaw);
-      setSearchQuery(newQuery);
-      setSearchActive(newQuery.length >= 2);
+      const nextQuery = normalizeSearchQuery(removeFilterFromQuery(searchQuery, filterRaw));
+      const hasValidNextQuery = isValidCommittedSearch(nextQuery);
+      setSearchQuery(hasValidNextQuery ? nextQuery : "");
+      setSearchActive(hasValidNextQuery);
     },
     [searchQuery, setSearchQuery, setSearchActive],
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevSelectionKeyRef = useRef<string | null>(null);
 
   const results = data?.results ?? [];
   const totalCount = data?.total_count ?? 0;
+
+  useEffect(() => {
+    if (selectedMessageUid == null || results.length === 0) return;
+
+    const selectionKey = `${activeFolder}:${selectedMessageUid}`;
+    if (selectionKey === prevSelectionKeyRef.current) return;
+
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    const selectedRow = scrollEl.querySelector(
+      `[data-search-result-folder="${activeFolder}"][data-search-result-uid="${selectedMessageUid}"]`,
+    ) as HTMLElement | null;
+    if (!selectedRow) return;
+
+    prevSelectionKeyRef.current = selectionKey;
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const rowRect = selectedRow.getBoundingClientRect();
+    const rowTop = rowRect.top - scrollRect.top + scrollEl.scrollTop;
+    const rowBottom = rowTop + rowRect.height;
+    const viewTop = scrollEl.scrollTop;
+    const viewBottom = viewTop + scrollEl.clientHeight;
+    const buffer = rowRect.height * 3;
+
+    if (rowTop < viewTop + buffer) {
+      scrollEl.scrollTop = Math.max(0, rowTop - buffer);
+    } else if (rowBottom > viewBottom - buffer) {
+      scrollEl.scrollTop = rowBottom - scrollEl.clientHeight + buffer;
+    }
+  }, [selectedMessageUid, activeFolder, results.length]);
 
   const handleResultClick = useCallback(
     (result: SearchResultItem) => {
@@ -195,71 +259,115 @@ export function SearchResults() {
       )}
 
       {/* Empty state */}
-      {!isLoading && !isError && results.length === 0 && (
-        <div className="flex flex-1 items-center justify-center px-4 text-center">
+      {!isLoading && !isError && hasValidCommittedSearch && results.length === 0 && (
+        <div className="flex flex-1 items-center justify-center px-4 pt-4 text-center">
           <p className="text-sm text-muted-foreground">No results found</p>
         </div>
       )}
 
       {/* Results list with infinite scroll */}
-      {!isLoading && !isError && results.length > 0 && (
+      {!isLoading && !isError && hasValidCommittedSearch && (
         <>
           {/* Result count header */}
-          <div className="shrink-0 border-b border-border px-3 py-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {results.length < totalCount
-                  ? `Showing ${results.length} of ${totalCount} results`
-                  : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
-              </span>
-              <button
-                onClick={() => setSortOrder(sortOrder === "date_desc" ? "date_asc" : "date_desc")}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={sortOrder === "date_desc" ? "Newest first" : "Oldest first"}
-              >
-                {sortOrder === "date_desc" ? (
-                  <ArrowDown className="size-3" />
-                ) : (
-                  <ArrowUp className="size-3" />
-                )}
-                Date
-              </button>
-            </div>
-            {parsed.filters.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {parsed.filters.map((filter, idx) => (
-                  <span
-                    key={`${filter.operator}-${idx}`}
-                    className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                  >
-                    {getFilterLabel(filter)}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFilter(filter.raw)}
-                      aria-label={`Remove ${filter.operator} filter`}
-                      className="flex size-3.5 items-center justify-center rounded-full transition-colors hover:bg-primary/20"
+          {results.length > 0 && (
+            <div className="shrink-0 border-b border-border px-3 py-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {results.length < totalCount
+                    ? `Showing ${results.length} of ${totalCount} results`
+                    : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSearchSortOrder(searchSortOrder === "date_desc" ? "date_asc" : "date_desc")}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={searchSortOrder === "date_desc" ? "Newest first" : "Oldest first"}
+                >
+                  {searchSortOrder === "date_desc" ? (
+                    <ArrowDown className="size-3" />
+                  ) : (
+                    <ArrowUp className="size-3" />
+                  )}
+                  Date
+                </button>
+              </div>
+              {parsed.filters.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {parsed.filters.map((filter, idx) => (
+                    <span
+                      key={`${filter.operator}-${idx}`}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
                     >
-                      <X className="size-2.5" />
-                    </button>
-                  </span>
+                      {getFilterLabel(filter)}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFilter(filter.raw)}
+                        aria-label={`Remove ${filter.operator} filter`}
+                        className="flex size-3.5 items-center justify-center rounded-full transition-colors hover:bg-primary/20"
+                      >
+                        <X className="size-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {shouldAnimate ? (
+            <AnimatePresence initial={false}>
+              {results.length > 0 && (
+                <motion.div
+                  key="search-results-list"
+                  ref={scrollRef}
+                  data-testid="search-results-list-transition"
+                  data-motion-props={JSON.stringify(listTransition)}
+                  initial={listTransition.initial}
+                  animate={listTransition.animate}
+                  exit={listTransition.exit}
+                  className="min-h-0 flex-1 overflow-y-auto"
+                >
+                  <AnimatePresence initial={false}>
+                    {results.map((result) => (
+                      <motion.div
+                        key={`${result.folder}-${result.uid}`}
+                        data-testid="search-results-item-transition"
+                        data-motion-props={JSON.stringify(itemTransition)}
+                        initial={itemTransition.initial}
+                        animate={itemTransition.animate}
+                        exit={itemTransition.exit}
+                      >
+                        <SearchResultRow
+                          result={result}
+                          isSelected={
+                            activeFolder === result.folder &&
+                            selectedMessageUid === result.uid
+                          }
+                          onClick={() => handleResultClick(result)}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          ) : (
+            results.length > 0 && (
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+                {results.map((result) => (
+                  <SearchResultRow
+                    key={`${result.folder}-${result.uid}`}
+                    result={result}
+                    isSelected={
+                      activeFolder === result.folder &&
+                      selectedMessageUid === result.uid
+                    }
+                    onClick={() => handleResultClick(result)}
+                  />
                 ))}
               </div>
-            )}
-          </div>
-
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-            {results.map((result) => (
-              <SearchResultRow
-                key={`${result.folder}-${result.uid}`}
-                result={result}
-                isSelected={
-                  activeFolder === result.folder &&
-                  selectedMessageUid === result.uid
-                }
-                onClick={() => handleResultClick(result)}
-              />
-            ))}
-          </div>
+            )
+          )}
         </>
       )}
     </div>

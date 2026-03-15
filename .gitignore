@@ -33,6 +33,8 @@ pnpm-lock.yaml
 # =============================================================================
 .agent/
 .claude/
+.sisyphus/
+.superpowers/
 .worktrees/
 run.sh
 
@@ -98,3 +100,6 @@ build/
 _bmad/
 _bmad-output/
 docs/
+
+# Debugging files
+debugging/

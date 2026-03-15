@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet } from "@/lib/api";
+import { fetchAccounts } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { ComposeDialog } from "@/components/mail/ComposeDialog";
 
 export default function AuthLayout({
   children,
@@ -12,15 +13,19 @@ export default function AuthLayout({
 }) {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
-  const setEmail = useAuthStore((s) => s.setEmail);
+  const setAccounts = useAuthStore((s) => s.setAccounts);
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<{ user: { email: string } }>("/auth/session")
+    fetchAccounts()
       .then((data) => {
         if (!cancelled) {
-          setEmail(data.user.email);
-          setAuthenticated(true);
+          if (data.accounts.length > 0) {
+            setAccounts(data.accounts);
+            setAuthenticated(true);
+          } else {
+            router.replace("/");
+          }
         }
       })
       .catch(() => {
@@ -29,7 +34,7 @@ export default function AuthLayout({
     return () => {
       cancelled = true;
     };
-  }, [router, setEmail]);
+  }, [router, setAccounts]);
 
   if (!authenticated) {
     return (
@@ -42,5 +47,10 @@ export default function AuthLayout({
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <ComposeDialog />
+    </>
+  );
 }

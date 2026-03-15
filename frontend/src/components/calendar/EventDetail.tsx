@@ -2,6 +2,7 @@
 
 import { useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   X,
   MapPin,
@@ -14,8 +15,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCalendarStore } from "@/stores/useCalendarStore";
+import { useUiStore } from "@/stores/useUiStore";
 import { useCalendarEvent, useDeleteEvent } from "@/hooks/useCalendar";
 import { formatTime, getEventColorClasses } from "./calendarUtils";
+import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 import { cn } from "@/lib/utils";
 
 interface EventDetailProps {
@@ -26,6 +29,11 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
   const selectedEvent = useCalendarStore((s) => s.selectedEvent);
   const selectEvent = useCalendarStore((s) => s.selectEvent);
   const openEventForm = useCalendarStore((s) => s.openEventForm);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const ContentContainer = shouldAnimate ? motion.div : "div";
 
   const { data: event } = useCalendarEvent(selectedEvent);
   const deleteEvent = useDeleteEvent();
@@ -64,6 +72,7 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
   };
 
   if (!selectedEvent || !event) return null;
+  if (typeof document === "undefined") return null;
 
   const colors = getEventColorClasses(event.color);
 
@@ -94,13 +103,37 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={() => selectEvent(null)}
-      />
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {shouldAnimate ? (
+        <motion.div
+          data-testid="calendar-event-detail-overlay-transition"
+          data-motion-props={JSON.stringify(overlayMotionProps)}
+          initial={overlayMotionProps.initial}
+          animate={overlayMotionProps.animate}
+          exit={overlayMotionProps.exit}
+          className="absolute inset-0 bg-black/50"
+          onClick={() => selectEvent(null)}
+        />
+      ) : (
+        <div
+          className="absolute inset-0 bg-black/50"
+          onClick={() => selectEvent(null)}
+        />
+      )}
 
-      <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-xl">
+      <ContentContainer
+        {...(shouldAnimate
+          ? {
+              "data-testid": "calendar-event-detail-content-transition",
+              "data-motion-props": JSON.stringify(contentMotionProps),
+              initial: contentMotionProps.initial,
+              animate: contentMotionProps.animate,
+              exit: contentMotionProps.exit,
+            }
+          : {})}
+        className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-xl"
+      >
         {/* Color bar at top */}
         <div className={cn("h-2 rounded-t-lg", colors.bg)} />
 
@@ -216,8 +249,9 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
             </Button>
           </div>
         </div>
-      </div>
-    </div>,
+      </ContentContainer>
+    </div>
+    </AnimatePresence>,
     document.body,
   );
 }

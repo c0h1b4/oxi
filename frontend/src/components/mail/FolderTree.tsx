@@ -18,10 +18,10 @@ import { useIsFetching } from "@tanstack/react-query";
 import { useFolders, useRenameFolder } from "@/hooks/useFolders";
 import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useUiStore } from "@/stores/useUiStore";
-import { useAuthStore } from "@/stores/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { FolderContextMenu } from "@/components/mail/FolderContextMenu";
 import { CreateFolderDialog } from "@/components/mail/CreateFolderDialog";
+import { AccountSwitcher } from "@/components/accounts/AccountSwitcher";
 import { cn } from "@/lib/utils";
 import { TagSection } from "@/components/mail/TagSection";
 import type { Folder as FolderType } from "@/types/folder";
@@ -293,7 +293,6 @@ function FolderItem({
 
 export function FolderTree() {
   const { data, isLoading, isError, refetch } = useFolders();
-  const email = useAuthStore((s) => s.email);
   const activeFolder = useUiStore((s) => s.activeFolder);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
@@ -304,11 +303,9 @@ export function FolderTree() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* User email */}
-      <div className="flex items-center justify-center border-b border-sidebar-border px-3 py-3">
-        <span className="truncate text-sm font-bold text-sidebar-foreground">
-          {email ?? ""}
-        </span>
+      {/* Account switcher */}
+      <div className="border-b border-sidebar-border p-2">
+        <AccountSwitcher />
       </div>
 
       {/* Folder list */}

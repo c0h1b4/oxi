@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Mail,
@@ -14,11 +14,15 @@ import {
   LogOut,
 } from "lucide-react";
 import { apiPost } from "@/lib/api";
+import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUiStore } from "@/stores/useUiStore";
+import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
 import { useWsStatus } from "@/lib/ws-context";
+
+type NavButtonClickEvent = MouseEvent<Element>;
 
 function NavButton({
   icon,
@@ -31,11 +35,13 @@ function NavButton({
   label: string;
   active?: boolean;
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: (event: NavButtonClickEvent) => void;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-label={disabled ? `${label} (coming soon)` : label}
       title={disabled ? `${label} (coming soon)` : label}
       className={cn(
         "flex size-10 items-center justify-center rounded-lg transition-colors",
@@ -50,33 +56,39 @@ function NavButton({
   );
 }
 
+function useResolvedTheme() {
+  const theme = useUiStore((s) => s.theme);
+  if (theme === "system") {
+    if (typeof window === "undefined") return "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return theme;
+}
+
+const THEME_STORAGE_KEY = "oxi-theme";
+
 export function NavRail() {
   const { status: wsStatus, failCount: wsFailCount } = useWsStatus();
   const router = useRouter();
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
-  const [dark, setDark] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const stored = localStorage.getItem("oxi-theme");
-    const prefersDark =
-      stored === "dark" ||
-      (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    if (prefersDark) {
-      document.documentElement.classList.add("dark");
-    }
-    return prefersDark;
-  });
-  const toggleDark = useCallback(() => {
-    const next = !dark;
-    setDark(next);
-    if (next) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("oxi-theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("oxi-theme", "light");
-    }
-  }, [dark]);
+  const setTheme = useUiStore((s) => s.setTheme);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const updatePrefs = useUpdateDisplayPreferences();
+  const resolvedTheme = useResolvedTheme();
+
+  const toggleTheme = useCallback((event: NavButtonClickEvent) => {
+    const next = resolvedTheme === "dark" ? "light" : "dark";
+    runThemeSpreadTransition({
+      mode: effectiveAnimationMode,
+      trigger: "explicit",
+      origin: { x: event.clientX, y: event.clientY },
+      applyTheme: () => setTheme(next),
+      nextTheme: next,
+    });
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+    updatePrefs.mutate({ theme: next });
+  }, [effectiveAnimationMode, resolvedTheme, setTheme, updatePrefs]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -136,14 +148,14 @@ export function NavRail() {
       <div className="flex flex-col items-center gap-1">
         <NavButton
           icon={
-            dark ? (
+            resolvedTheme === "dark" ? (
               <Sun className="size-5" />
             ) : (
               <Moon className="size-5" />
             )
           }
-          label={dark ? "Light mode" : "Dark mode"}
-          onClick={toggleDark}
+          label={resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+          onClick={toggleTheme}
         />
         <NavButton
           icon={<Keyboard className="size-5" />}

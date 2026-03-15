@@ -54,6 +54,9 @@ jobs:
       - name: Lint (ESLint)
         run: bun run lint
 
+      - name: Test (unit)
+        run: bunx vitest run
+
       - name: Build (static export)
         run: bun run build
 

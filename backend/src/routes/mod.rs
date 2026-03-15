@@ -109,6 +109,12 @@ pub fn create_router(
         .layer(middleware::from_fn(csrf_protection))
         .layer(GovernorLayer::new(governor_conf));
 
+    // Browser-bound routes (no auth_guard, no rate limit).
+    // These routes only need the browser cookie, not full auth.
+    let browser_routes = Router::new()
+        .route("/accounts", get(auth::list_accounts))
+        .route("/accounts/{id}", delete(auth::remove_account).layer(middleware::from_fn(csrf_protection)));
+
     // Protected auth routes (auth_guard + CSRF).
     let protected_auth = Router::new()
         .route("/session", get(auth::get_session))
@@ -118,6 +124,7 @@ pub fn create_router(
 
     let auth_router = Router::new()
         .merge(public_auth)
+        .merge(browser_routes)
         .merge(protected_auth);
 
     // Protected data routes (auth_guard + CSRF).
@@ -213,6 +220,10 @@ pub fn create_router(
         )
         .route("/contacts/export", get(contacts::export_contacts_handler))
         .route("/contacts/import", post(contacts::import_contacts_handler))
+        .route(
+            "/contacts/autocomplete/all",
+            get(contacts::autocomplete_all_handler),
+        )
         .route(
             "/contacts/autocomplete",
             get(contacts::autocomplete_handler),

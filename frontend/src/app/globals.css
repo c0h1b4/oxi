@@ -69,7 +69,7 @@
   --secondary-foreground: hsl(20 15% 10%);
   --muted: hsl(30 10% 96%);
   --muted-foreground: hsl(20 5% 46%);
-  --accent: hsl(30 10% 96%);
+  --accent: hsl(25 30% 88%);
   --accent-foreground: hsl(20 15% 10%);
   --destructive: hsl(0 84% 60%);
   --destructive-foreground: hsl(0 0% 100%);
@@ -104,7 +104,7 @@
   --secondary-foreground: hsl(30 15% 95%);
   --muted: hsl(20 8% 12%);
   --muted-foreground: hsl(20 5% 55%);
-  --accent: hsl(20 8% 12%);
+  --accent: hsl(25 15% 22%);
   --accent-foreground: hsl(30 15% 95%);
   --destructive: hsl(0 84% 60%);
   --destructive-foreground: hsl(0 0% 100%);
@@ -132,5 +132,86 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  .disable-transitions,
+  .disable-transitions * {
+    transition: none !important;
+  }
+
+  .theme-transitioning *:not([data-theme-transition]),
+  .theme-transitioning *:not([data-theme-transition])::before,
+  .theme-transitioning *:not([data-theme-transition])::after {
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  z-index: 9999;
+  animation: clip-reveal 0.5s ease-in-out forwards;
+}
+
+::view-transition-group(root) {
+  animation: none;
+}
+
+@keyframes clip-reveal {
+  from {
+    clip-path: circle(0px at var(--click-x) var(--click-y));
+  }
+  to {
+    clip-path: circle(150vmax at var(--click-x) var(--click-y));
+  }
+}
+
+@keyframes email-plaintext-line-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes email-plaintext-medium-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes email-plaintext-subtle-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes email-plaintext-container-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

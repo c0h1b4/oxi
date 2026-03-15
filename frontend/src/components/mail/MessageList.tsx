@@ -2,10 +2,12 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { AnimatePresence, motion } from "framer-motion";
 import { PenLine, X, PanelRight } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
 import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
+import { createFadeSlideVariants } from "@/lib/motion/variants";
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { MessageListItem } from "./MessageListItem";
@@ -186,9 +188,11 @@ export function MessageList() {
   const selectedMessageUids = useUiStore((s) => s.selectedMessageUids);
   const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
   const keyboardNav = useUiStore((s) => s.keyboardNav);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
   const selectAllMessages = useUiStore((s) => s.selectAllMessages);
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
+  const shouldAnimateRows = effectiveAnimationMode !== "off";
 
   const folderQuery = useMessages(activeFolder);
   const tagQuery = useTagMessages(activeTagId);
@@ -219,6 +223,7 @@ export function MessageList() {
 
   const parentRef = useRef<HTMLDivElement>(null);
   const rowHeight = density === "compact" ? 36 : 64;
+  const prevSelectedUidRef = useRef<number | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- useVirtualizer is designed for this usage
   const virtualizer = useVirtualizer({
@@ -230,8 +235,11 @@ export function MessageList() {
 
   // Scroll the virtualizer to keep the keyboard-selected message visible
   // with a 3-row buffer so the user can preview upcoming messages.
+  // Only runs when selectedMessageUid CHANGES (keyboard nav), not on every render.
   useEffect(() => {
-    if (selectedMessageUid == null) return;
+    if (selectedMessageUid == null || selectedMessageUid === prevSelectedUidRef.current) return;
+    prevSelectedUidRef.current = selectedMessageUid;
+
     const idx = messages.findIndex((m) => m.uid === selectedMessageUid);
     if (idx < 0) return;
 
@@ -253,6 +261,35 @@ export function MessageList() {
 
   // Fetch next page when scrolling near the bottom.
   const virtualItems = virtualizer.getVirtualItems();
+  const rowMotionVariants = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const prevVisibleUidsRef = useRef<Set<number>>(new Set());
+
+  const changedVisibleDelays = new Map<number, number>();
+  if (shouldAnimateRows) {
+    const previous = prevVisibleUidsRef.current;
+    let changedVisibleIndex = 0;
+    for (const item of virtualItems) {
+      const message = messages[item.index];
+      if (!message) continue;
+      if (!previous.has(message.uid)) {
+        const boundedIndex = Math.min(changedVisibleIndex, 6);
+        changedVisibleDelays.set(message.uid, boundedIndex * 0.03);
+        changedVisibleIndex += 1;
+      }
+    }
+  }
+
+  useEffect(() => {
+    const nextVisible = new Set<number>();
+    for (const item of virtualItems) {
+      const message = messages[item.index];
+      if (message) {
+        nextVisible.add(message.uid);
+      }
+    }
+    prevVisibleUidsRef.current = nextVisible;
+  }, [messages, virtualItems]);
+
   const lastItem = virtualItems[virtualItems.length - 1];
   const lastItemIndex = lastItem?.index;
 
@@ -415,33 +452,83 @@ export function MessageList() {
                 position: "relative",
               }}
             >
-              {virtualItems.map((virtualRow) => {
-                const message = messages[virtualRow.index];
-                return (
-                  <div
-                    key={message.uid}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: virtualRow.size,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <MessageListItem
-                      message={message}
-                      isSelected={selectedMessageUid === message.uid}
-                      density={density}
-                      onClick={(e) => handleClick(message.uid, e)}
-                      bulkSelectMode={bulkSelectMode}
-                      isBulkSelected={selectedMessageUids.includes(message.uid)}
-                      onBulkToggle={toggleBulkSelect}
-                      suppressHover={keyboardNav}
-                    />
-                  </div>
-                );
-              })}
+              <AnimatePresence initial={false}>
+                {virtualItems.map((virtualRow) => {
+                  const message = messages[virtualRow.index];
+                  if (!message) return null;
+
+                  const staggerDelay = changedVisibleDelays.get(message.uid) ?? 0;
+                  const animateValue = {
+                    ...rowMotionVariants.animate,
+                    transition: {
+                      ...(rowMotionVariants.animate as { transition?: object }).transition,
+                      delay: staggerDelay,
+                    },
+                  };
+
+                  if (!shouldAnimateRows) {
+                    return (
+                      <div
+                        key={message.uid}
+                        style={{
+                          position: "absolute",
+                          top: virtualRow.start,
+                          left: 0,
+                          width: "100%",
+                          height: virtualRow.size,
+                        }}
+                      >
+                        <MessageListItem
+                          message={message}
+                          isSelected={selectedMessageUid === message.uid}
+                          density={density}
+                          onClick={(e) => handleClick(message.uid, e)}
+                          bulkSelectMode={bulkSelectMode}
+                          isBulkSelected={selectedMessageUids.includes(message.uid)}
+                          onBulkToggle={toggleBulkSelect}
+                          suppressHover={keyboardNav}
+                        />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <motion.div
+                      key={message.uid}
+                      data-testid="message-list-row-transition"
+                      data-row-uid={String(message.uid)}
+                      data-row-changed={changedVisibleDelays.has(message.uid) ? "true" : "false"}
+                      data-row-stagger-delay={String(staggerDelay)}
+                      data-motion-props={JSON.stringify({
+                        initial: rowMotionVariants.initial,
+                        animate: animateValue,
+                        exit: rowMotionVariants.exit,
+                      })}
+                      initial={rowMotionVariants.initial}
+                      animate={animateValue}
+                      exit={rowMotionVariants.exit}
+                      style={{
+                        position: "absolute",
+                        top: virtualRow.start,
+                        left: 0,
+                        width: "100%",
+                        height: virtualRow.size,
+                      }}
+                    >
+                      <MessageListItem
+                        message={message}
+                        isSelected={selectedMessageUid === message.uid}
+                        density={density}
+                        onClick={(e) => handleClick(message.uid, e)}
+                        bulkSelectMode={bulkSelectMode}
+                        isBulkSelected={selectedMessageUids.includes(message.uid)}
+                        onBulkToggle={toggleBulkSelect}
+                        suppressHover={keyboardNav}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             </div>
           )}
           {isFetchingNextPage && (

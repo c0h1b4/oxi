@@ -5,34 +5,28 @@ use axum::extract::WebSocketUpgrade;
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use futures::{SinkExt, StreamExt};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
-use crate::auth::session::{SessionState, SessionStore};
+use crate::auth::session::{AccountSession, SessionStore};
 use crate::config::AppConfig;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
 use crate::search::engine::SearchEngine;
 
-/// Extract the session token from the `Cookie` header string.
-fn extract_session_token(cookie_header: &str) -> Option<String> {
+fn extract_browser_id(cookie_header: &str) -> Option<String> {
     for segment in cookie_header.split(';') {
         let trimmed = segment.trim();
-        if let Some(token) = trimmed.strip_prefix("oxi_session=") {
-            let token = token.trim();
-            if !token.is_empty() {
-                return Some(token.to_string());
+        if let Some(id) = trimmed.strip_prefix("oxi_browser=") {
+            let id = id.trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
             }
         }
     }
     None
 }
 
-/// `GET /api/ws` — WebSocket upgrade handler.
-///
-/// Authenticates via the session cookie (extracted from the upgrade request
-/// headers) and then upgrades to a WebSocket connection that receives
-/// real-time mail events.
 #[allow(clippy::too_many_arguments)]
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -44,60 +38,91 @@ pub async fn ws_handler(
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
     Extension(search_engine): Extension<Arc<SearchEngine>>,
 ) -> Response {
-    // Authenticate from cookie.
-    let session = headers
+    let browser_id = headers
         .get_all("cookie")
         .iter()
         .filter_map(|v| v.to_str().ok())
-        .find_map(extract_session_token)
-        .and_then(|token| store.get(&token));
+        .find_map(extract_browser_id);
 
-    let Some(session) = session else {
+    let Some(browser_id) = browser_id else {
         return (
             axum::http::StatusCode::UNAUTHORIZED,
-            "Missing or invalid session",
+            "Missing browser session",
         )
             .into_response();
     };
 
-    let imap_creds = config.imap_host.as_ref().map(|host| ImapCredentials {
-        host: host.clone(),
-        port: config.imap_port,
-        tls: config.tls_enabled,
-        email: session.email.clone(),
-        password: session.password.clone(),
-    });
+    let accounts = store.get_browser_accounts(&browser_id);
+
+    if accounts.is_empty() {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "No active accounts",
+        )
+            .into_response();
+    }
 
     ws.on_upgrade(move |socket| {
-        handle_socket(socket, session, config, event_bus, idle_manager, imap_client, imap_creds, search_engine)
+        handle_socket_multi_account(
+            socket,
+            accounts,
+            config,
+            event_bus,
+            idle_manager,
+            imap_client,
+            search_engine,
+        )
     })
 }
 
-/// Handle an authenticated WebSocket connection.
-///
-/// Subscribes to the user's EventBus channel and forwards events as JSON.
-/// Also starts IMAP IDLE for INBOX when the connection is established.
 #[allow(clippy::too_many_arguments)]
-async fn handle_socket(
+async fn handle_socket_multi_account(
     socket: WebSocket,
-    session: SessionState,
+    accounts: Vec<AccountSession>,
     config: Arc<AppConfig>,
     event_bus: Arc<EventBus>,
     idle_manager: Arc<IdleManager>,
     imap_client: Arc<dyn ImapClient>,
-    imap_creds: Option<ImapCredentials>,
     search_engine: Arc<SearchEngine>,
 ) {
-    let user_hash = session.user_hash.clone();
+    tracing::info!(account_count = accounts.len(), "WebSocket connected");
 
-    tracing::info!(user = %session.email, "WebSocket connected");
+    let mut sync_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let mut forward_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
-    // Subscribe to the user's event channel.
-    let mut rx = event_bus.subscribe(&user_hash).await;
+    let (event_tx, mut event_rx) = mpsc::channel::<(String, crate::realtime::events::MailEvent)>(64);
 
-    // Start IMAP IDLE for INBOX if IMAP is configured.
-    // Also start the periodic sync loop for flag/deletion reconciliation.
-    let sync_handle = if let Some(ref creds) = imap_creds {
+    for session in &accounts {
+        let user_hash = session.user_hash.clone();
+        let account_id = session.account_id.clone();
+
+        let mut rx = event_bus.subscribe(&user_hash).await;
+        let tx = event_tx.clone();
+        let aid = account_id.clone();
+
+        let forward_handle = tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send((aid.clone(), event)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
+        forward_handles.push(forward_handle);
+
+        let creds = ImapCredentials {
+            host: session.imap_host.clone(),
+            port: session.imap_port,
+            tls: session.imap_tls,
+            email: session.email.clone(),
+            password: session.password.clone(),
+        };
+
         idle_manager
             .start_idle(
                 user_hash.clone(),
@@ -109,54 +134,44 @@ async fn handle_socket(
             .await;
 
         let handle = tokio::spawn(super::sync::sync_loop(
-            user_hash.clone(),
-            creds.clone(),
-            config,
-            imap_client,
+            user_hash,
+            creds,
+            config.clone(),
+            imap_client.clone(),
             event_bus.clone(),
-            search_engine,
+            search_engine.clone(),
         ));
-        Some(handle)
-    } else {
-        None
-    };
+        sync_handles.push(handle);
+    }
+
+    drop(event_tx);
 
     let (mut ws_tx, mut ws_rx) = socket.split();
-
-    // Ping interval for keepalive.
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
 
     loop {
         tokio::select! {
-            // Forward events from the bus to the WebSocket client.
-            event = rx.recv() => {
-                match event {
-                    Ok(mail_event) => {
-                        if let Ok(json) = serde_json::to_string(&mail_event)
-                            && ws_tx.send(Message::Text(json.into())).await.is_err() {
-                                break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!(user = %session.email, skipped = n, "WebSocket client lagged");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        break;
-                    }
+            Some((account_id, mail_event)) = event_rx.recv() => {
+                let msg = serde_json::json!({
+                    "accountId": account_id,
+                    "event": mail_event,
+                });
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && ws_tx.send(Message::Text(json.into())).await.is_err()
+                {
+                    break;
                 }
             }
 
-            // Handle incoming messages from the client (or detect disconnect).
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(Message::Pong(_))) => {}
-                    Some(Ok(_)) => {} // Ignore other messages from client.
+                    Some(Ok(_)) => {}
                     Some(Err(_)) => break,
                 }
             }
 
-            // Send periodic pings.
             _ = ping_interval.tick() => {
                 if ws_tx.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
@@ -165,14 +180,18 @@ async fn handle_socket(
         }
     }
 
-    tracing::info!(user = %session.email, "WebSocket disconnected");
+    tracing::info!("WebSocket disconnected");
 
-    // Stop the periodic sync task.
-    if let Some(handle) = sync_handle {
+    for handle in sync_handles {
         handle.abort();
     }
 
-    // Stop IDLE tasks and clean up the event channel.
-    idle_manager.stop_all(&user_hash).await;
-    event_bus.cleanup(&user_hash).await;
+    for handle in forward_handles {
+        handle.abort();
+    }
+
+    for session in &accounts {
+        idle_manager.stop_all(&session.user_hash).await;
+        event_bus.cleanup(&session.user_hash).await;
+    }
 }

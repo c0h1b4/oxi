@@ -6,6 +6,8 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
 import {
   getFilterLabel,
+  isValidCommittedSearch,
+  normalizeSearchQuery,
   parseSearchQuery,
   removeFilterFromQuery,
 } from "@/lib/search-parser";
@@ -31,8 +33,13 @@ export function SearchBar() {
   const [inputValue, setInputValue] = useState(searchQuery);
   const [showTips, setShowTips] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const tipsRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDebounce = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, []);
 
   // Fetch results for displaying the count
   const { data } = useSearch(searchQuery);
@@ -44,49 +51,82 @@ export function SearchBar() {
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
-      setInputValue(value);
+      const normalizedValue = normalizeSearchQuery(value);
 
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
+      setInputValue(value);
+      cancelDebounce();
+
+      if (normalizedValue === "") {
+        clearSearch();
+        return;
       }
 
       debounceRef.current = setTimeout(() => {
-        setSearchQuery(value);
-        setSearchActive(value.length >= 2);
+        if (!isValidCommittedSearch(normalizedValue)) {
+          return;
+        }
+
+        setSearchQuery(normalizedValue);
+        setSearchActive(true);
       }, 300);
     },
-    [setSearchQuery, setSearchActive],
+    [cancelDebounce, clearSearch, setSearchActive, setSearchQuery],
   );
 
-  // Clear search on Escape
+  // Handle Enter to commit and blur, Escape to clear
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Escape") {
+      if (e.key === "Enter") {
+        const normalizedValue = normalizeSearchQuery(inputValue);
+        if (isValidCommittedSearch(normalizedValue)) {
+          setSearchQuery(normalizedValue);
+          setSearchActive(true);
+        }
+        inputRef.current?.blur();
+      } else if (e.key === "Escape") {
         setInputValue("");
+        cancelDebounce();
         clearSearch();
         setShowTips(false);
         inputRef.current?.blur();
       }
     },
-    [clearSearch],
+    [cancelDebounce, clearSearch, inputValue, setSearchActive, setSearchQuery],
   );
 
   // Clear button handler
   const handleClear = useCallback(() => {
     setInputValue("");
+    cancelDebounce();
     clearSearch();
     inputRef.current?.focus();
-  }, [clearSearch]);
+  }, [cancelDebounce, clearSearch]);
+
+  // Cancel debounce on blur to avoid unexpected state updates
+  const handleBlur = useCallback(() => {
+    cancelDebounce();
+  }, [cancelDebounce]);
 
   // Remove a filter chip
   const handleRemoveFilter = useCallback(
     (filterRaw: string) => {
       const newQuery = removeFilterFromQuery(inputValue, filterRaw);
+      const normalizedQuery = normalizeSearchQuery(newQuery);
+
       setInputValue(newQuery);
-      setSearchQuery(newQuery);
-      setSearchActive(newQuery.length >= 2);
+      cancelDebounce();
+
+      if (normalizedQuery === "") {
+        clearSearch();
+        return;
+      }
+
+      if (isValidCommittedSearch(normalizedQuery)) {
+        setSearchQuery(normalizedQuery);
+        setSearchActive(true);
+      }
     },
-    [inputValue, setSearchQuery, setSearchActive],
+    [cancelDebounce, clearSearch, inputValue, setSearchActive, setSearchQuery],
   );
 
   // Insert a tip operator into the input
@@ -112,21 +152,10 @@ export function SearchBar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
-  // Close tips when clicking outside
+  // Cleanup pending debounce on unmount
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        tipsRef.current &&
-        !tipsRef.current.contains(e.target as Node) &&
-        inputRef.current &&
-        !inputRef.current.contains(e.target as Node)
-      ) {
-        setShowTips(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+    return () => cancelDebounce();
+  }, [cancelDebounce]);
 
   // Sync input value when the Zustand store is cleared externally (e.g. pressing
   // Escape or clicking the clear button).  This is an intentional synchronisation
@@ -148,9 +177,7 @@ export function SearchBar() {
             value={inputValue}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            onFocus={() => {
-              if (!inputValue) setShowTips(true);
-            }}
+            onBlur={handleBlur}
             placeholder="Search mail... (Ctrl+K)"
             data-search-input
             className="h-8 w-full rounded-md border border-border bg-background py-1 pl-8 pr-14 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -168,8 +195,10 @@ export function SearchBar() {
             )}
             <button
               type="button"
-              onClick={() => setShowTips((prev) => !prev)}
-              aria-label="Search tips"
+              onMouseDown={() => setShowTips(true)}
+              onMouseUp={() => setShowTips(false)}
+              onMouseLeave={() => setShowTips(false)}
+              aria-label="Search tips (hold to show)"
               className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
             >
               <HelpCircle className="size-3.5" />
@@ -179,7 +208,6 @@ export function SearchBar() {
           {/* Search tips popover */}
           {showTips && (
             <div
-              ref={tipsRef}
               className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-border bg-popover p-2 shadow-md"
             >
               <p className="mb-1.5 text-xs font-medium text-foreground">

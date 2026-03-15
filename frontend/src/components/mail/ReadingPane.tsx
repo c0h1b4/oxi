@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Paperclip,
   ChevronDown,
@@ -15,7 +16,9 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 import { useMessage, useUpdateFlags } from "@/hooks/useMessages";
+import { createFadeSlideVariants } from "@/lib/motion/variants";
 import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { Button } from "@/components/ui/button";
@@ -36,6 +39,8 @@ type BodyMode = "html" | "plain";
 export function ReadingPane() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
   const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
@@ -126,12 +131,16 @@ export function ReadingPane() {
     );
   }
 
-  const attachmentBaseUrl = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
+  const attachmentBaseUrl = activeAccountId
+    ? `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments?account_id=${encodeURIComponent(activeAccountId)}`
+    : `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const paneVariants = createFadeSlideVariants(effectiveAnimationMode, "x");
 
-  return (
+  const paneContent = (
     <div
       className={cn(
         "flex h-full w-full flex-col overflow-hidden transition-opacity",
@@ -329,9 +338,30 @@ export function ReadingPane() {
             text={data.text}
             blockRemoteResources={!remoteAllowed}
             theme={emailTheme}
+            emailTheme={data.email_theme}
           />
         )}
       </div>
     </div>
+  );
+
+  if (!shouldAnimate) {
+    return paneContent;
+  }
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={`reading-pane-${data.uid}`}
+        data-testid="reading-pane-message-transition"
+        data-motion-props={JSON.stringify(paneVariants)}
+        initial={paneVariants.initial}
+        animate={paneVariants.animate}
+        exit={paneVariants.exit}
+        className="h-full min-w-0 w-full"
+      >
+        {paneContent}
+      </motion.div>
+    </AnimatePresence>
   );
 }

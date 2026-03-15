@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback, useMemo } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 import {
   useUpdateFlags,
@@ -8,6 +8,12 @@ import {
   useDeleteMessage,
   useMessages,
 } from "@/hooks/useMessages";
+import { useSearch } from "@/hooks/useSearch";
+import {
+  isValidCommittedSearch,
+  normalizeSearchQuery,
+} from "@/lib/search-parser";
+import type { SearchResultItem } from "@/types/message";
 
 function isInputFocused(): boolean {
   const el = document.activeElement;
@@ -22,8 +28,10 @@ export function useKeyboardShortcuts() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const selectMessage = useUiStore((s) => s.selectMessage);
+  const setActiveFolder = useUiStore((s) => s.setActiveFolder);
   const searchActive = useUiStore((s) => s.searchActive);
-  const setSearchActive = useUiStore((s) => s.setSearchActive);
+  const searchQuery = useUiStore((s) => s.searchQuery);
+  const searchSortOrder = useUiStore((s) => s.searchSortOrder);
   const clearSearch = useUiStore((s) => s.clearSearch);
   const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
@@ -33,15 +41,69 @@ export function useKeyboardShortcuts() {
   const deleteMessage = useDeleteMessage();
   const { data } = useMessages(activeFolder);
 
-  // Flatten all pages into a single array.
-  const messages = data?.pages.flatMap((page) => page.messages) ?? [];
+  const normalizedQuery = normalizeSearchQuery(searchQuery);
+  const hasActiveSearch = searchActive && isValidCommittedSearch(normalizedQuery);
+
+  const { data: searchData } = useSearch(
+    hasActiveSearch ? searchQuery : "",
+    undefined,
+    searchSortOrder,
+  );
+  const searchResults = useMemo(
+    () => searchData?.results ?? [],
+    [searchData?.results],
+  );
+
+  const folderMessages = useMemo(
+    () => data?.pages.flatMap((page) => page.messages) ?? [],
+    [data?.pages],
+  );
+
+  const findCurrentSearchIndex = useCallback((): number => {
+    if (selectedMessageUid === null) return -1;
+    return searchResults.findIndex(
+      (r) => r.folder === activeFolder && r.uid === selectedMessageUid,
+    );
+  }, [searchResults, activeFolder, selectedMessageUid]);
+
+  const selectSearchResult = useCallback(
+    (result: SearchResultItem) => {
+      setActiveFolder(result.folder);
+      selectMessage(result.uid);
+      (document.activeElement as HTMLElement)?.blur?.();
+      useUiStore.getState().setKeyboardNav(true);
+    },
+    [setActiveFolder, selectMessage],
+  );
+
+  const getSearchNavigationTarget = useCallback(
+    (direction: "next" | "prev"): SearchResultItem | null => {
+      if (searchResults.length === 0) return null;
+
+      const currentIndex = findCurrentSearchIndex();
+
+      if (currentIndex === -1) {
+        return direction === "next"
+          ? searchResults[0]
+          : searchResults[searchResults.length - 1];
+      }
+
+      const nextIndex =
+        direction === "next" ? currentIndex + 1 : currentIndex - 1;
+
+      if (nextIndex < 0 || nextIndex >= searchResults.length) {
+        return null;
+      }
+
+      return searchResults[nextIndex];
+    },
+    [searchResults, findCurrentSearchIndex],
+  );
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Cmd/Ctrl+K — search
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setSearchActive(true);
         setTimeout(() => {
           const searchInput = document.querySelector(
             "[data-search-input]",
@@ -51,24 +113,43 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Cmd/Ctrl+P — command palette
       if ((e.metaKey || e.ctrlKey) && e.key === "p") {
         e.preventDefault();
         setCommandPaletteOpen(true);
         return;
       }
 
-      // Don't handle other shortcuts when typing in inputs
-      if (isInputFocused()) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "a" && searchActive) {
+        e.preventDefault();
+        const searchInput = document.querySelector("[data-search-input]") as HTMLInputElement;
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
 
-      // ? — keyboard shortcuts reference
+      const searchInput = document.querySelector("[data-search-input]");
+      const isArrowKey = e.key === "ArrowDown" || e.key === "ArrowUp";
+
+      if (hasActiveSearch && isArrowKey && document.activeElement === searchInput) {
+        (document.activeElement as HTMLElement)?.blur?.();
+      }
+
+      if (hasActiveSearch && document.activeElement === searchInput) {
+        return;
+      }
+
+      if (isInputFocused()) {
+        return;
+      }
+
       if (e.key === "?") {
         e.preventDefault();
         setShortcutsOpen(true);
         return;
       }
 
-      // Escape — close reading pane or clear search
       if (e.key === "Escape") {
         if (searchActive) {
           clearSearch();
@@ -78,22 +159,27 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // All remaining shortcuts require a selected message
       if (selectedMessageUid === null) {
-        // J/ArrowDown with no selection — select first message
-        if (
-          (e.key === "j" || e.key === "ArrowDown") &&
-          messages.length > 0
-        ) {
-          e.preventDefault();
-          selectMessage(messages[0].uid);
+        if (e.key === "j" || e.key === "ArrowDown") {
+          if (hasActiveSearch && searchResults.length > 0) {
+            e.preventDefault();
+            selectSearchResult(searchResults[0]);
+          } else if (folderMessages.length > 0) {
+            e.preventDefault();
+            selectMessage(folderMessages[0].uid);
+          }
+        }
+        if (e.key === "k" || e.key === "ArrowUp") {
+          if (hasActiveSearch && searchResults.length > 0) {
+            e.preventDefault();
+            selectSearchResult(searchResults[searchResults.length - 1]);
+          } else if (folderMessages.length > 0) {
+            e.preventDefault();
+            selectMessage(folderMessages[0].uid);
+          }
         }
         return;
       }
-
-      const currentIndex = messages.findIndex(
-        (m) => m.uid === selectedMessageUid,
-      );
 
       switch (e.key) {
         case "Delete":
@@ -114,10 +200,12 @@ export function useKeyboardShortcuts() {
           }
           break;
 
-        case "s":
-          if (currentIndex >= 0) {
-            const flagged =
-              messages[currentIndex].flags.includes("\\Flagged");
+        case "s": {
+          const currentMsg = folderMessages.find(
+            (m) => m.uid === selectedMessageUid,
+          );
+          if (currentMsg) {
+            const flagged = currentMsg.flags.includes("\\Flagged");
             updateFlags.mutate({
               folder: activeFolder,
               uid: selectedMessageUid,
@@ -126,10 +214,14 @@ export function useKeyboardShortcuts() {
             });
           }
           break;
+        }
 
-        case "u":
-          if (currentIndex >= 0) {
-            const seen = messages[currentIndex].flags.includes("\\Seen");
+        case "u": {
+          const currentMsg = folderMessages.find(
+            (m) => m.uid === selectedMessageUid,
+          );
+          if (currentMsg) {
+            const seen = currentMsg.flags.includes("\\Seen");
             updateFlags.mutate({
               folder: activeFolder,
               uid: selectedMessageUid,
@@ -138,24 +230,41 @@ export function useKeyboardShortcuts() {
             });
           }
           break;
+        }
 
         case "j":
         case "ArrowDown":
           e.preventDefault();
-          if (currentIndex >= 0 && currentIndex < messages.length - 1) {
-            selectMessage(messages[currentIndex + 1].uid);
-            (document.activeElement as HTMLElement)?.blur?.();
-            useUiStore.getState().setKeyboardNav(true);
+          if (hasActiveSearch) {
+            const target = getSearchNavigationTarget("next");
+            if (target) selectSearchResult(target);
+          } else {
+            const currentIndex = folderMessages.findIndex(
+              (m) => m.uid === selectedMessageUid,
+            );
+            if (currentIndex >= 0 && currentIndex < folderMessages.length - 1) {
+              selectMessage(folderMessages[currentIndex + 1].uid);
+              (document.activeElement as HTMLElement)?.blur?.();
+              useUiStore.getState().setKeyboardNav(true);
+            }
           }
           break;
 
         case "k":
         case "ArrowUp":
           e.preventDefault();
-          if (currentIndex > 0) {
-            selectMessage(messages[currentIndex - 1].uid);
-            (document.activeElement as HTMLElement)?.blur?.();
-            useUiStore.getState().setKeyboardNav(true);
+          if (hasActiveSearch) {
+            const target = getSearchNavigationTarget("prev");
+            if (target) selectSearchResult(target);
+          } else {
+            const currentIndex = folderMessages.findIndex(
+              (m) => m.uid === selectedMessageUid,
+            );
+            if (currentIndex > 0) {
+              selectMessage(folderMessages[currentIndex - 1].uid);
+              (document.activeElement as HTMLElement)?.blur?.();
+              useUiStore.getState().setKeyboardNav(true);
+            }
           }
           break;
       }
@@ -168,13 +277,16 @@ export function useKeyboardShortcuts() {
     selectedMessageUid,
     selectMessage,
     searchActive,
-    setSearchActive,
     clearSearch,
     setShortcutsOpen,
     setCommandPaletteOpen,
     updateFlags,
     moveMessage,
     deleteMessage,
-    messages,
+    folderMessages,
+    hasActiveSearch,
+    searchResults,
+    selectSearchResult,
+    getSearchNavigationTarget,
   ]);
 }

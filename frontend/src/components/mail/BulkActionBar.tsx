@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Mail,
   MailOpen,
@@ -21,6 +22,7 @@ import {
 import { useFolders } from "@/hooks/useFolders";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { useTags, useBulkAddTag } from "@/hooks/useTags";
+import { createFadeSlideVariants } from "@/lib/motion/variants";
 
 export function BulkActionBar() {
   const selectedUids = useUiStore((s) => s.selectedMessageUids);
@@ -39,6 +41,9 @@ export function BulkActionBar() {
 
   const { data: foldersData } = useFolders();
   const folders = foldersData?.folders ?? [];
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
   const { data: tagsData } = useTags();
   const allTags = tagsData?.tags ?? [];
   const bulkAddTag = useBulkAddTag();
@@ -127,10 +132,9 @@ export function BulkActionBar() {
     [bulkAddTag, selectedUids, activeFolder],
   );
 
-  if (selectedUids.length < 1) return null;
-
-  return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5">
+  const hasSelection = selectedUids.length > 0;
+  const actionContent = (
+    <>
       {/* Selection count */}
       <span className="mr-2 text-sm font-medium text-foreground">
         {selectedUids.length} selected
@@ -288,6 +292,35 @@ export function BulkActionBar() {
       >
         <X className="size-4" />
       </button>
+    </>
+  );
+
+  if (!shouldAnimate && !hasSelection) return null;
+
+  if (shouldAnimate) {
+    return (
+      <AnimatePresence>
+        {hasSelection ? (
+          <motion.div
+            key="bulk-action-bar"
+            data-testid="bulk-action-bar-transition"
+            data-motion-props={JSON.stringify(barMotionProps)}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={barMotionProps}
+            className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5"
+          >
+            {actionContent}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    );
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5">
+      {actionContent}
     </div>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { create } from "zustand";
+import { create, type UseBoundStore, type StoreApi } from "zustand";
+
+import type { AnimationMode } from "@/lib/motion/config";
 
 const STORAGE_KEY = "oxi-ui-settings";
 
@@ -42,7 +44,14 @@ function saveSettings(settings: Partial<PersistedSettings>) {
 
 export type ThemeMode = "light" | "dark" | "system";
 
-interface UiState {
+const DEFAULT_EFFECTIVE_ANIMATION_MODE: AnimationMode = "medium";
+
+export interface AnimationModeState {
+  storedMode: AnimationMode | null;
+  effectiveMode: AnimationMode;
+}
+
+export interface UiState {
   activeFolder: string;
   selectedMessageUid: number | null;
   sidebarWidth: number;
@@ -60,6 +69,9 @@ interface UiState {
   commandPaletteOpen: boolean;
   keyboardNav: boolean;
   composeFormat: "html" | "text";
+  storedAnimationMode: AnimationMode | null;
+  effectiveAnimationMode: AnimationMode;
+  searchSortOrder: "date_desc" | "date_asc";
 
   setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
@@ -81,11 +93,14 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setKeyboardNav: (active: boolean) => void;
   setComposeFormat: (format: "html" | "text") => void;
+  setAnimationModeState: (state: AnimationModeState) => void;
+  isAnimationOff: () => boolean;
+  setSearchSortOrder: (order: "date_desc" | "date_asc") => void;
 }
 
 const initial = loadSettings();
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set) => ({
   activeFolder: "INBOX",
   selectedMessageUid: null,
   sidebarWidth: initial.sidebarWidth,
@@ -103,6 +118,9 @@ export const useUiStore = create<UiState>((set) => ({
   commandPaletteOpen: false,
   keyboardNav: false,
   composeFormat: "html",
+  storedAnimationMode: null,
+  effectiveAnimationMode: DEFAULT_EFFECTIVE_ANIMATION_MODE,
+  searchSortOrder: "date_desc",
 
   setActiveTag: (tagId) =>
     set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -143,4 +161,11 @@ export const useUiStore = create<UiState>((set) => ({
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setKeyboardNav: (active) => set({ keyboardNav: active }),
   setComposeFormat: (format) => set({ composeFormat: format }),
+  setAnimationModeState: ({ storedMode, effectiveMode }) =>
+    set({
+      storedAnimationMode: storedMode,
+      effectiveAnimationMode: effectiveMode,
+    }),
+  isAnimationOff: () => useUiStore.getState().effectiveAnimationMode === "off",
+  setSearchSortOrder: (order) => set({ searchSortOrder: order }),
 }));
