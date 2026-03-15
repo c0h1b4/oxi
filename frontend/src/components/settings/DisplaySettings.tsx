@@ -75,8 +75,12 @@ export function DisplaySettings() {
 
   const handleThemeChange = useCallback(
     (theme: ThemeMode) => {
-      runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
-      setTheme(theme);
+      runThemeSpreadTransition({
+        mode: effectiveAnimationMode,
+        trigger: "explicit",
+        applyTheme: () => setTheme(theme),
+        nextTheme: theme,
+      });
       updatePrefs.mutate(
         { theme },
         { onError: (e) => toast.error(`Failed to update: ${e.message}`) },

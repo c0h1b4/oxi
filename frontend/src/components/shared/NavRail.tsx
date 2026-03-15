@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Mail,
@@ -22,6 +22,8 @@ import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
 import { useWsStatus } from "@/lib/ws-context";
 
+type NavButtonClickEvent = MouseEvent<Element>;
+
 function NavButton({
   icon,
   label,
@@ -33,7 +35,7 @@ function NavButton({
   label: string;
   active?: boolean;
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: (event: NavButtonClickEvent) => void;
 }) {
   return (
     <button
@@ -75,10 +77,15 @@ export function NavRail() {
   const updatePrefs = useUpdateDisplayPreferences();
   const resolvedTheme = useResolvedTheme();
 
-  const toggleTheme = useCallback(() => {
+  const toggleTheme = useCallback((event: NavButtonClickEvent) => {
     const next = resolvedTheme === "dark" ? "light" : "dark";
-    runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
-    setTheme(next);
+    runThemeSpreadTransition({
+      mode: effectiveAnimationMode,
+      trigger: "explicit",
+      origin: { x: event.clientX, y: event.clientY },
+      applyTheme: () => setTheme(next),
+      nextTheme: next,
+    });
     localStorage.setItem(THEME_STORAGE_KEY, next);
     updatePrefs.mutate({ theme: next });
   }, [effectiveAnimationMode, resolvedTheme, setTheme, updatePrefs]);

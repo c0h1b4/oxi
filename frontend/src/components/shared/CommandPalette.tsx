@@ -52,8 +52,12 @@ export function CommandPalette() {
 
   const toggleTheme = () => {
     const next = resolvedTheme === "dark" ? "light" : "dark";
-    runThemeSpreadTransition({ mode: effectiveAnimationMode, trigger: "explicit" });
-    setTheme(next);
+    runThemeSpreadTransition({
+      mode: effectiveAnimationMode,
+      trigger: "explicit",
+      applyTheme: () => setTheme(next),
+      nextTheme: next,
+    });
     localStorage.setItem(THEME_STORAGE_KEY, next);
     updatePrefs.mutate({ theme: next });
   };
