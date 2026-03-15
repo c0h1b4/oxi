@@ -143,6 +143,7 @@ export function SearchResults() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const searchSortOrder = useUiStore((s) => s.searchSortOrder);
   const setSearchSortOrder = useUiStore((s) => s.setSearchSortOrder);
+  const setSearchResultCount = useUiStore((s) => s.setSearchResultCount);
   const shouldAnimate = effectiveAnimationMode !== "off";
 
   const listTransition = {
@@ -200,6 +201,12 @@ export function SearchResults() {
 
   const results = data?.results ?? [];
   const totalCount = data?.total_count ?? 0;
+
+  // Sync result count to the store so sibling components (e.g. SearchBar) can
+  // read it without subscribing to the full query cache.
+  useEffect(() => {
+    setSearchResultCount(hasValidCommittedSearch ? totalCount : null);
+  }, [totalCount, hasValidCommittedSearch, setSearchResultCount]);
 
   useEffect(() => {
     if (selectedMessageUid == null || results.length === 0) return;

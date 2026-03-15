@@ -60,6 +60,9 @@ const { mockUiState, mockUseSearch } = vi.hoisted(() => ({
     activeFolder: "INBOX",
     selectedMessageUid: null as number | null,
     effectiveAnimationMode: "medium" as "rich" | "medium" | "subtle" | "off",
+    searchSortOrder: "date_desc" as "date_desc" | "date_asc",
+    setSearchSortOrder: vi.fn(),
+    setSearchResultCount: vi.fn(),
   },
   mockUseSearch: vi.fn(),
 }));

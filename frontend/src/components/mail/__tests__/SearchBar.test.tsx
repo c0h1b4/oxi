@@ -1,23 +1,19 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockUiState, mockUseSearch } = vi.hoisted(() => ({
+const { mockUiState } = vi.hoisted(() => ({
   mockUiState: {
     searchQuery: "",
     searchActive: false,
+    searchResultCount: null as number | null,
     setSearchQuery: vi.fn(),
     setSearchActive: vi.fn(),
     clearSearch: vi.fn(),
   },
-  mockUseSearch: vi.fn(),
 }));
 
 vi.mock("@/stores/useUiStore", () => ({
   useUiStore: (selector: (state: typeof mockUiState) => unknown) => selector(mockUiState),
-}));
-
-vi.mock("@/hooks/useSearch", () => ({
-  useSearch: mockUseSearch,
 }));
 
 import { SearchBar } from "../SearchBar";
@@ -30,7 +26,7 @@ describe("SearchBar", () => {
     mockUiState.setSearchQuery.mockReset();
     mockUiState.setSearchActive.mockReset();
     mockUiState.clearSearch.mockReset();
-    mockUseSearch.mockReturnValue({ data: null });
+    mockUiState.searchResultCount = null;
   });
 
   afterEach(() => {
