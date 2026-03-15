@@ -248,6 +248,16 @@ function runCrossfadeFallback(
   };
 }
 
+export function clearThemeTransitionArtifacts() {
+  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
+    node.remove();
+  });
+  document.documentElement.classList.remove("theme-transitioning");
+  document.documentElement.classList.remove("disable-transitions");
+  document.documentElement.style.removeProperty("--click-x");
+  document.documentElement.style.removeProperty("--click-y");
+}
+
 export function runThemeSpreadTransition({
   mode,
   trigger,

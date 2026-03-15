@@ -5,19 +5,10 @@ import { LazyMotion, domAnimation } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { MotionProvider } from "@/lib/motion/MotionProvider";
+import { clearThemeTransitionArtifacts } from "@/lib/motion/theme-spread";
 import { makeQueryClient } from "@/lib/query-client";
 
 const THEME_STORAGE_KEY = "oxi-theme";
-
-function clearThemeTransitionArtifacts() {
-  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
-    node.remove();
-  });
-  document.documentElement.classList.remove("theme-transitioning");
-  document.documentElement.classList.remove("disable-transitions");
-  document.documentElement.style.removeProperty("--click-x");
-  document.documentElement.style.removeProperty("--click-y");
-}
 
 function ThemeInitializer() {
   useEffect(() => {
