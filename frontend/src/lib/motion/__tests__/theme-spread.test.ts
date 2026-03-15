@@ -20,7 +20,8 @@ describe("runThemeSpreadTransition", () => {
     vi.useRealTimers();
   });
 
-  it("falls back to immediate theme apply when view transitions are unavailable", () => {
+  it("uses snapshot fallback when view transitions are unavailable", () => {
+    vi.useFakeTimers();
     const applyTheme = vi.fn();
     runThemeSpreadTransition({
       mode: "medium",
@@ -28,8 +29,11 @@ describe("runThemeSpreadTransition", () => {
       applyTheme,
       nextTheme: "dark",
     });
+    const firstOverlay = document.querySelector('[data-theme-transition="snapshot"]');
+    expect(firstOverlay).toBeTruthy();
     expect(applyTheme).toHaveBeenCalledTimes(1);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("disable-transitions")).toBe(true);
 
     runThemeSpreadTransition({
       mode: "rich",
@@ -37,8 +41,12 @@ describe("runThemeSpreadTransition", () => {
       applyTheme,
       nextTheme: "light",
     });
-    expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(document.querySelector('[data-theme-transition="snapshot"]')).toBeTruthy();
     expect(applyTheme).toHaveBeenCalledTimes(2);
+
+    vi.runAllTimers();
+    expect(document.querySelector("[data-theme-transition]")).toBeNull();
+    expect(document.documentElement.classList.contains("disable-transitions")).toBe(false);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
