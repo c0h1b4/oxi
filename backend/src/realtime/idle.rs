@@ -757,6 +757,12 @@ async fn fetch_and_store_headers(
             ) {
                 tracing::warn!(uid = uid, error = %e, "IDLE fetch: failed to upsert message");
             } else {
+                // Populate denormalized known_addresses table.
+                if let Err(e) = db::contacts::populate_known_addresses(
+                    &conn, from_address, from_name, &to_json, &cc_json,
+                ) {
+                    tracing::warn!(uid = uid, error = %e, "IDLE fetch: failed to populate known addresses");
+                }
                 new_count += 1;
             }
         }
