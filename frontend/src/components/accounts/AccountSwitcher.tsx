@@ -1,14 +1,17 @@
 "use client";
 
 import { useAuthStore } from "@/stores/useAuthStore";
+import { useUiStore } from "@/stores/useUiStore";
 import { cn } from "@/lib/utils";
 import { Plus, ChevronRight, LogOut, X, Check } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiPost } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { AddAccountModal } from "./AddAccountModal";
+import { createScaleFadeVariants } from "@/lib/motion/variants";
 
 export function AccountSwitcher() {
   const accounts = useAuthStore((s) => s.accounts);
@@ -25,6 +28,11 @@ export function AccountSwitcher() {
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const shouldAnimate = effectiveAnimationMode !== "off";
+  const dropdownMotionProps = createScaleFadeVariants(effectiveAnimationMode);
+  const DropdownContainer = shouldAnimate ? motion.div : "div";
+  const canPortal = typeof document !== "undefined";
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -144,16 +152,28 @@ export function AccountSwitcher() {
           />
         </button>
 
-        {isOpen &&
+        {canPortal &&
           createPortal(
-            <div
-              ref={dropdownRef}
-              className="fixed w-72 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden"
-              style={{
-                top: dropdownPosition.top,
-                left: dropdownPosition.left,
-              }}
-            >
+            <AnimatePresence>
+              {isOpen ? (
+                <DropdownContainer
+                  {...(shouldAnimate
+                    ? {
+                        ref: dropdownRef,
+                        "data-testid": "account-switcher-dropdown-transition",
+                        "data-motion-props": JSON.stringify(dropdownMotionProps),
+                        initial: "initial",
+                        animate: "animate",
+                        exit: "exit",
+                        variants: dropdownMotionProps,
+                      }
+                    : { ref: dropdownRef })}
+                  className="fixed w-72 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden"
+                  style={{
+                    top: dropdownPosition.top,
+                    left: dropdownPosition.left,
+                  }}
+                >
               <div className="py-1">
                 {accounts.map((account) => {
                   const isActive = account.id === activeAccountId;
@@ -250,7 +270,9 @@ export function AccountSwitcher() {
                   </button>
                 )}
               </div>
-            </div>,
+                </DropdownContainer>
+              ) : null}
+            </AnimatePresence>,
             document.body
           )}
 
