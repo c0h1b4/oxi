@@ -6,6 +6,8 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
 import {
   getFilterLabel,
+  isValidCommittedSearch,
+  normalizeSearchQuery,
   parseSearchQuery,
   removeFilterFromQuery,
 } from "@/lib/search-parser";
@@ -43,18 +45,29 @@ export function SearchBar() {
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
+      const normalizedValue = normalizeSearchQuery(value);
+
       setInputValue(value);
 
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
 
+      if (normalizedValue === "") {
+        clearSearch();
+        return;
+      }
+
       debounceRef.current = setTimeout(() => {
-        setSearchQuery(value);
-        setSearchActive(value.length >= 2);
+        if (!isValidCommittedSearch(normalizedValue)) {
+          return;
+        }
+
+        setSearchQuery(normalizedValue);
+        setSearchActive(true);
       }, 300);
     },
-    [setSearchQuery, setSearchActive],
+    [clearSearch, setSearchActive, setSearchQuery],
   );
 
   // Clear search on Escape
@@ -81,11 +94,21 @@ export function SearchBar() {
   const handleRemoveFilter = useCallback(
     (filterRaw: string) => {
       const newQuery = removeFilterFromQuery(inputValue, filterRaw);
+      const normalizedQuery = normalizeSearchQuery(newQuery);
+
       setInputValue(newQuery);
-      setSearchQuery(newQuery);
-      setSearchActive(newQuery.length >= 2);
+
+      if (normalizedQuery === "") {
+        clearSearch();
+        return;
+      }
+
+      if (isValidCommittedSearch(normalizedQuery)) {
+        setSearchQuery(normalizedQuery);
+        setSearchActive(true);
+      }
     },
-    [inputValue, setSearchQuery, setSearchActive],
+    [clearSearch, inputValue, setSearchActive, setSearchQuery],
   );
 
   // Insert a tip operator into the input
