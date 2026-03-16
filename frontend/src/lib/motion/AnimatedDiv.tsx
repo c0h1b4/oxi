@@ -70,15 +70,19 @@ export const AnimatedDiv = forwardRef<HTMLDivElement, AnimatedDivProps>(
     }, [exposeMotionProps, variants]);
 
     if (!shouldAnimate) {
-      // Strip data-testid in off mode — the old animated/static branch pattern
-      // only placed transition test IDs on the animated branch, and tests assert
-      // their absence when animations are off.
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { "data-testid": _strippedTestId, ...staticProps } = htmlProps;
+      // Only strip animation-specific data-testid values (those containing
+      // "transition" or "motion"). Pass through all other test IDs so
+      // non-animation tests can still query elements.
+      const { "data-testid": testId, ...staticProps } = htmlProps;
+      const isAnimationTestId =
+        testId != null &&
+        (/transition/i.test(testId) || /motion/i.test(testId));
       return (
         <div
           ref={ref}
-          {...staticProps}
+          {...(!isAnimationTestId && testId != null
+            ? { "data-testid": testId, ...staticProps }
+            : staticProps)}
         />
       );
     }
