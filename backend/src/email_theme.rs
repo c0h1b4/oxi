@@ -309,9 +309,9 @@ fn extract_inline_style_colors(html: &str, colors: &mut Vec<BackgroundColor>) {
             let extracted = extract_colors_from_style(tag_content);
             for ec in extracted {
                 if ec.alpha < 0.1 {
-                        continue;
-                    }
-                    if !is_transparent(&ec.color) {
+                    continue;
+                }
+                if !is_transparent(&ec.color) {
                     let normalized = normalize_color(&ec.color);
                     if !normalized.is_empty() {
                         colors.push(BackgroundColor {
