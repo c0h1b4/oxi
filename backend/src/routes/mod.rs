@@ -30,7 +30,7 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
 use tower_http::cors::CorsLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::csrf::csrf_protection;
@@ -61,6 +61,51 @@ impl KeyExtractor for PeerIpKeyExtractorFallback {
             .map(|ci: &ConnectInfo<SocketAddr>| ci.0.ip());
 
         Ok(ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+    }
+}
+
+/// SPA fallback handler that tries `{path}.html` before serving `index.html`.
+///
+/// Next.js static export produces files like `login.html` for `/login` routes,
+/// but `ServeDir` doesn't try the `.html` extension automatically. This handler
+/// runs for any request that doesn't match a static file, mapping clean URLs
+/// (e.g. `/login` → `login.html`) with `index.html` as the final catch-all for
+/// client-side routing.
+async fn spa_fallback(
+    uri: axum::http::Uri,
+    Extension(config): Extension<Arc<AppConfig>>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let static_dir = Path::new(&config.static_dir);
+    let path = uri.path().trim_start_matches('/');
+
+    // Try {path}.html (e.g. /login -> login.html)
+    if !path.is_empty() && !path.contains('.') {
+        let html_path = static_dir.join(format!("{path}.html"));
+        if html_path.is_file()
+            && let Ok(contents) = tokio::fs::read(&html_path).await
+        {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
+    // Fall back to index.html (SPA catch-all)
+    let index_path = static_dir.join("index.html");
+    match tokio::fs::read(&index_path).await {
+        Ok(contents) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            contents,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -300,12 +345,15 @@ pub fn create_router(
         .merge(ws_route)
         .merge(protected_data);
 
-    let index_path = Path::new(&config.static_dir).join("index.html");
-    let static_service = ServeDir::new(&config.static_dir).fallback(ServeFile::new(index_path));
+    let static_service = ServeDir::new(&config.static_dir);
+
+    let spa_router = Router::new()
+        .fallback(spa_fallback)
+        .layer(Extension(config.clone()));
 
     let inner = Router::new()
         .nest("/api", api_router)
-        .fallback_service(static_service);
+        .fallback_service(static_service.fallback(spa_router));
 
     // If BASE_PATH is set (e.g. "/oxi"), nest the entire app under that prefix.
     let router = match config.base_path.as_deref() {

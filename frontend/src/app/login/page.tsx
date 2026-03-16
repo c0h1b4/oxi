@@ -56,7 +56,7 @@ export default function Home() {
       .then((data) => {
         if (!cancelled) {
           if (data.accounts.length > 0) {
-            router.replace("/mail");
+            router.replace("/");
           } else {
             setChecking(false);
           }
@@ -108,11 +108,11 @@ export default function Home() {
       const response = await apiPost<{
         account: { id: string; email: string; imapHost: string; smtpHost: string };
       }>("/auth/login", payload);
-      
+
       const accountsData = await fetchAccounts();
       setAccounts(accountsData.accounts);
       setActiveAccount(response.account.id);
-      router.push("/mail");
+      router.push("/");
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "An unexpected error occurred",

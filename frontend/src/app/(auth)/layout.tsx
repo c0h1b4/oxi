@@ -27,12 +27,12 @@ export default function AuthLayout({
             setAccounts(data.accounts);
             setAuthenticated(true);
           } else {
-            router.replace("/");
+            router.replace("/login");
           }
         }
       })
       .catch(() => {
-        if (!cancelled) router.replace("/");
+        if (!cancelled) router.replace("/login");
       });
     return () => {
       cancelled = true;
