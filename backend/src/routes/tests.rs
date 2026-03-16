@@ -29,6 +29,8 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
         })
     }
 
@@ -47,6 +49,8 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
         })
     }
 
@@ -65,6 +69,8 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
         })
     }
 

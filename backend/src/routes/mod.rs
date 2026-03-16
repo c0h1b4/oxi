@@ -29,6 +29,7 @@ use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -345,15 +346,17 @@ pub fn create_router(
         .merge(ws_route)
         .merge(protected_data);
 
-    let static_service = ServeDir::new(&config.static_dir);
-
-    let spa_router = Router::new()
-        .fallback(spa_fallback)
-        .layer(Extension(config.clone()));
-
-    let inner = Router::new()
-        .nest("/api", api_router)
-        .fallback_service(static_service.fallback(spa_router));
+    let inner = if config.serve_static {
+        let static_service = ServeDir::new(&config.static_dir);
+        let spa_router = Router::new()
+            .fallback(spa_fallback)
+            .layer(Extension(config.clone()));
+        Router::new()
+            .nest("/api", api_router)
+            .fallback_service(static_service.fallback(spa_router))
+    } else {
+        Router::new().nest("/api", api_router)
+    };
 
     // If BASE_PATH is set (e.g. "/oxi"), nest the entire app under that prefix.
     let router = match config.base_path.as_deref() {
@@ -372,7 +375,26 @@ pub fn create_router(
         .layer(TraceLayer::new_for_http());
 
     if config.environment == "development" {
-        router.layer(CorsLayer::permissive())
+        if let Some(ref origin) = config.cors_origin {
+            let cors = CorsLayer::new()
+                .allow_origin(origin.parse::<HeaderValue>().unwrap())
+                .allow_credentials(true)
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::DELETE,
+                ])
+                .allow_headers([
+                    header::CONTENT_TYPE,
+                    HeaderName::from_static("x-requested-with"),
+                    HeaderName::from_static("x-active-account"),
+                ]);
+            router.layer(cors)
+        } else {
+            router.layer(CorsLayer::permissive())
+        }
     } else {
         router
     }

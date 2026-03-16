@@ -47,6 +47,8 @@ mod tests {
             static_dir: "nonexistent_static_dir".to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
         });
         let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
         let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());

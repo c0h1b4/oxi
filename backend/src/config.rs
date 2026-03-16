@@ -56,6 +56,14 @@ pub struct AppConfig {
     /// Optional base path prefix (e.g. "/oxi") for serving behind a reverse proxy subpath.
     #[serde(default)]
     pub base_path: Option<String>,
+
+    /// Whether to serve static frontend files. Disable for dev-mode (separate frontend dev server).
+    #[serde(default = "default_serve_static")]
+    pub serve_static: bool,
+
+    /// Allowed CORS origin for dev-mode cross-port requests (e.g. "http://localhost:3000").
+    #[serde(default)]
+    pub cors_origin: Option<String>,
 }
 
 fn default_host() -> String {
@@ -94,6 +102,10 @@ fn default_environment() -> String {
     "development".to_string()
 }
 
+fn default_serve_static() -> bool {
+    true
+}
+
 impl AppConfig {
     /// Load configuration by layering serde defaults with environment variables.
     ///
@@ -128,6 +140,8 @@ mod tests {
         assert_eq!(config.session_timeout_hours, 24);
         assert_eq!(config.static_dir, "./static");
         assert_eq!(config.environment, "development");
+        assert!(config.serve_static);
+        assert!(config.cors_origin.is_none());
     }
 
     #[test]
@@ -146,6 +160,8 @@ mod tests {
             .merge(("session_timeout_hours", 48u64))
             .merge(("static_dir", "/srv/static"))
             .merge(("environment", "production"))
+            .merge(("serve_static", false))
+            .merge(("cors_origin", "http://localhost:3000"))
             .extract()
             .expect("overrides should load");
 
@@ -160,6 +176,8 @@ mod tests {
         assert_eq!(config.session_timeout_hours, 48);
         assert_eq!(config.static_dir, "/srv/static");
         assert_eq!(config.environment, "production");
+        assert!(!config.serve_static);
+        assert_eq!(config.cors_origin.as_deref(), Some("http://localhost:3000"));
     }
 
     #[test]
