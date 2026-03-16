@@ -104,7 +104,7 @@ export function AccountSwitcher() {
       await apiPost("/auth/logout", {});
       setAccounts([]);
       queryClient.clear();
-      router.push("/");
+      router.push("/login");
     } catch (err) {
       console.error("Failed to logout all accounts:", err);
     } finally {
