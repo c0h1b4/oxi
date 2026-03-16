@@ -40,10 +40,11 @@ export function ContactDialog({
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
-      setName(""); // eslint-disable-line react-hooks/set-state-in-effect -- intentional reset on dialog open
-      setEmail(""); // eslint-disable-line react-hooks/set-state-in-effect
-      setCompany(""); // eslint-disable-line react-hooks/set-state-in-effect
-      setNotes(""); // eslint-disable-line react-hooks/set-state-in-effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on dialog open
+      setName("");
+      setEmail("");
+      setCompany("");
+      setNotes("");
     }
   }, [open]);
 

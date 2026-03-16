@@ -163,6 +163,7 @@ export function AttachmentPreviewer({
                     title={thumb.filename ?? `Attachment ${i + 1}`}
                   >
                     {thumb.content_type.startsWith("image/") ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- blob URL thumbnail, not optimizable
                       <img
                         src={thumbUrl}
                         alt={thumb.filename ?? ""}
@@ -184,6 +185,7 @@ export function AttachmentPreviewer({
           {/* Preview content */}
           <div className="flex flex-1 items-center justify-center overflow-auto p-4">
             {att.content_type.startsWith("image/") ? (
+              // eslint-disable-next-line @next/next/no-img-element -- blob URL preview, not optimizable
               <img
                 src={url}
                 alt={att.filename ?? "Attachment"}

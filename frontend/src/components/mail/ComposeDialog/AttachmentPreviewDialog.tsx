@@ -83,6 +83,7 @@ export function AttachmentPreviewDialog({
               </div>
               <div className="flex flex-1 items-center justify-center overflow-auto p-4">
                 {attachment.contentType.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- data URL from local attachment, not optimizable
                   <img
                     src={previewUrl}
                     alt={attachment.filename}

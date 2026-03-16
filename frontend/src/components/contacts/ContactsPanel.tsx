@@ -392,7 +392,6 @@ export function ContactsPanel() {
                 onDelete={handleDelete}
                 isDeleting={deleteContact.isPending}
                 groups={groups}
-                activeGroupId={activeGroupId}
               />
             </AnimatedDiv>
           ) : (
