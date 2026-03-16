@@ -11,8 +11,12 @@ static RGB_COLOR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)"#).unwrap());
 
 static RGBA_COLOR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9]*\.?[0-9]+)\s*\)"#)
+    Regex::new(r#"rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9]*\.?[0-9]+%?)\s*\)"#)
         .unwrap()
+});
+
+static RGBA_MODERN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"rgb\s*\(\s*(\d+)\s+(\d+)\s+(\d+)\s*/\s*([0-9]*\.?[0-9]+%?)\s*\)"#).unwrap()
 });
 
 static STYLE_TAG_RE: LazyLock<Regex> =
@@ -398,7 +402,21 @@ fn extract_all_colors_from_css(css: &str, weight: f32, colors: &mut Vec<Backgrou
         }
 
         for rgba_cap in RGBA_COLOR_RE.captures_iter(bg_value) {
-            let alpha: f32 = rgba_cap[4].parse().unwrap_or(1.0);
+            let alpha = parse_alpha_str(&rgba_cap[4]);
+            if alpha < 0.1 {
+                continue;
+            }
+            let color = format!("rgb({}, {}, {})", &rgba_cap[1], &rgba_cap[2], &rgba_cap[3]);
+            if !is_transparent(&color) {
+                colors.push(BackgroundColor {
+                    color,
+                    element_weight: weight * alpha,
+                });
+            }
+        }
+
+        for rgba_cap in RGBA_MODERN_RE.captures_iter(bg_value) {
+            let alpha = parse_alpha_str(&rgba_cap[4]);
             if alpha < 0.1 {
                 continue;
             }
@@ -483,7 +501,18 @@ fn extract_colors_from_style(tag_content: &str) -> Vec<ExtractedColor> {
             }
 
             for rgba_cap in RGBA_COLOR_RE.captures_iter(bg_value) {
-                let alpha: f32 = rgba_cap[4].parse().unwrap_or(1.0);
+                let alpha = parse_alpha_str(&rgba_cap[4]);
+                colors.push(ExtractedColor {
+                    color: format!(
+                        "rgb({}, {}, {})",
+                        &rgba_cap[1], &rgba_cap[2], &rgba_cap[3]
+                    ),
+                    alpha,
+                });
+            }
+
+            for rgba_cap in RGBA_MODERN_RE.captures_iter(bg_value) {
+                let alpha = parse_alpha_str(&rgba_cap[4]);
                 colors.push(ExtractedColor {
                     color: format!(
                         "rgb({}, {}, {})",
@@ -520,6 +549,15 @@ fn parse_hex_alpha(color: &str) -> f32 {
         return u8::from_str_radix(&hex[6..8], 16).unwrap_or(255) as f32 / 255.0;
     }
     1.0
+}
+
+/// Parse an alpha string that may be a decimal (`0.5`) or percentage (`50%`).
+fn parse_alpha_str(s: &str) -> f32 {
+    if let Some(pct) = s.strip_suffix('%') {
+        pct.parse::<f32>().unwrap_or(100.0) / 100.0
+    } else {
+        s.parse::<f32>().unwrap_or(1.0)
+    }
 }
 
 fn is_transparent(color: &str) -> bool {
