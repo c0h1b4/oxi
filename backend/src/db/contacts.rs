@@ -258,7 +258,8 @@ pub fn populate_known_addresses(
     // Insert from address.
     if !from_address.is_empty() {
         conn.execute(
-            "INSERT OR IGNORE INTO known_addresses (email, name) VALUES (?1, ?2)",
+            "INSERT INTO known_addresses (email, name) VALUES (?1, ?2)
+             ON CONFLICT(email) DO UPDATE SET name = excluded.name WHERE excluded.name != ''",
             params![from_address, from_name],
         )
         .map_err(|e| format!("Failed to insert known address (from): {e}"))?;
@@ -291,7 +292,8 @@ fn insert_addresses_from_json(conn: &Connection, json: &str) -> Result<(), Strin
         }
         let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
         conn.execute(
-            "INSERT OR IGNORE INTO known_addresses (email, name) VALUES (?1, ?2)",
+            "INSERT INTO known_addresses (email, name) VALUES (?1, ?2)
+             ON CONFLICT(email) DO UPDATE SET name = excluded.name WHERE excluded.name != ''",
             params![email, name],
         )
         .map_err(|e| format!("Failed to insert known address (json): {e}"))?;
@@ -587,12 +589,12 @@ mod tests {
         let conn = open_test_db();
 
         populate_known_addresses(&conn, "alice@test.com", "Alice", "[]", "[]").unwrap();
-        // Same email again with different name -- should be ignored (INSERT OR IGNORE).
+        // Same email again with non-empty name -- should update the name.
         populate_known_addresses(&conn, "alice@test.com", "Alice Different", "[]", "[]").unwrap();
 
         let results = search_known_addresses(&conn, "alice@test.com", 10).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "Alice");
+        assert_eq!(results[0].name, "Alice Different");
     }
 
     #[test]
