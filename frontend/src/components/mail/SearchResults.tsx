@@ -204,6 +204,7 @@ export function SearchResults() {
   // read it without subscribing to the full query cache.
   useEffect(() => {
     setSearchResultCount(hasValidCommittedSearch ? totalCount : null);
+    return () => setSearchResultCount(null);
   }, [totalCount, hasValidCommittedSearch, setSearchResultCount]);
 
   useEffect(() => {
