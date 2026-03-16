@@ -109,40 +109,15 @@ impl SessionStore {
             timeout_override: None,
         };
 
-        // Insert into sessions first (independent operation).
         self.sessions.insert(token.clone(), session);
-
-        // Insert into account_to_session; rollback sessions on panic.
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.account_to_session
-                .insert(account_id.clone(), token.clone());
-        })) {
-            self.sessions.remove(&token);
-            std::panic::resume_unwind(payload);
-        }
-
-        // Insert into account_to_browser; rollback prior maps on panic.
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.account_to_browser
-                .insert(account_id.clone(), browser_id.to_string());
-        })) {
-            self.account_to_session.remove(&account_id);
-            self.sessions.remove(&token);
-            std::panic::resume_unwind(payload);
-        }
-
-        // Insert into browsers; rollback all prior maps on panic.
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.browsers
-                .entry(browser_id.to_string())
-                .or_default()
-                .push(account_id.clone());
-        })) {
-            self.account_to_browser.remove(&account_id);
-            self.account_to_session.remove(&account_id);
-            self.sessions.remove(&token);
-            std::panic::resume_unwind(payload);
-        }
+        self.account_to_session
+            .insert(account_id.clone(), token.clone());
+        self.account_to_browser
+            .insert(account_id.clone(), browser_id.to_string());
+        self.browsers
+            .entry(browser_id.to_string())
+            .or_default()
+            .push(account_id.clone());
 
         (token, account_id)
     }
