@@ -543,10 +543,14 @@ fn extract_colors_from_style(tag_content: &str) -> Vec<ExtractedColor> {
 /// Returns 1.0 for 3/6-digit hex or if parsing fails.
 fn parse_hex_alpha(color: &str) -> f32 {
     let c = color.trim().to_lowercase();
-    if let Some(hex) = c.strip_prefix('#')
-        && hex.len() == 8
-    {
-        return u8::from_str_radix(&hex[6..8], 16).unwrap_or(255) as f32 / 255.0;
+    if let Some(hex) = c.strip_prefix('#') {
+        if hex.len() == 8 {
+            return u8::from_str_radix(&hex[6..8], 16).unwrap_or(255) as f32 / 255.0;
+        }
+        if hex.len() == 4 {
+            let digit = u8::from_str_radix(&hex[3..4], 16).unwrap_or(15);
+            return (digit * 17) as f32 / 255.0;
+        }
     }
     1.0
 }
