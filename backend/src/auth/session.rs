@@ -280,6 +280,7 @@ impl SessionStore {
     /// too -- keeping it would serve no purpose and would itself be a leak.
     fn evict_account(&self, account_id: &str) {
         self.account_to_session.remove(account_id);
+        self.account_to_browser.remove(account_id);
 
         // We cannot predict which browser owns this account, so scan all.
         self.browsers.retain(|_, accounts| {
@@ -305,7 +306,6 @@ impl SessionStore {
         });
 
         for account_id in &expired_accounts {
-            self.account_to_browser.remove(account_id);
             self.evict_account(account_id);
         }
     }
@@ -357,6 +357,22 @@ impl SessionStore {
                         "browser {browser_id} references account {account_id} missing from account_to_session"
                     ));
                 }
+            }
+        }
+
+        // Every account_to_browser entry should reference a valid account and browser.
+        for entry in self.account_to_browser.iter() {
+            let account_id = entry.key();
+            let browser_id = entry.value();
+            if !self.account_to_session.contains_key(account_id) {
+                issues.push(format!(
+                    "account_to_browser[{account_id}] references account missing from account_to_session"
+                ));
+            }
+            if !self.browsers.contains_key(browser_id) {
+                issues.push(format!(
+                    "account_to_browser[{account_id}] references missing browser {browser_id}"
+                ));
             }
         }
 
