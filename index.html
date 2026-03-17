@@ -4,203 +4,1091 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>oxi — Modern Open-Source Webmail</title>
-    <meta name="description" content="A modern, fast, and secure open-source webmail client built with React and Rust. Feature-complete Roundcube replacement.">
+    <meta name="description" content="A modern, fast, and secure open-source webmail client built with React and Rust. Feature-complete Roundcube replacement that connects to any IMAP/SMTP server.">
     <meta property="og:title" content="oxi — Modern Open-Source Webmail">
     <meta property="og:description" content="A fast, secure, open-source webmail client built with React + Rust. Connects to any IMAP/SMTP server.">
     <meta property="og:url" content="https://oxi.email">
     <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="oxi — Modern Open-Source Webmail">
+    <meta name="twitter:description" content="A fast, secure, open-source webmail client built with React + Rust.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%9C%89%EF%B8%8F</text></svg>">
     <style>
+        :root {
+            --bg: #09090b;
+            --bg-card: #18181b;
+            --border: #27272a;
+            --border-hover: #3f3f46;
+            --text: #fafafa;
+            --text-muted: #a1a1aa;
+            --text-dim: #71717a;
+            --accent: #f97316;
+            --accent-red: #ef4444;
+            --accent-glow: rgba(249, 115, 22, 0.15);
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: #09090b;
-            color: #fafafa;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
+            overflow-x: hidden;
         }
 
-        .hero {
-            flex: 1;
+        /* ── Nav ── */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 1rem 2rem;
             display: flex;
-            flex-direction: column;
-            justify-content: center;
+            justify-content: space-between;
             align-items: center;
-            padding: 2rem;
-            text-align: center;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.3s;
         }
 
-        .logo {
-            font-size: 4rem;
+        nav.scrolled { border-bottom-color: var(--border); }
+
+        .nav-logo {
+            font-size: 1.25rem;
             font-weight: 700;
-            letter-spacing: -0.04em;
-            margin-bottom: 0.25rem;
-            background: linear-gradient(135deg, #f97316, #ef4444);
+            background: linear-gradient(135deg, var(--accent), var(--accent-red));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            text-decoration: none;
         }
 
-        .tagline {
-            font-size: 1.25rem;
-            color: #a1a1aa;
-            font-weight: 400;
-            max-width: 480px;
-            line-height: 1.6;
-            margin-bottom: 2.5rem;
+        .nav-links { display: flex; gap: 2rem; align-items: center; }
+
+        .nav-links a {
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: color 0.2s;
         }
 
-        .stack {
+        .nav-links a:hover { color: var(--text); }
+
+        .nav-github {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.85rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            color: var(--text-muted) !important;
+            font-size: 0.8rem !important;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .nav-github:hover {
+            border-color: var(--border-hover);
+            color: var(--text) !important;
+        }
+
+        .nav-github svg { width: 16px; height: 16px; }
+
+        /* ── Shared ── */
+        section { padding: 6rem 2rem; }
+
+        .container { max-width: 1080px; margin: 0 auto; }
+
+        .section-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+
+        .section-desc {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+            line-height: 1.7;
+            max-width: 560px;
+        }
+
+        /* ── Hero ── */
+        .hero {
+            min-height: 100vh;
             display: flex;
-            gap: 0.75rem;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding-top: 5rem;
+            position: relative;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-status {
+            display: inline-block;
+            padding: 0.3rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: rgba(249, 115, 22, 0.1);
+            color: var(--accent);
+            border: 1px solid rgba(249, 115, 22, 0.25);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 2rem;
+            animation: fadeDown 0.6s ease;
+        }
+
+        .hero-title {
+            font-size: clamp(3.5rem, 8vw, 6rem);
+            font-weight: 800;
+            letter-spacing: -0.05em;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), var(--accent-red));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: fadeDown 0.6s ease 0.1s both;
+        }
+
+        .hero-subtitle {
+            font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+            color: var(--text-muted);
+            font-weight: 400;
+            max-width: 520px;
+            line-height: 1.7;
+            margin-bottom: 2.5rem;
+            animation: fadeDown 0.6s ease 0.2s both;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 1rem;
             flex-wrap: wrap;
             justify-content: center;
             margin-bottom: 3rem;
+            animation: fadeDown 0.6s ease 0.3s both;
         }
 
-        .badge {
-            padding: 0.375rem 0.875rem;
-            border-radius: 9999px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            border: 1px solid #27272a;
-            color: #a1a1aa;
-            background: #18181b;
-        }
-
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-            max-width: 720px;
-            width: 100%;
-            margin-bottom: 3rem;
-        }
-
-        .feature {
-            text-align: left;
-            padding: 1.25rem;
-            border-radius: 12px;
-            border: 1px solid #27272a;
-            background: #18181b;
-        }
-
-        .feature h3 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            margin-bottom: 0.375rem;
-            color: #fafafa;
-        }
-
-        .feature p {
-            font-size: 0.8rem;
-            color: #71717a;
-            line-height: 1.5;
-        }
-
-        .cta {
+        .btn-primary {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.75rem 1.5rem;
+            padding: 0.75rem 1.75rem;
             border-radius: 8px;
-            background: #fafafa;
-            color: #09090b;
+            background: var(--text);
+            color: var(--bg);
             text-decoration: none;
             font-weight: 600;
             font-size: 0.95rem;
-            transition: opacity 0.15s;
+            transition: transform 0.15s, box-shadow 0.15s;
         }
 
-        .cta:hover { opacity: 0.85; }
-
-        .cta svg {
-            width: 20px;
-            height: 20px;
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(250, 250, 250, 0.15);
         }
 
-        .status {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.75rem;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            border: 1px solid var(--border);
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--border-hover);
+            color: var(--text);
+        }
+
+        .hero-stack {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            animation: fadeDown 0.6s ease 0.4s both;
+        }
+
+        .hero-stack span {
+            padding: 0.3rem 0.75rem;
             border-radius: 9999px;
             font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            background: var(--bg-card);
+        }
+
+        /* ── Preview ── */
+        .preview {
+            padding-top: 2rem;
+            padding-bottom: 6rem;
+        }
+
+        .preview-window {
+            max-width: 960px;
+            margin: 0 auto;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .preview-titlebar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .preview-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border-hover);
+        }
+
+        .preview-body {
+            display: grid;
+            grid-template-columns: 200px 260px 1fr;
+            min-height: 400px;
+        }
+
+        .preview-sidebar {
+            padding: 1rem;
+            border-right: 1px solid var(--border);
+        }
+
+        .preview-sidebar-item {
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .preview-sidebar-item.active {
+            background: rgba(249, 115, 22, 0.1);
+            color: var(--accent);
+        }
+
+        .preview-sidebar-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: var(--border);
+        }
+
+        .preview-sidebar-item.active .preview-sidebar-icon {
+            background: rgba(249, 115, 22, 0.3);
+        }
+
+        .preview-list {
+            padding: 1rem;
+            border-right: 1px solid var(--border);
+        }
+
+        .preview-email {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            cursor: default;
+        }
+
+        .preview-email.selected {
+            background: rgba(249, 115, 22, 0.08);
+            border: 1px solid rgba(249, 115, 22, 0.15);
+        }
+
+        .preview-email:not(.selected) {
+            border: 1px solid transparent;
+        }
+
+        .preview-email-from {
+            font-size: 0.8rem;
             font-weight: 600;
-            background: #1c1917;
-            color: #f97316;
-            border: 1px solid #431407;
-            margin-bottom: 1.5rem;
+            color: var(--text);
+            margin-bottom: 0.15rem;
+        }
+
+        .preview-email-subject {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.15rem;
+        }
+
+        .preview-email-snippet {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+
+        .preview-content {
+            padding: 1.5rem;
+        }
+
+        .preview-content-header {
+            margin-bottom: 1.25rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .preview-content-subject {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .preview-content-meta {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        .preview-content-body {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        .preview-content-body p { margin-bottom: 0.75rem; }
+
+        .preview-search {
+            margin: 0 1rem 1rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+        }
+
+        /* ── Features ── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.25rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            transition: border-color 0.25s, transform 0.25s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+        }
+
+        .feature-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: rgba(249, 115, 22, 0.1);
+            border: 1px solid rgba(249, 115, 22, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        /* ── Stack ── */
+        .stack-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.25rem;
+            margin-top: 3rem;
+        }
+
+        .stack-card {
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+
+        .stack-card h3 {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+        }
+
+        .stack-items { display: flex; flex-direction: column; gap: 0.6rem; }
+
+        .stack-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        .stack-item-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .stack-item-label { color: var(--text); font-weight: 500; }
+        .stack-item-desc { color: var(--text-dim); font-size: 0.8rem; margin-left: auto; }
+
+        /* ── Quick Start ── */
+        .quickstart-tabs {
+            display: flex;
+            gap: 0;
+            margin-top: 3rem;
+            margin-bottom: 0;
+        }
+
+        .quickstart-tab {
+            padding: 0.6rem 1.25rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            background: transparent;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .quickstart-tab.active {
+            color: var(--text);
+            background: var(--bg-card);
+            border-color: var(--border);
+        }
+
+        .quickstart-tab:not(.active):hover { color: var(--text-muted); }
+
+        .quickstart-panel {
+            display: none;
+            padding: 1.5rem;
+            border-radius: 0 12px 12px 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+        }
+
+        .quickstart-panel.active { display: block; }
+
+        pre {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            overflow-x: auto;
+            font-size: 0.82rem;
+            line-height: 1.7;
+            color: var(--text-muted);
+        }
+
+        code { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
+
+        .code-comment { color: var(--text-dim); }
+        .code-string { color: #a5d6ff; }
+        .code-flag { color: #d2a8ff; }
+
+        .quickstart-note {
+            margin-top: 1rem;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        .quickstart-note a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .quickstart-note a:hover { text-decoration: underline; }
+
+        /* ── Comparison ── */
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 3rem;
+            font-size: 0.9rem;
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            padding: 0.85rem 1.25rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .comparison-table th {
+            color: var(--text-dim);
+            font-weight: 600;
+            font-size: 0.8rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
 
+        .comparison-table td:first-child { font-weight: 500; }
+        .comparison-table td { color: var(--text-muted); }
+
+        .check { color: var(--accent); }
+        .cross { color: var(--text-dim); }
+
+        /* ── CTA ── */
+        .cta-section {
+            text-align: center;
+            padding: 8rem 2rem;
+        }
+
+        .cta-section .section-title {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .cta-section .section-desc {
+            margin: 0 auto 2.5rem;
+            text-align: center;
+        }
+
+        /* ── Footer ── */
         footer {
             text-align: center;
-            padding: 2rem;
-            color: #3f3f46;
+            padding: 3rem 2rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-dim);
             font-size: 0.8rem;
         }
 
         footer a {
-            color: #71717a;
+            color: var(--text-dim);
             text-decoration: none;
+            transition: color 0.2s;
         }
 
-        footer a:hover { color: #a1a1aa; }
+        footer a:hover { color: var(--text-muted); }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* ── Animations ── */
+        @keyframes fadeDown {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        .fade-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            .nav-links a:not(.nav-github) { display: none; }
+
+            .hero-title { font-size: 3rem; }
+
+            .preview-body { grid-template-columns: 1fr; }
+            .preview-sidebar, .preview-list { display: none; }
+
+            .features-grid { grid-template-columns: 1fr; }
+            .stack-grid { grid-template-columns: 1fr; }
+
+            .comparison-table { font-size: 0.8rem; }
+            .comparison-table th,
+            .comparison-table td { padding: 0.6rem 0.75rem; }
+        }
 
         @media (max-width: 480px) {
-            .logo { font-size: 3rem; }
-            .tagline { font-size: 1.1rem; }
-            .features { grid-template-columns: 1fr; }
+            .hero-title { font-size: 2.5rem; }
+            .hero-actions { flex-direction: column; align-items: center; }
+            section { padding: 4rem 1.25rem; }
         }
     </style>
 </head>
 <body>
-    <main class="hero">
-        <span class="status">Under Development</span>
-        <h1 class="logo">oxi</h1>
-        <p class="tagline">
+
+    <!-- Nav -->
+    <nav id="nav">
+        <a href="#" class="nav-logo">oxi</a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#stack">Stack</a>
+            <a href="#quickstart">Get Started</a>
+            <a href="https://github.com/c0h1b4/oxi" class="nav-github" target="_blank" rel="noopener">
+                <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                Star on GitHub
+            </a>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <span class="hero-status">Under Active Development</span>
+        <h1 class="hero-title">oxi</h1>
+        <p class="hero-subtitle">
             A modern, fast, and secure open-source webmail client.
-            Feature-complete Roundcube replacement that connects to any IMAP/SMTP server.
+            Drop-in Roundcube replacement for any IMAP/SMTP server.
         </p>
-
-        <div class="stack">
-            <span class="badge">Next.js</span>
-            <span class="badge">Rust</span>
-            <span class="badge">IMAP/SMTP</span>
-            <span class="badge">Tantivy Search</span>
-            <span class="badge">SQLite</span>
-            <span class="badge">Docker</span>
+        <div class="hero-actions">
+            <a href="#quickstart" class="btn-primary">Get Started</a>
+            <a href="https://github.com/c0h1b4/oxi" class="btn-secondary" target="_blank" rel="noopener">
+                <svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                View on GitHub
+            </a>
         </div>
+        <div class="hero-stack">
+            <span>Next.js 16</span>
+            <span>React 19</span>
+            <span>Rust</span>
+            <span>Axum</span>
+            <span>Tantivy</span>
+            <span>SQLite</span>
+            <span>Docker</span>
+        </div>
+    </section>
 
-        <div class="features">
-            <div class="feature">
-                <h3>Fast</h3>
-                <p>Rust backend with async I/O. SQLite cache and Tantivy full-text search for instant results across thousands of emails.</p>
-            </div>
-            <div class="feature">
-                <h3>Secure</h3>
-                <p>Memory-safe Rust. No PHP attack surface. HTML sanitization, CSP headers, PGP/S-MIME encryption support.</p>
-            </div>
-            <div class="feature">
-                <h3>Modern UI</h3>
-                <p>Clean React frontend with Next.js and Tailwind. Thread view, drag-and-drop, keyboard shortcuts, mobile-responsive.</p>
-            </div>
-            <div class="feature">
-                <h3>Drop-in</h3>
-                <p>Connects to any existing mail server. Single Docker image. No bundled mail server, no vendor lock-in.</p>
+    <!-- Preview -->
+    <section class="preview">
+        <div class="container">
+            <div class="preview-window fade-in">
+                <div class="preview-titlebar">
+                    <span class="preview-dot"></span>
+                    <span class="preview-dot"></span>
+                    <span class="preview-dot"></span>
+                </div>
+                <div class="preview-body">
+                    <div class="preview-sidebar">
+                        <div class="preview-sidebar-item active">
+                            <span class="preview-sidebar-icon"></span> Inbox
+                        </div>
+                        <div class="preview-sidebar-item">
+                            <span class="preview-sidebar-icon"></span> Sent
+                        </div>
+                        <div class="preview-sidebar-item">
+                            <span class="preview-sidebar-icon"></span> Drafts
+                        </div>
+                        <div class="preview-sidebar-item">
+                            <span class="preview-sidebar-icon"></span> Archive
+                        </div>
+                        <div class="preview-sidebar-item">
+                            <span class="preview-sidebar-icon"></span> Trash
+                        </div>
+                    </div>
+                    <div class="preview-list">
+                        <div class="preview-search">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            Search emails...
+                        </div>
+                        <div class="preview-email selected">
+                            <div class="preview-email-from">Alice Chen</div>
+                            <div class="preview-email-subject">Re: Q4 Product Roadmap</div>
+                            <div class="preview-email-snippet">Hey, I reviewed the draft and have a few...</div>
+                        </div>
+                        <div class="preview-email">
+                            <div class="preview-email-from">GitHub</div>
+                            <div class="preview-email-subject">[oxi] PR #42 merged</div>
+                            <div class="preview-email-snippet">Your pull request has been merged into main...</div>
+                        </div>
+                        <div class="preview-email">
+                            <div class="preview-email-from">David Park</div>
+                            <div class="preview-email-subject">Design system updates</div>
+                            <div class="preview-email-snippet">Attached the latest component specs for...</div>
+                        </div>
+                        <div class="preview-email">
+                            <div class="preview-email-from">Sarah Wilson</div>
+                            <div class="preview-email-subject">Meeting notes &mdash; Sprint 14</div>
+                            <div class="preview-email-snippet">Here are the action items from today's...</div>
+                        </div>
+                    </div>
+                    <div class="preview-content">
+                        <div class="preview-content-header">
+                            <div class="preview-content-subject">Re: Q4 Product Roadmap</div>
+                            <div class="preview-content-meta">Alice Chen &lt;alice@example.com&gt; &middot; 2 hours ago</div>
+                        </div>
+                        <div class="preview-content-body">
+                            <p>Hey,</p>
+                            <p>I reviewed the draft and have a few suggestions for the search feature prioritization. The Tantivy integration looks solid &mdash; instant full-text search will be a big differentiator.</p>
+                            <p>Can we sync tomorrow to walk through the calendar integration timeline? I think we can ship it in the next sprint if we scope it to read-only iCal parsing first.</p>
+                            <p>Best,<br>Alice</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
+    </section>
 
-        <a href="https://github.com/c0h1b4/oxi" class="cta">
-            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            View on GitHub
-        </a>
-    </main>
+    <!-- Features -->
+    <section id="features">
+        <div class="container">
+            <div class="section-label fade-in">Features</div>
+            <h2 class="section-title fade-in">Everything you need in a webmail client</h2>
+            <p class="section-desc fade-in">Built for speed and simplicity. No bloat, no bundled mail server &mdash; just a clean, modern interface for your existing email infrastructure.</p>
 
+            <div class="features-grid">
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#9993;</div>
+                    <h3>Full Email Management</h3>
+                    <p>Read, compose, reply, forward, and organize emails with a rich text editor powered by Tiptap.</p>
+                </div>
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#128269;</div>
+                    <h3>Instant Search</h3>
+                    <p>Tantivy-powered full-text search delivers results across thousands of emails in milliseconds.</p>
+                </div>
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#9889;</div>
+                    <h3>Real-Time Sync</h3>
+                    <p>WebSocket-driven live mailbox updates. New emails appear instantly without refreshing.</p>
+                </div>
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#128197;</div>
+                    <h3>Calendar</h3>
+                    <p>iCal event parsing with calendar view. See your schedule alongside your emails.</p>
+                </div>
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#128274;</div>
+                    <h3>Secure by Default</h3>
+                    <p>Memory-safe Rust backend. IMAP credential auth, session tokens, rate limiting, HTML sanitization.</p>
+                </div>
+                <div class="feature-card fade-in">
+                    <div class="feature-icon">&#128230;</div>
+                    <h3>One Docker Image</h3>
+                    <p>Single container serves the full application. Connects to any IMAP/SMTP server. No vendor lock-in.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stack -->
+    <section id="stack" style="background: var(--bg-card);">
+        <div class="container">
+            <div class="section-label fade-in">Tech Stack</div>
+            <h2 class="section-title fade-in">Built with the best tools</h2>
+            <p class="section-desc fade-in">A React + Rust stack designed for performance, reliability, and developer experience.</p>
+
+            <div class="stack-grid">
+                <div class="stack-card fade-in">
+                    <h3>Frontend</h3>
+                    <div class="stack-items">
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #fafafa;"></span>
+                            <span class="stack-item-label">Next.js 16</span>
+                            <span class="stack-item-desc">Static export</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #61dafb;"></span>
+                            <span class="stack-item-label">React 19</span>
+                            <span class="stack-item-desc">UI framework</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #38bdf8;"></span>
+                            <span class="stack-item-label">Tailwind CSS 4</span>
+                            <span class="stack-item-desc">Styling</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #fafafa;"></span>
+                            <span class="stack-item-label">Shadcn/ui</span>
+                            <span class="stack-item-desc">Components</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #f97316;"></span>
+                            <span class="stack-item-label">Zustand</span>
+                            <span class="stack-item-desc">State management</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #ef4444;"></span>
+                            <span class="stack-item-label">TanStack Query</span>
+                            <span class="stack-item-desc">Data fetching</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="stack-card fade-in">
+                    <h3>Backend</h3>
+                    <div class="stack-items">
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #dea584;"></span>
+                            <span class="stack-item-label">Rust</span>
+                            <span class="stack-item-desc">Language</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #7c3aed;"></span>
+                            <span class="stack-item-label">Axum</span>
+                            <span class="stack-item-desc">HTTP framework</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #22c55e;"></span>
+                            <span class="stack-item-label">Tokio</span>
+                            <span class="stack-item-desc">Async runtime</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #3b82f6;"></span>
+                            <span class="stack-item-label">Tantivy</span>
+                            <span class="stack-item-desc">Full-text search</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #06b6d4;"></span>
+                            <span class="stack-item-label">SQLite</span>
+                            <span class="stack-item-desc">Per-user cache</span>
+                        </div>
+                        <div class="stack-item">
+                            <span class="stack-item-dot" style="background: #eab308;"></span>
+                            <span class="stack-item-label">Lettre</span>
+                            <span class="stack-item-desc">SMTP client</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section id="quickstart">
+        <div class="container">
+            <div class="section-label fade-in">Get Started</div>
+            <h2 class="section-title fade-in">Up and running in minutes</h2>
+            <p class="section-desc fade-in">Deploy with Docker or build from source. Just point it at your mail server.</p>
+
+            <div class="quickstart-tabs fade-in">
+                <button class="quickstart-tab active" onclick="switchTab('docker')">Docker</button>
+                <button class="quickstart-tab" onclick="switchTab('compose')">Compose</button>
+                <button class="quickstart-tab" onclick="switchTab('source')">From Source</button>
+            </div>
+
+            <div id="tab-docker" class="quickstart-panel active fade-in">
+                <pre><code><span class="code-comment"># Pull and run</span>
+<span class="code-flag">docker</span> run -d \
+  --name oxi \
+  -p <span class="code-string">3001:3001</span> \
+  -e <span class="code-string">IMAP_HOST=mail.example.com</span> \
+  -e <span class="code-string">SMTP_HOST=mail.example.com</span> \
+  -v oxi-data:/data \
+  <span class="code-string">ghcr.io/c0h1b4/oxi:latest</span></code></pre>
+                <p class="quickstart-note">Then open <a href="http://localhost:3001">localhost:3001</a> and log in with your email credentials.</p>
+            </div>
+
+            <div id="tab-compose" class="quickstart-panel">
+                <pre><code><span class="code-comment"># docker-compose.yml</span>
+<span class="code-flag">services</span>:
+  app:
+    image: <span class="code-string">ghcr.io/c0h1b4/oxi:latest</span>
+    ports:
+      - <span class="code-string">"3001:3001"</span>
+    environment:
+      - <span class="code-string">IMAP_HOST=mail.example.com</span>
+      - <span class="code-string">SMTP_HOST=mail.example.com</span>
+    volumes:
+      - oxi-data:/data
+
+<span class="code-flag">volumes</span>:
+  oxi-data:</code></pre>
+                <p class="quickstart-note">Run <code>docker compose up -d</code> and open <a href="http://localhost:3001">localhost:3001</a>.</p>
+            </div>
+
+            <div id="tab-source" class="quickstart-panel">
+                <pre><code><span class="code-comment"># Clone and build</span>
+git clone https://github.com/c0h1b4/oxi.git && cd oxi
+
+<span class="code-comment"># Frontend</span>
+cd frontend && bun install && bun run build && cd ..
+
+<span class="code-comment"># Backend</span>
+cd backend && cargo build --release && cd ..
+
+<span class="code-comment"># Run</span>
+<span class="code-flag">STATIC_DIR</span>=frontend/out \
+<span class="code-flag">IMAP_HOST</span>=<span class="code-string">mail.example.com</span> \
+<span class="code-flag">SMTP_HOST</span>=<span class="code-string">mail.example.com</span> \
+  ./backend/target/release/oxi-email-server</code></pre>
+                <p class="quickstart-note">Requires <a href="https://bun.sh">Bun</a> and <a href="https://rustup.rs">Rust</a>. Open <a href="http://localhost:3001">localhost:3001</a> when ready.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison -->
+    <section style="background: var(--bg-card);">
+        <div class="container">
+            <div class="section-label fade-in">Why oxi?</div>
+            <h2 class="section-title fade-in">Compared to alternatives</h2>
+            <p class="section-desc fade-in">oxi fills a gap &mdash; a modern webmail UI without the baggage of a full mail platform.</p>
+
+            <table class="comparison-table fade-in">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>oxi</th>
+                        <th>Roundcube</th>
+                        <th>SOGo</th>
+                        <th>Mailcow</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Modern UI</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                    </tr>
+                    <tr>
+                        <td>Memory-safe backend</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                    </tr>
+                    <tr>
+                        <td>Full-text search</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="check">&#10003;</td>
+                        <td class="check">&#10003;</td>
+                    </tr>
+                    <tr>
+                        <td>No bundled mail server</td>
+                        <td class="check">&#10003;</td>
+                        <td class="check">&#10003;</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                    </tr>
+                    <tr>
+                        <td>WebSocket live sync</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                    </tr>
+                    <tr>
+                        <td>Single Docker image</td>
+                        <td class="check">&#10003;</td>
+                        <td class="check">&#10003;</td>
+                        <td class="cross">&#10005;</td>
+                        <td class="cross">&#10005;</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+        <div class="container">
+            <h2 class="section-title fade-in">Ready to modernize your webmail?</h2>
+            <p class="section-desc fade-in">oxi is open source and free forever. Star the repo, try it out, or contribute.</p>
+            <div class="hero-actions fade-in">
+                <a href="https://github.com/c0h1b4/oxi" class="btn-primary" target="_blank" rel="noopener">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="18" height="18"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                    Star on GitHub
+                </a>
+                <a href="#quickstart" class="btn-secondary">Get Started</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
     <footer>
-        <a href="https://github.com/c0h1b4/oxi">GitHub</a> &middot; MIT License
+        <div class="footer-links">
+            <a href="https://github.com/c0h1b4/oxi">GitHub</a>
+            <a href="https://github.com/c0h1b4/oxi/issues">Issues</a>
+            <a href="https://github.com/c0h1b4/oxi/blob/main/LICENSE">MIT License</a>
+        </div>
+        <p>&copy; 2025 oxi contributors</p>
     </footer>
+
+    <script>
+        // Nav scroll effect
+        const nav = document.getElementById('nav');
+        window.addEventListener('scroll', () => {
+            nav.classList.toggle('scrolled', window.scrollY > 20);
+        });
+
+        // Tab switching
+        function switchTab(tab) {
+            document.querySelectorAll('.quickstart-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.quickstart-panel').forEach(p => p.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+
+        // Scroll fade-in
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    </script>
+
 </body>
 </html>
