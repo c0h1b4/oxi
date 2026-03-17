@@ -43,25 +43,38 @@ use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
 use crate::smtp::client::SmtpClient;
 
-/// Per-IP key extractor that falls back to the loopback address when
-/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests using
-/// `oneshot`).  In production the server is started with
-/// `into_make_service_with_connect_info::<SocketAddr>()` so the real
-/// peer IP is always present.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PeerIpKeyExtractorFallback;
+/// Per-IP key extractor that supports trusted reverse proxies.
+///
+/// When the peer IP is in the configured `trusted_proxies` list, the
+/// leftmost `X-Forwarded-For` value is used as the client IP. Otherwise
+/// the direct peer IP is used. Falls back to loopback when
+/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests).
+#[derive(Debug, Clone)]
+struct ProxyAwareIpExtractor {
+    trusted_proxies: Vec<IpAddr>,
+}
 
-impl KeyExtractor for PeerIpKeyExtractorFallback {
+impl KeyExtractor for ProxyAwareIpExtractor {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        // Try ConnectInfo<SocketAddr> first (production path).
-        let ip = req
+        let peer_ip = req
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
-            .map(|ci: &ConnectInfo<SocketAddr>| ci.0.ip());
+            .map(|ci| ci.0.ip())
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-        Ok(ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+        if self.trusted_proxies.contains(&peer_ip) {
+            if let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+                if let Some(first) = forwarded.split(',').next() {
+                    if let Ok(client_ip) = first.trim().parse::<IpAddr>() {
+                        return Ok(client_ip);
+                    }
+                }
+            }
+        }
+
+        Ok(peer_ip)
     }
 }
 
@@ -144,7 +157,9 @@ pub fn create_router(
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
-        .key_extractor(PeerIpKeyExtractorFallback)
+        .key_extractor(ProxyAwareIpExtractor {
+            trusted_proxies: config.parsed_trusted_proxies(),
+        })
         .period(Duration::from_secs(12))
         .burst_size(5)
         .finish()

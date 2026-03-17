@@ -31,6 +31,7 @@
             base_path: None,
             serve_static: true,
             cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
@@ -51,6 +52,7 @@
             base_path: None,
             serve_static: true,
             cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
@@ -71,6 +73,7 @@
             base_path: None,
             serve_static: true,
             cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
