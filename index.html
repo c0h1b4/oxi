@@ -567,6 +567,7 @@
         /* ── Comparison ── */
         .comparison-table {
             width: 100%;
+            table-layout: fixed;
             border-collapse: collapse;
             margin-top: 3rem;
             font-size: 0.9rem;
@@ -577,7 +578,11 @@
             padding: 0.85rem 1.25rem;
             text-align: left;
             border-bottom: 1px solid var(--border);
+            width: 16%;
         }
+
+        .comparison-table th:first-child,
+        .comparison-table td:first-child { width: 36%; }
 
         .comparison-table th {
             color: var(--text-dim);
@@ -991,6 +996,20 @@ cd backend && cargo build --release && cd ..
                     </tr>
                 </thead>
                 <tbody>
+                    <tr>
+                        <td>Backend language</td>
+                        <td>Rust</td>
+                        <td>PHP</td>
+                        <td>Objective-C</td>
+                        <td>PHP / Python</td>
+                    </tr>
+                    <tr>
+                        <td>Frontend framework</td>
+                        <td>React / Next.js</td>
+                        <td>jQuery</td>
+                        <td>Angular</td>
+                        <td>Vue.js</td>
+                    </tr>
                     <tr>
                         <td>Modern UI</td>
                         <td class="check">&#10003;</td>
