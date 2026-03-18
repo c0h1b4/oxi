@@ -31,6 +31,7 @@ function isPdfType(ct: string): boolean {
 interface AttachmentPreviewerProps {
   attachments: Attachment[];
   baseUrl: string;
+  accountId: string | null;
   initialIndex: number;
   onClose: () => void;
 }
@@ -38,6 +39,7 @@ interface AttachmentPreviewerProps {
 export function AttachmentPreviewer({
   attachments,
   baseUrl,
+  accountId,
   initialIndex,
   onClose,
 }: AttachmentPreviewerProps) {
@@ -48,7 +50,11 @@ export function AttachmentPreviewer({
   const ContentContainer = shouldAnimate ? motion.div : "div";
   const [index, setIndex] = useState(initialIndex);
   const att = attachments[index];
-  const url = `${baseUrl}/${att.id}`;
+  const buildUrl = (attId: string) => {
+    const path = `${baseUrl}/${attId}`;
+    return accountId ? `${path}?account_id=${encodeURIComponent(accountId)}` : path;
+  };
+  const url = buildUrl(att.id);
 
   const goPrev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), [setIndex]);
   const goNext = useCallback(
@@ -166,7 +172,7 @@ export function AttachmentPreviewer({
           {attachments.length > 1 && (
             <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-muted/30 px-4 py-2">
               {attachments.map((thumb, i) => {
-                const thumbUrl = `${baseUrl}/${thumb.id}`;
+                const thumbUrl = buildUrl(thumb.id);
                 const isActive = i === index;
                 return (
                   <button

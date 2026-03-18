@@ -39,28 +39,24 @@ export default function MailPage() {
   if (viewMode === "contacts") {
     viewContent = (
       <div className="flex h-full min-h-0 w-full overflow-hidden">
-        <NavRail />
         <ContactsPanel />
       </div>
     );
   } else if (viewMode === "calendar") {
     viewContent = (
       <div className="flex h-full min-h-0 w-full overflow-hidden">
-        <NavRail />
         <CalendarPanel />
       </div>
     );
   } else if (viewMode === "settings") {
     viewContent = (
       <div className="flex h-full min-h-0 w-full overflow-hidden">
-        <NavRail />
         <SettingsPanel />
       </div>
     );
   } else {
     viewContent = (
       <ThreePanelLayout
-        navRail={<NavRail />}
         sidebar={<FolderTree />}
         messageList={<MessageList />}
         readingPane={<ReadingPane />}
@@ -91,7 +87,10 @@ export default function MailPage() {
     <WsContext.Provider value={wsContextValue}>
       <PreferencesLoader />
       {showBanner && <NotificationBanner onEnable={requestPermission} onDismiss={dismissBanner} />}
-      <div className="relative h-dvh w-full overflow-hidden">{content}</div>
+      <div className="flex h-dvh w-full overflow-hidden">
+        <NavRail />
+        <div className="relative min-w-0 flex-1">{content}</div>
+      </div>
       <KeyboardShortcuts />
       <CommandPalette />
     </WsContext.Provider>

@@ -274,7 +274,7 @@ function FolderItem({
             ? "bg-primary/10 font-semibold text-primary"
             : isActive
               ? "bg-primary/10 font-semibold text-primary"
-              : "font-medium text-sidebar-foreground hover:bg-sidebar-accent",
+              : "font-medium text-sidebar-foreground hover:bg-sidebar-foreground/10",
         )}
       >
         {getFolderIcon(folder.name)}
