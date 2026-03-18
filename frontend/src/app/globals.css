@@ -215,3 +215,12 @@
     transform: translateY(0);
   }
 }
+
+@keyframes hdd-blink {
+  0%, 100% { background-color: oklch(0.72 0.19 142); }
+  50% { background-color: oklch(0.53 0.15 142); }
+}
+
+.animate-hdd-blink {
+  animation: hdd-blink 400ms ease-in-out infinite;
+}
