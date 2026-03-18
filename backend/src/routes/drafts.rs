@@ -115,12 +115,18 @@ pub async fn upsert_draft_handler(
             password: session.password.clone(),
         };
 
+        // Resolve the actual Drafts folder name from the cached folder list.
+        let drafts_folder = db::folders::find_folder_by_attribute(&conn, "\\Drafts")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "Drafts".to_string());
+
         if let Ok(rfc822_bytes) = build_draft_rfc822(&req, &session.email) {
             if let Err(e) = imap_client
-                .append_message(&imap_creds, "Drafts", &rfc822_bytes, &["\\Draft", "\\Seen"])
+                .append_message(&imap_creds, &drafts_folder, &rfc822_bytes, &["\\Draft", "\\Seen"])
                 .await
             {
-                tracing::warn!(error = %e, "Failed to append draft to IMAP Drafts folder");
+                tracing::warn!(error = %e, folder = %drafts_folder, "Failed to append draft to IMAP Drafts folder");
             }
         }
     }
