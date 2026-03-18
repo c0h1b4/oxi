@@ -13,6 +13,7 @@ import {
   Keyboard,
   LogOut,
 } from "lucide-react";
+import { Tooltip } from "radix-ui";
 import { apiPost } from "@/lib/api";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
@@ -37,22 +38,36 @@ function NavButton({
   disabled?: boolean;
   onClick?: (event: NavButtonClickEvent) => void;
 }) {
+  const tooltipLabel = disabled ? `${label} (coming soon)` : label;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={disabled ? `${label} (coming soon)` : label}
-      title={disabled ? `${label} (coming soon)` : label}
-      className={cn(
-        "flex size-10 items-center justify-center rounded-lg transition-colors",
-        disabled
-          ? "cursor-default text-sidebar-foreground/30"
-          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-        active && "bg-sidebar-accent text-sidebar-foreground",
-      )}
-    >
-      {icon}
-    </button>
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={tooltipLabel}
+          className={cn(
+            "flex size-10 items-center justify-center rounded-lg transition-colors",
+            disabled
+              ? "cursor-default text-sidebar-foreground/30"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground",
+            active && "bg-sidebar-accent text-sidebar-foreground",
+          )}
+        >
+          {icon}
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content
+          side="right"
+          sideOffset={8}
+          className="rounded-md bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-md border border-border animate-in fade-in-0 zoom-in-95"
+        >
+          {tooltipLabel}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }
 
@@ -100,75 +115,77 @@ export function NavRail() {
   }, [router]);
 
   return (
-    <div className="relative flex h-full w-14 flex-col items-center border-r border-border bg-sidebar py-3">
-      {/* Logo */}
-      <div className="mb-4 flex size-10 items-center justify-center">
-        <span className="text-lg font-bold text-primary">o.</span>
+    <Tooltip.Provider delayDuration={400}>
+      <div className="relative flex h-full w-14 flex-col items-center border-r border-border bg-sidebar py-3">
+        {/* Logo */}
+        <div className="mb-4 flex size-10 items-center justify-center">
+          <span className="text-lg font-bold text-primary">o.</span>
+        </div>
+
+        {/* Top actions */}
+        <div className="flex flex-col items-center gap-1">
+          <NavButton
+            icon={<PenSquare className="size-5" />}
+            label="Compose"
+            onClick={() => useComposeStore.getState().openCompose()}
+          />
+          <NavButton
+            icon={<Mail className="size-5" />}
+            label="Mail"
+            active={viewMode === "mail"}
+            onClick={() => setViewMode("mail")}
+          />
+          <NavButton
+            icon={<Users className="size-5" />}
+            label="Contacts"
+            active={viewMode === "contacts"}
+            onClick={() => setViewMode(viewMode === "contacts" ? "mail" : "contacts")}
+          />
+          <NavButton
+            icon={<Calendar className="size-5" />}
+            label="Calendar"
+            active={viewMode === "calendar"}
+            onClick={() => setViewMode(viewMode === "calendar" ? "mail" : "calendar")}
+          />
+          <NavButton
+            icon={<Settings className="size-5" />}
+            label="Settings"
+            active={viewMode === "settings"}
+            onClick={() => setViewMode(viewMode === "settings" ? "mail" : "settings")}
+          />
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        <ConnectionStatus status={wsStatus} failCount={wsFailCount} />
+
+        {/* Bottom actions */}
+        <div className="flex flex-col items-center gap-1">
+          <NavButton
+            icon={
+              resolvedTheme === "dark" ? (
+                <Sun className="size-5" />
+              ) : (
+                <Moon className="size-5" />
+              )
+            }
+            label={resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+            onClick={toggleTheme}
+          />
+          <NavButton
+            icon={<Keyboard className="size-5" />}
+            label="Keyboard shortcuts"
+            onClick={() => useUiStore.getState().setShortcutsOpen(true)}
+          />
+          <NavButton
+            icon={<LogOut className="size-5" />}
+            label="Logout"
+            onClick={handleLogout}
+          />
+        </div>
+
       </div>
-
-      {/* Top actions */}
-      <div className="flex flex-col items-center gap-1">
-        <NavButton
-          icon={<PenSquare className="size-5" />}
-          label="Compose"
-          onClick={() => useComposeStore.getState().openCompose()}
-        />
-        <NavButton
-          icon={<Mail className="size-5" />}
-          label="Mail"
-          active={viewMode === "mail"}
-          onClick={() => setViewMode("mail")}
-        />
-        <NavButton
-          icon={<Users className="size-5" />}
-          label="Contacts"
-          active={viewMode === "contacts"}
-          onClick={() => setViewMode(viewMode === "contacts" ? "mail" : "contacts")}
-        />
-        <NavButton
-          icon={<Calendar className="size-5" />}
-          label="Calendar"
-          active={viewMode === "calendar"}
-          onClick={() => setViewMode(viewMode === "calendar" ? "mail" : "calendar")}
-        />
-        <NavButton
-          icon={<Settings className="size-5" />}
-          label="Settings"
-          active={viewMode === "settings"}
-          onClick={() => setViewMode(viewMode === "settings" ? "mail" : "settings")}
-        />
-      </div>
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      <ConnectionStatus status={wsStatus} failCount={wsFailCount} />
-
-      {/* Bottom actions */}
-      <div className="flex flex-col items-center gap-1">
-        <NavButton
-          icon={
-            resolvedTheme === "dark" ? (
-              <Sun className="size-5" />
-            ) : (
-              <Moon className="size-5" />
-            )
-          }
-          label={resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
-          onClick={toggleTheme}
-        />
-        <NavButton
-          icon={<Keyboard className="size-5" />}
-          label="Keyboard shortcuts"
-          onClick={() => useUiStore.getState().setShortcutsOpen(true)}
-        />
-        <NavButton
-          icon={<LogOut className="size-5" />}
-          label="Logout"
-          onClick={handleLogout}
-        />
-      </div>
-
-    </div>
+    </Tooltip.Provider>
   );
 }

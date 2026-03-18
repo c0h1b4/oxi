@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import {
   CalendarDays,
+  CalendarPlus,
+  Check,
   Clock,
   MapPin,
   AlignLeft,
@@ -12,6 +14,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { parseIcs, type IcsEvent } from "@/lib/ics-parser";
+import { useCreateEvent } from "@/hooks/useCalendar";
+import type { CreateEventRequest } from "@/types/calendar";
 
 interface IcsPreviewProps {
   url: string;
@@ -113,10 +117,25 @@ function EventCard({ event }: { event: IcsEvent }) {
   );
 }
 
+function icsEventToRequest(event: IcsEvent): CreateEventRequest {
+  const now = new Date().toISOString();
+  return {
+    title: event.summary || "Untitled Event",
+    description: event.description || undefined,
+    location: event.location || undefined,
+    start_time: event.dtstart?.toISOString() ?? now,
+    end_time: event.dtend?.toISOString() ?? event.dtstart?.toISOString() ?? now,
+    all_day: event.isAllDay,
+    attendees: event.attendees.length > 0 ? event.attendees.join(", ") : undefined,
+  };
+}
+
 export function IcsPreview({ url, filename }: IcsPreviewProps) {
   const [events, setEvents] = useState<IcsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
+  const createEvent = useCreateEvent();
 
   useEffect(() => {
     let cancelled = false;
@@ -144,6 +163,17 @@ export function IcsPreview({ url, filename }: IcsPreviewProps) {
       cancelled = true;
     };
   }, [url]);
+
+  async function handleAddToCalendar() {
+    try {
+      for (const event of events) {
+        await createEvent.mutateAsync(icsEventToRequest(event));
+      }
+      setAdded(true);
+    } catch {
+      // mutation error is available via createEvent.error
+    }
+  }
 
   if (loading) {
     return (
@@ -178,6 +208,30 @@ export function IcsPreview({ url, filename }: IcsPreviewProps) {
       {events.map((event, i) => (
         <EventCard key={i} event={event} />
       ))}
+      {added ? (
+        <span className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white">
+          <Check className="size-4" />
+          Added to Calendar
+        </span>
+      ) : (
+        <button
+          onClick={handleAddToCalendar}
+          disabled={createEvent.isPending}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {createEvent.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <CalendarPlus className="size-4" />
+          )}
+          {createEvent.isPending ? "Adding…" : "Add to Calendar"}
+        </button>
+      )}
+      {createEvent.error && (
+        <p className="text-sm text-destructive">
+          Failed to add event. Please try again.
+        </p>
+      )}
     </div>
   );
 }

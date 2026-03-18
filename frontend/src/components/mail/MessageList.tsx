@@ -405,9 +405,11 @@ export function MessageList() {
       <BulkActionBar />
 
       {/* Non-blocking refetch indicator */}
-      {isFetching && !isLoading && messages.length > 0 && (
-        <div className="h-0.5 shrink-0 animate-pulse bg-primary/30" />
-      )}
+      <div className="relative h-0">
+        {isFetching && !isLoading && messages.length > 0 && (
+          <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-primary/30" />
+        )}
+      </div>
 
       {/* Loading state (true initial load only) */}
       {isLoading && !data && (

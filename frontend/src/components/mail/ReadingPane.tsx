@@ -130,9 +130,7 @@ export function ReadingPane() {
     );
   }
 
-  const attachmentBaseUrl = activeAccountId
-    ? `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments?account_id=${encodeURIComponent(activeAccountId)}`
-    : `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
+  const attachmentBaseUrl = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
@@ -283,6 +281,7 @@ export function ReadingPane() {
         <AttachmentPreviewer
           attachments={data.attachments}
           baseUrl={attachmentBaseUrl}
+          accountId={activeAccountId}
           initialIndex={previewIndex}
           onClose={() => setPreviewIndex(null)}
         />
