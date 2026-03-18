@@ -243,6 +243,10 @@ function FolderItem({
     [folder.name, moveMessage],
   );
 
+  const isDrafts = isDraftsFolder(folder.name);
+  const { data: draftsData } = useListDrafts(isDrafts);
+  const badgeCount = isDrafts ? (draftsData?.drafts.length ?? 0) : folder.unread_count;
+
   if (isRenaming) {
     return (
       <div
@@ -256,10 +260,6 @@ function FolderItem({
       </div>
     );
   }
-
-  const isDrafts = isDraftsFolder(folder.name);
-  const { data: draftsData } = useListDrafts(isDrafts);
-  const badgeCount = isDrafts ? (draftsData?.drafts.length ?? 0) : folder.unread_count;
 
   return (
     <FolderContextMenu
