@@ -12,16 +12,12 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [authenticated, setAuthenticated] = useState(false);
   const setAccounts = useAuthStore((s) => s.setAccounts);
   const existingAccounts = useAuthStore((s) => s.accounts);
+  const [authenticated, setAuthenticated] = useState(existingAccounts.length > 0);
 
   useEffect(() => {
-    // If the login page already populated accounts, skip the redundant fetch
-    if (existingAccounts.length > 0) {
-      setAuthenticated(true);
-      return;
-    }
+    if (authenticated) return;
 
     let cancelled = false;
     fetchAccounts()
@@ -41,7 +37,7 @@ export default function AuthLayout({
     return () => {
       cancelled = true;
     };
-  }, [router, setAccounts, existingAccounts]);
+  }, [router, setAccounts, authenticated]);
 
   if (!authenticated) {
     return (

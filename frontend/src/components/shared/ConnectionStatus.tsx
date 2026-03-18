@@ -2,7 +2,7 @@
 
 import type { WsStatus } from "@/hooks/useWebSocket";
 import { cn } from "@/lib/utils";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 /**
  * Tracks in-flight fetch requests by monkey-patching globalThis.fetch.
@@ -12,7 +12,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
  */
 let inflight = 0;
 let active = false;
-let listeners = new Set<() => void>();
+const listeners = new Set<() => void>();
 let offTimer: ReturnType<typeof setTimeout> | null = null;
 
 function notify() {
