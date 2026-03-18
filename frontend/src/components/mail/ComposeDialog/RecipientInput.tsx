@@ -136,7 +136,7 @@ export function RecipientInput({
         className="w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
       />
       {showDropdown && results.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
           {isLoading && (
             <div className="px-3 py-2 text-xs text-muted-foreground">
               Searching...

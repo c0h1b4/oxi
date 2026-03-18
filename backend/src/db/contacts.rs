@@ -218,28 +218,33 @@ pub fn search_known_addresses(
     let pattern = format!("%{escaped}%");
 
     let sql = r#"
-        SELECT DISTINCT email, name FROM (
-            SELECT from_address AS email, COALESCE(from_name, '') AS name FROM messages
-            WHERE from_address LIKE ?1 ESCAPE '\'
-            AND from_address NOT IN (SELECT email FROM contacts)
-            
-            UNION
-            
-            SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
-            FROM messages, json_each(to_addresses)
-            WHERE json_valid(to_addresses)
-            AND value->>'address' LIKE ?1 ESCAPE '\'
-            AND value->>'address' NOT IN (SELECT email FROM contacts)
-            
-            UNION
-            
-            SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
-            FROM messages, json_each(cc_addresses)
-            WHERE json_valid(cc_addresses)
-            AND value->>'address' LIKE ?1 ESCAPE '\'
-            AND value->>'address' NOT IN (SELECT email FROM contacts)
+        SELECT email, name FROM (
+            SELECT email, name,
+                   ROW_NUMBER() OVER (PARTITION BY email ORDER BY LENGTH(name) DESC) AS rn
+            FROM (
+                SELECT from_address AS email, COALESCE(from_name, '') AS name FROM messages
+                WHERE from_address LIKE ?1 ESCAPE '\'
+                AND from_address NOT IN (SELECT email FROM contacts)
+
+                UNION ALL
+
+                SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
+                FROM messages, json_each(to_addresses)
+                WHERE json_valid(to_addresses)
+                AND value->>'address' LIKE ?1 ESCAPE '\'
+                AND value->>'address' NOT IN (SELECT email FROM contacts)
+
+                UNION ALL
+
+                SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
+                FROM messages, json_each(cc_addresses)
+                WHERE json_valid(cc_addresses)
+                AND value->>'address' LIKE ?1 ESCAPE '\'
+                AND value->>'address' NOT IN (SELECT email FROM contacts)
+            )
+            WHERE email != ''
         )
-        WHERE email != ''
+        WHERE rn = 1
         ORDER BY email ASC
         LIMIT ?2
     "#;

@@ -265,10 +265,10 @@ pub async fn autocomplete_all_handler(
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let contacts = db::contacts::list_contacts(&conn, None, 1000, 0)
+    let contacts = db::contacts::list_contacts(&conn, None, 50000, 0)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let known = db::contacts::search_known_addresses(&conn, "", 1000)
+    let known = db::contacts::search_known_addresses(&conn, "", 50000)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let mut seen_emails = std::collections::HashSet::new();
