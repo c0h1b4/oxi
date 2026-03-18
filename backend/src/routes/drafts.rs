@@ -10,6 +10,7 @@ use crate::auth::session::SessionState;
 use crate::config::AppConfig;
 use crate::db;
 use crate::error::AppError;
+use crate::imap::client::{ImapClient, ImapCredentials};
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -84,6 +85,7 @@ struct DeleteResponse {
 pub async fn upsert_draft_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(imap_client): Extension<Arc<dyn ImapClient>>,
     Json(req): Json<UpsertDraftRequest>,
 ) -> Result<Response, AppError> {
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
@@ -103,11 +105,86 @@ pub async fn upsert_draft_handler(
     )
     .map_err(AppError::InternalError)?;
 
+    // Best-effort: append draft to IMAP Drafts folder so other clients can see it.
+    if let Some(imap_host) = config.imap_host.as_deref() {
+        let imap_creds = ImapCredentials {
+            host: imap_host.to_string(),
+            port: config.imap_port,
+            tls: config.tls_enabled,
+            email: session.email.clone(),
+            password: session.password.clone(),
+        };
+
+        if let Ok(rfc822_bytes) = build_draft_rfc822(&req, &session.email) {
+            if let Err(e) = imap_client
+                .append_message(&imap_creds, "Drafts", &rfc822_bytes, &["\\Draft", "\\Seen"])
+                .await
+            {
+                tracing::warn!(error = %e, "Failed to append draft to IMAP Drafts folder");
+            }
+        }
+    }
+
     Ok(Json(DraftResponse {
         id: req.id,
         status: "saved".to_string(),
     })
     .into_response())
+}
+
+/// Build a minimal RFC822 message from draft fields for IMAP APPEND.
+fn build_draft_rfc822(req: &UpsertDraftRequest, from_email: &str) -> Result<Vec<u8>, String> {
+    use lettre::message::{header::ContentType, Mailbox, MultiPart, SinglePart};
+
+    let from_mailbox: Mailbox = from_email
+        .parse()
+        .map_err(|e: lettre::address::AddressError| e.to_string())?;
+
+    let mut builder = lettre::Message::builder()
+        .from(from_mailbox)
+        .subject(&req.subject);
+
+    // Parse comma-separated address lists.
+    for addr in req.to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(mailbox) = addr.parse::<Mailbox>() {
+            builder = builder.to(mailbox);
+        }
+    }
+    for addr in req.cc.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(mailbox) = addr.parse::<Mailbox>() {
+            builder = builder.cc(mailbox);
+        }
+    }
+    if let Some(ref irt) = req.in_reply_to {
+        builder = builder.in_reply_to(irt.clone());
+    }
+    if let Some(ref refs) = req.references {
+        builder = builder.references(refs.clone());
+    }
+
+    let email = if let Some(ref html) = req.html_body {
+        builder
+            .multipart(
+                MultiPart::alternative()
+                    .singlepart(
+                        SinglePart::builder()
+                            .content_type(ContentType::TEXT_PLAIN)
+                            .body(req.text_body.clone()),
+                    )
+                    .singlepart(
+                        SinglePart::builder()
+                            .content_type(ContentType::TEXT_HTML)
+                            .body(html.clone()),
+                    ),
+            )
+            .map_err(|e| e.to_string())?
+    } else {
+        builder
+            .body(req.text_body.clone())
+            .map_err(|e| e.to_string())?
+    };
+
+    Ok(email.formatted())
 }
 
 /// `GET /api/drafts` — List all drafts.

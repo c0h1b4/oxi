@@ -17,6 +17,7 @@ import {
 import { useIsFetching } from "@tanstack/react-query";
 import { useFolders, useRenameFolder } from "@/hooks/useFolders";
 import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
+import { useListDrafts } from "@/hooks/useCompose";
 import { useUiStore } from "@/stores/useUiStore";
 import { Button } from "@/components/ui/button";
 import { FolderContextMenu } from "@/components/mail/FolderContextMenu";
@@ -256,6 +257,10 @@ function FolderItem({
     );
   }
 
+  const isDrafts = isDraftsFolder(folder.name);
+  const { data: draftsData } = useListDrafts(isDrafts);
+  const badgeCount = isDrafts ? (draftsData?.drafts.length ?? 0) : folder.unread_count;
+
   return (
     <FolderContextMenu
       folderName={folder.name}
@@ -279,9 +284,16 @@ function FolderItem({
       >
         {getFolderIcon(folder.name)}
         <span className="flex-1 truncate text-left">{formatFolderName(folder.name)}</span>
-        {folder.unread_count > 0 ? (
-          <span className="min-w-[20px] rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold text-primary-foreground">
-            {folder.unread_count}
+        {badgeCount > 0 ? (
+          <span
+            className={cn(
+              "min-w-[20px] rounded-full px-1.5 py-0.5 text-center text-xs font-semibold",
+              isDrafts
+                ? "bg-muted-foreground/20 text-muted-foreground"
+                : "bg-primary text-primary-foreground",
+            )}
+          >
+            {badgeCount}
           </span>
         ) : isFetching > 0 ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />

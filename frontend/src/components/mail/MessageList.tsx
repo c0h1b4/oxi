@@ -216,7 +216,7 @@ export function MessageList() {
   const totalCount = isTagView
     ? (tagQuery.data?.total_count ?? 0)
     : (data?.pages[0]?.total_count ?? 0);
-  const isSyncing = data?.pages[0]?.syncing ?? false;
+  const isSyncing = isDraftsFolder(activeFolder) ? false : (data?.pages[0]?.syncing ?? false);
 
   // Resolve tag name for header display.
   const activeTagName = tagsData?.tags.find((t) => t.id === activeTagId)?.name;
