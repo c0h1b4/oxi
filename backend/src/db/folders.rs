@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 /// A cached IMAP folder, mirroring the `folders` table schema.
@@ -330,6 +330,18 @@ pub fn rename_folder_in_cache(conn: &Connection, old_name: &str, new_name: &str)
     )
     .map_err(|e| format!("Failed to rename folder: {e}"))?;
     Ok(())
+}
+
+/// Find a folder whose `flags` column contains the given attribute (e.g. `\Drafts`, `\Sent`).
+/// Returns the folder name if found.
+pub fn find_folder_by_attribute(conn: &Connection, attribute: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT name FROM folders WHERE flags LIKE '%' || ?1 || '%' LIMIT 1",
+        [attribute],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
