@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useEffect, useState, useReducer, useMemo } from "react";
+import { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 
 interface EmailRendererProps {
@@ -67,7 +67,6 @@ export function EmailRenderer({
   emailTheme
 }: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [isReady, setIsReady] = useReducer((_: boolean, ready: boolean) => ready, false);
 
   const appTheme = useUiStore((state) => state.theme);
   const effectiveAnimationMode = useUiStore((state) => state.effectiveAnimationMode);
@@ -108,15 +107,6 @@ export function EmailRenderer({
   // Compute a stable key for the iframe — when this changes, React remounts the iframe
   const iframeKey = `${shouldInvert ? "inverted" : "normal"}-${isDark ? "dark" : "light"}-${blockRemoteResources}`;
 
-  // Track iframe key changes to reset ready state
-  const iframeKeyRef = useRef(iframeKey);
-  useEffect(() => {
-    if (iframeKeyRef.current !== iframeKey) {
-      iframeKeyRef.current = iframeKey;
-      setIsReady(false);
-    }
-  }, [iframeKey]);
-
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -146,7 +136,6 @@ export function EmailRenderer({
         };
 
         updateHeight();
-        setIsReady(true);
 
         const images = body.querySelectorAll("img");
         images.forEach((img) => {
@@ -165,7 +154,6 @@ export function EmailRenderer({
       }
     } catch {
       iframe.style.height = "600px";
-      setIsReady(true);
     }
   }, []);
 
@@ -484,16 +472,7 @@ export function EmailRenderer({
 
   if (wrappedHtml) {
     return (
-      <div className="h-full w-full overflow-auto bg-background relative">
-        {!isReady && (
-          <div className="space-y-2 p-4">
-            <div className="h-4 w-full animate-pulse rounded bg-muted" />
-            <div className="h-4 w-full animate-pulse rounded bg-muted" />
-            <div className="h-4 w-5/6 animate-pulse rounded bg-muted" />
-            <div className="h-4 w-full animate-pulse rounded bg-muted" />
-            <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
-          </div>
-        )}
+      <div className="h-full w-full overflow-auto bg-background">
         {/*
          * SECURITY: iframe sandbox attribute rationale
          *
@@ -539,12 +518,9 @@ export function EmailRenderer({
           scrolling="no"
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
           srcDoc={wrappedHtml}
-          className="w-full border-none transition-opacity duration-150"
+          className="w-full border-none"
           style={{
             minHeight: "100%",
-            opacity: isReady ? 1 : 0,
-            position: isReady ? "static" : "absolute",
-            pointerEvents: isReady ? "auto" : "none",
           }}
           title="Email content"
           onLoad={handleIframeLoad}
