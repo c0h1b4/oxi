@@ -121,13 +121,12 @@ pub async fn upsert_draft_handler(
             .flatten()
             .unwrap_or_else(|| "Drafts".to_string());
 
-        if let Ok(rfc822_bytes) = build_draft_rfc822(&req, &session.email) {
-            if let Err(e) = imap_client
+        if let Ok(rfc822_bytes) = build_draft_rfc822(&req, &session.email)
+            && let Err(e) = imap_client
                 .append_message(&imap_creds, &drafts_folder, &rfc822_bytes, &["\\Draft", "\\Seen"])
                 .await
-            {
-                tracing::warn!(error = %e, folder = %drafts_folder, "Failed to append draft to IMAP Drafts folder");
-            }
+        {
+            tracing::warn!(error = %e, folder = %drafts_folder, "Failed to append draft to IMAP Drafts folder");
         }
     }
 
