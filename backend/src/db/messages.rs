@@ -554,20 +554,10 @@ pub fn get_full_thread(
     Ok(all_messages)
 }
 
-/// Sum the RFC822 size of all cached messages (total mailbox usage estimate).
-pub fn total_message_size(conn: &Connection) -> Result<u64, String> {
-    conn.query_row(
-        "SELECT COALESCE(SUM(size), 0) FROM messages",
-        [],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|v| v as u64)
-    .map_err(|e| format!("Failed to sum message sizes: {e}"))
-}
-
 /// Search the SQLite message cache using LIKE for text matches across
 /// subject, from_name, from_address, and to_addresses.
 /// This provides comprehensive results independent of the tantivy index state.
+#[allow(clippy::too_many_arguments)]
 pub fn search_messages_sqlite(
     conn: &Connection,
     text: &str,

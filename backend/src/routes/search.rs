@@ -339,47 +339,44 @@ pub async fn search_messages(
         .collect();
 
     // Secondary search: Tantivy for body text matches not found by SQLite.
-    if !parsed.text.is_empty() {
-        if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
-            let search_query = SearchQuery {
-                text: parsed.text,
-                subject_only: parsed.subject_only,
-                folder,
-                from,
-                to,
-                date_from,
-                date_to,
-                has_attachment,
-                limit: params.limit,
-                offset: params.offset,
-            };
-
-            if let Ok((tantivy_results, _)) = user_index.search(&search_query) {
-                for sr in &tantivy_results {
-                    if seen.contains(&(sr.folder.clone(), sr.uid)) {
-                        continue;
-                    }
-                    if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
-                        seen.insert((msg.folder.clone(), msg.uid));
-                        results.push(SearchResultItem {
-                            uid: msg.uid,
-                            folder: msg.folder,
-                            score: sr.score,
-                            subject: msg.subject,
-                            from_address: msg.from_address,
-                            from_name: msg.from_name,
-                            to_addresses: msg.to_addresses,
-                            date: msg.date,
-                            flags: msg.flags,
-                            has_attachments: msg.has_attachments,
-                            snippet: if sr.snippet.is_empty() {
-                                msg.snippet
-                            } else {
-                                sr.snippet.clone()
-                            },
-                        });
-                    }
-                }
+    if !parsed.text.is_empty()
+        && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
+        && let Ok((tantivy_results, _)) = user_index.search(&SearchQuery {
+            text: parsed.text,
+            subject_only: parsed.subject_only,
+            folder,
+            from,
+            to,
+            date_from,
+            date_to,
+            has_attachment,
+            limit: params.limit,
+            offset: params.offset,
+        })
+    {
+        for sr in &tantivy_results {
+            if seen.contains(&(sr.folder.clone(), sr.uid)) {
+                continue;
+            }
+            if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
+                seen.insert((msg.folder.clone(), msg.uid));
+                results.push(SearchResultItem {
+                    uid: msg.uid,
+                    folder: msg.folder,
+                    score: sr.score,
+                    subject: msg.subject,
+                    from_address: msg.from_address,
+                    from_name: msg.from_name,
+                    to_addresses: msg.to_addresses,
+                    date: msg.date,
+                    flags: msg.flags,
+                    has_attachments: msg.has_attachments,
+                    snippet: if sr.snippet.is_empty() {
+                        msg.snippet
+                    } else {
+                        sr.snippet.clone()
+                    },
+                });
             }
         }
     }
