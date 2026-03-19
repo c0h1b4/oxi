@@ -576,12 +576,13 @@ mod tests {
     }
 
     #[test]
-    fn search_empty_text_returns_empty() {
+    fn search_empty_text_returns_all() {
         let (_tmp, idx) = setup();
 
         let msg = make_message(1, "INBOX", "Test subject", "Test body text.");
         idx.index_message(&msg).unwrap();
 
+        // Empty text with no filters uses AllQuery — returns everything.
         let query = SearchQuery {
             text: "".to_string(),
             limit: 10,
@@ -589,8 +590,8 @@ mod tests {
         };
         let (results, total) = idx.search(&query).unwrap();
 
-        assert_eq!(total, 0);
-        assert!(results.is_empty());
+        assert_eq!(total, 1);
+        assert_eq!(results.len(), 1);
     }
 
     #[test]
