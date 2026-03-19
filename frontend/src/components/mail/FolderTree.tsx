@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useIsFetching } from "@tanstack/react-query";
 import { useFolders, useRenameFolder } from "@/hooks/useFolders";
+import { useQuota } from "@/hooks/useQuota";
 import { useMoveMessage, usePrefetchAllFolders } from "@/hooks/useMessages";
 import { useListDrafts } from "@/hooks/useCompose";
 import { useUiStore } from "@/stores/useUiStore";
@@ -303,8 +304,54 @@ function FolderItem({
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function MailboxSpace({ usageBytes, limitBytes }: { usageBytes: number; limitBytes: number | null }) {
+  const unlimited = !limitBytes || limitBytes <= 0;
+
+  if (unlimited) {
+    return (
+      <div className="mt-1 px-1">
+        <p className="text-[11px] leading-none text-muted-foreground">
+          {formatBytes(usageBytes)} used
+        </p>
+      </div>
+    );
+  }
+
+  const pct = Math.min((usageBytes / limitBytes) * 100, 100);
+  const isHigh = pct >= 90;
+  const isMedium = pct >= 75;
+
+  return (
+    <div className="mt-1 px-1">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            isHigh ? "bg-destructive" : isMedium ? "bg-yellow-500" : "bg-primary/60",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className={cn(
+        "mt-1 text-[11px] leading-none",
+        isHigh ? "text-destructive" : "text-muted-foreground",
+      )}>
+        {formatBytes(usageBytes)} of {formatBytes(limitBytes)} used
+      </p>
+    </div>
+  );
+}
+
 export function FolderTree() {
   const { data, isLoading, isError, refetch } = useFolders();
+  const { data: quota } = useQuota();
   const activeFolder = useUiStore((s) => s.activeFolder);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
@@ -359,7 +406,7 @@ export function FolderTree() {
         <TagSection />
       </nav>
 
-      {/* New folder button */}
+      {/* New folder button + mailbox space */}
       <div className="border-t border-sidebar-border p-2">
         <Button
           variant="ghost"
@@ -370,6 +417,12 @@ export function FolderTree() {
           <FolderPlus className="size-4" />
           New folder
         </Button>
+        {quota?.usage_bytes != null && (
+          <>
+            <div className="my-1.5 border-t border-sidebar-border" />
+            <MailboxSpace usageBytes={quota.usage_bytes} limitBytes={quota.limit_bytes} />
+          </>
+        )}
       </div>
 
       {/* Create folder dialog */}

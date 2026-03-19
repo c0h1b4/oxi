@@ -11,6 +11,7 @@ pub mod health;
 pub mod identities;
 pub mod messages;
 pub mod notification_preferences;
+pub mod quota;
 pub mod search;
 pub mod send;
 pub mod tags;
@@ -284,6 +285,7 @@ pub fn create_router(
             "/calendar/meeting-templates/{id}",
             delete(calendar::delete_meeting_template),
         )
+        .route("/quota", get(quota::get_quota))
         .layer(middleware::from_fn(auth_guard))
         .layer(middleware::from_fn(csrf_protection));
 

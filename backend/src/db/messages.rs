@@ -554,6 +554,125 @@ pub fn get_full_thread(
     Ok(all_messages)
 }
 
+/// Sum the RFC822 size of all cached messages (total mailbox usage estimate).
+pub fn total_message_size(conn: &Connection) -> Result<u64, String> {
+    conn.query_row(
+        "SELECT COALESCE(SUM(size), 0) FROM messages",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|v| v as u64)
+    .map_err(|e| format!("Failed to sum message sizes: {e}"))
+}
+
+/// Search the SQLite message cache using LIKE for text matches across
+/// subject, from_name, from_address, and to_addresses.
+/// This provides comprehensive results independent of the tantivy index state.
+pub fn search_messages_sqlite(
+    conn: &Connection,
+    text: &str,
+    folder: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    date_from: Option<i64>,
+    date_to: Option<i64>,
+    has_attachment: Option<bool>,
+    limit: usize,
+) -> Result<Vec<CachedMessage>, String> {
+    let mut conditions = Vec::new();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1u32;
+
+    // Exclude Trash/Spam/Junk from search results (same as tantivy).
+    conditions.push("LOWER(folder) NOT IN ('trash', 'spam', 'junk')".to_string());
+
+    if !text.is_empty() {
+        let pattern = format!("%{text}%");
+        conditions.push(format!(
+            "(subject LIKE ?{idx} OR from_name LIKE ?{idx} OR from_address LIKE ?{idx} OR to_addresses LIKE ?{idx})"
+        ));
+        param_values.push(Box::new(pattern));
+        idx += 1;
+    }
+
+    if let Some(f) = folder {
+        conditions.push(format!("folder = ?{idx}"));
+        param_values.push(Box::new(f.to_string()));
+        idx += 1;
+    }
+
+    if let Some(f) = from {
+        if f.contains('@') {
+            conditions.push(format!("from_address = ?{idx}"));
+        } else {
+            conditions.push(format!("from_name LIKE ?{idx}"));
+        }
+        let val = if f.contains('@') { f.to_string() } else { format!("%{f}%") };
+        param_values.push(Box::new(val));
+        idx += 1;
+    }
+
+    if let Some(t) = to {
+        conditions.push(format!("to_addresses LIKE ?{idx}"));
+        param_values.push(Box::new(format!("%{t}%")));
+        idx += 1;
+    }
+
+    if let Some(df) = date_from {
+        conditions.push(format!("date_epoch >= ?{idx}"));
+        param_values.push(Box::new(df));
+        idx += 1;
+    }
+
+    if let Some(dt) = date_to {
+        conditions.push(format!("date_epoch <= ?{idx}"));
+        param_values.push(Box::new(dt));
+        idx += 1;
+    }
+
+    if let Some(ha) = has_attachment {
+        conditions.push(format!("has_attachments = ?{idx}"));
+        param_values.push(Box::new(ha as i32));
+        idx += 1;
+    }
+
+    let _ = idx; // suppress unused warning
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT {MSG_SELECT_COLS}
+         FROM messages
+         {where_clause}
+         ORDER BY date_epoch DESC
+         LIMIT ?{}", param_values.len() + 1
+    );
+
+    param_values.push(Box::new(limit as i64));
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Failed to prepare search query: {e}"))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params_refs), |row| {
+            row_to_cached_message(row)
+        })
+        .map_err(|e| format!("Failed to execute search query: {e}"))?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row.map_err(|e| format!("Failed to read search row: {e}"))?);
+    }
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -339,6 +339,27 @@ impl ImapClient for MockImapClient {
         let items: Vec<(u32, Vec<String>)> = headers.iter().map(|h| (h.uid, h.flags.clone())).collect();
         Ok((items, 0))
     }
+
+    async fn get_quota(
+        &self,
+        _creds: &ImapCredentials,
+    ) -> Result<Option<MailboxQuota>, ImapError> {
+        if let Some(ref err) = *self.should_fail.lock().unwrap() {
+            return Err(clone_error(err));
+        }
+        Ok(None)
+    }
+
+    async fn fetch_folder_size(
+        &self,
+        _creds: &ImapCredentials,
+        _folder: &str,
+    ) -> Result<u64, ImapError> {
+        if let Some(ref err) = *self.should_fail.lock().unwrap() {
+            return Err(clone_error(err));
+        }
+        Ok(0)
+    }
 }
 
 // -----------------------------------------------------------------------

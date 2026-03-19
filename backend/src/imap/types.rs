@@ -103,6 +103,15 @@ pub struct FolderStatus {
     pub uid_next: u32,
 }
 
+/// Mailbox quota information from IMAP GETQUOTAROOT.
+#[derive(Debug, Clone, Serialize)]
+pub struct MailboxQuota {
+    /// Storage used in bytes (STORAGE resource reports in KB, we convert).
+    pub usage_bytes: u64,
+    /// Storage limit in bytes.
+    pub limit_bytes: u64,
+}
+
 /// Extended folder status from an IMAP `STATUS` command with CONDSTORE fields.
 /// Used for cheap pre-checks before full sync.
 #[derive(Debug, Clone, Serialize)]

@@ -238,10 +238,6 @@ impl UserIndex {
     /// Search the index with a text query and optional filters.
     /// Returns matching results and total count.
     pub fn search(&self, query: &SearchQuery) -> Result<(Vec<SearchResult>, usize), String> {
-        if query.text.is_empty() && query.subject_only.is_none() {
-            return Ok((Vec::new(), 0));
-        }
-
         let searcher = self.reader.searcher();
 
         // Collect all sub-queries into a BooleanQuery with Must clauses.

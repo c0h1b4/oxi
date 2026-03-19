@@ -264,8 +264,8 @@ pub struct SearchResultItem {
 
 /// `GET /api/search?q=text&folder=INBOX&from=alice&date_from=...&date_to=...&has_attachment=true&limit=50&offset=0`
 ///
-/// Searches the user's Tantivy index and resolves matching UIDs from the
-/// SQLite message cache to return enriched results.
+/// Searches the user's messages using both SQLite (for header fields) and
+/// Tantivy (for body text). Results are merged and deduplicated.
 pub async fn search_messages(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
@@ -286,48 +286,46 @@ pub async fn search_messages(
         ));
     }
 
-    // Open the user's search index.
-    let user_index = search_engine
-        .open_user_index(&session.user_hash)
-        .map_err(|e| AppError::InternalError(format!("Search engine error: {e}")))?;
-
     let sort_order = params.sort.clone();
 
     // Parse structured operators from the query string.
     let parsed = parse_search_query(&query_text);
 
-    // Build SearchQuery: explicit URL params take precedence over parsed operators.
-    let search_query = SearchQuery {
-        text: parsed.text,
-        subject_only: parsed.subject_only,
-        folder: params.folder.or(parsed.folder),
-        from: params.from.or(parsed.from),
-        to: params.to.or(parsed.to),
-        date_from: params.date_from.or(parsed.date_from),
-        date_to: params.date_to.or(parsed.date_to),
-        has_attachment: params.has_attachment.or(parsed.has_attachment),
-        limit: params.limit,
-        offset: params.offset,
-    };
+    let folder = params.folder.or(parsed.folder);
+    let from = params.from.or(parsed.from);
+    let to = params.to.or(parsed.to);
+    let date_from = params.date_from.or(parsed.date_from);
+    let date_to = params.date_to.or(parsed.date_to);
+    let has_attachment = params.has_attachment.or(parsed.has_attachment);
 
-    // Execute search.
-    let (search_results, _total_count) = user_index
-        .search(&search_query)
-        .map_err(|e| AppError::InternalError(format!("Search error: {e}")))?;
-
-    // Open the user's SQLite database to resolve message metadata.
+    // Open the user's SQLite database.
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    // Resolve each search result UID into a full SearchResultItem.
-    // Skip entries that no longer exist in SQLite (stale index entries).
-    let mut results = Vec::with_capacity(search_results.len());
-    for sr in &search_results {
-        if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
-            results.push(SearchResultItem {
+    // Primary search: SQLite LIKE across all cached messages (subject, from, to).
+    let sqlite_results = db::messages::search_messages_sqlite(
+        &conn,
+        &parsed.text,
+        folder.as_deref(),
+        from.as_deref(),
+        to.as_deref(),
+        date_from,
+        date_to,
+        has_attachment,
+        params.limit,
+    )
+    .map_err(|e| AppError::InternalError(format!("Search error: {e}")))?;
+
+    // Collect SQLite results as SearchResultItems.
+    let mut seen = std::collections::HashSet::new();
+    let mut results: Vec<SearchResultItem> = sqlite_results
+        .into_iter()
+        .map(|msg| {
+            seen.insert((msg.folder.clone(), msg.uid));
+            SearchResultItem {
                 uid: msg.uid,
                 folder: msg.folder,
-                score: sr.score,
+                score: 1.0,
                 subject: msg.subject,
                 from_address: msg.from_address,
                 from_name: msg.from_name,
@@ -335,12 +333,54 @@ pub async fn search_messages(
                 date: msg.date,
                 flags: msg.flags,
                 has_attachments: msg.has_attachments,
-                snippet: if sr.snippet.is_empty() {
-                    msg.snippet
-                } else {
-                    sr.snippet.clone()
-                },
-            });
+                snippet: msg.snippet,
+            }
+        })
+        .collect();
+
+    // Secondary search: Tantivy for body text matches not found by SQLite.
+    if !parsed.text.is_empty() {
+        if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
+            let search_query = SearchQuery {
+                text: parsed.text,
+                subject_only: parsed.subject_only,
+                folder,
+                from,
+                to,
+                date_from,
+                date_to,
+                has_attachment,
+                limit: params.limit,
+                offset: params.offset,
+            };
+
+            if let Ok((tantivy_results, _)) = user_index.search(&search_query) {
+                for sr in &tantivy_results {
+                    if seen.contains(&(sr.folder.clone(), sr.uid)) {
+                        continue;
+                    }
+                    if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
+                        seen.insert((msg.folder.clone(), msg.uid));
+                        results.push(SearchResultItem {
+                            uid: msg.uid,
+                            folder: msg.folder,
+                            score: sr.score,
+                            subject: msg.subject,
+                            from_address: msg.from_address,
+                            from_name: msg.from_name,
+                            to_addresses: msg.to_addresses,
+                            date: msg.date,
+                            flags: msg.flags,
+                            has_attachments: msg.has_attachments,
+                            snippet: if sr.snippet.is_empty() {
+                                msg.snippet
+                            } else {
+                                sr.snippet.clone()
+                            },
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -348,8 +388,8 @@ pub async fn search_messages(
     let sort_asc = sort_order == "date_asc";
     results.sort_by(|a, b| {
         let da = crate::db::messages::parse_date_to_epoch_public(&a.date);
-        let db = crate::db::messages::parse_date_to_epoch_public(&b.date);
-        if sort_asc { da.cmp(&db) } else { db.cmp(&da) }
+        let db_val = crate::db::messages::parse_date_to_epoch_public(&b.date);
+        if sort_asc { da.cmp(&db_val) } else { db_val.cmp(&da) }
     });
 
     Ok(Json(SearchResponse {

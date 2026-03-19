@@ -9,7 +9,7 @@ use super::parse::{
 pub use super::error::ImapError;
 pub use super::types::{
     EmailAddress, FolderStatus, FolderStatusExtended, ImapAttachment, ImapCredentials, ImapFolder,
-    ImapMessageBody, ImapMessageHeader,
+    ImapMessageBody, ImapMessageHeader, MailboxQuota,
 };
 
 pub(crate) use super::connection::connect;
@@ -162,6 +162,20 @@ pub trait ImapClient: Send + Sync {
         folder: &str,
         since_modseq: u64,
     ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError>;
+
+    /// Fetch mailbox quota via IMAP GETQUOTAROOT.
+    /// Returns `None` if the server doesn't support quotas.
+    async fn get_quota(
+        &self,
+        creds: &ImapCredentials,
+    ) -> Result<Option<MailboxQuota>, ImapError>;
+
+    /// Fetch the total size of all messages in a folder via UID FETCH 1:* (RFC822.SIZE).
+    async fn fetch_folder_size(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<u64, ImapError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -951,5 +965,79 @@ impl ImapClient for RealImapClient {
 
         let _ = session.logout().await;
         Ok((items, new_modseq))
+    }
+
+    async fn get_quota(
+        &self,
+        creds: &ImapCredentials,
+    ) -> Result<Option<MailboxQuota>, ImapError> {
+        let mut session = connect(creds).await?;
+
+        // Send GETQUOTAROOT INBOX — the server responds with QUOTAROOT + QUOTA lines.
+        // If the server doesn't support QUOTA, it returns NO — we treat that as None.
+        let req_id = match session.run_command("GETQUOTAROOT INBOX").await {
+            Ok(id) => id,
+            Err(_) => {
+                let _ = session.logout().await;
+                return Ok(None);
+            }
+        };
+
+        let mut quota_result: Option<MailboxQuota> = None;
+
+        // Read responses until we get the tagged OK/NO/BAD.
+        while let Some(resp) = session.read_response().await {
+            let resp = match resp {
+                Ok(r) => r,
+                Err(_) => break,
+            };
+            match resp.parsed() {
+                async_imap::imap_proto::Response::Quota(q) => {
+                    for resource in &q.resources {
+                        if matches!(resource.name, async_imap::imap_proto::types::QuotaResourceName::Storage) {
+                            quota_result = Some(MailboxQuota {
+                                usage_bytes: resource.usage * 1024,
+                                limit_bytes: resource.limit * 1024,
+                            });
+                        }
+                    }
+                }
+                async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
+                _ => {}
+            }
+        }
+
+        let _ = session.logout().await;
+        Ok(quota_result)
+    }
+
+    async fn fetch_folder_size(
+        &self,
+        creds: &ImapCredentials,
+        folder: &str,
+    ) -> Result<u64, ImapError> {
+        let mut session = connect(creds).await?;
+
+        let mailbox = session.select(folder).await.map_err(map_imap_error)?;
+        if mailbox.exists == 0 {
+            let _ = session.logout().await;
+            return Ok(0);
+        }
+
+        let mut total: u64 = 0;
+        {
+            let mut fetch_stream = session
+                .uid_fetch("1:*", "RFC822.SIZE")
+                .await
+                .map_err(map_imap_error)?;
+
+            while let Some(result) = fetch_stream.next().await {
+                let fetch = result.map_err(map_imap_error)?;
+                total += fetch.size.unwrap_or(0) as u64;
+            }
+        }
+
+        let _ = session.logout().await;
+        Ok(total)
     }
 }
