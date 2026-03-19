@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import {
   Send,
   X,
@@ -101,10 +102,10 @@ export function ComposeDialog() {
   const lastSavedHashRef = useRef<string>("");
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
-  const sendFeedbackMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const ContentContainer = shouldAnimate ? motion.div : "div";
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const sendFeedbackMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const serializedSendFeedbackMotionProps = useMemo(() => JSON.stringify(sendFeedbackMotionProps), [sendFeedbackMotionProps]);
 
   const hasContent = useCallback(() => {
     return !!(
@@ -533,62 +534,34 @@ export function ComposeDialog() {
           <AnimatePresence>
             {isOpen ? (
               <Fragment key="compose-dialog-open">
-                <Dialog.Overlay forceMount asChild={shouldAnimate}>
-                  {shouldAnimate ? (
-                    <motion.div
-                      data-testid="compose-dialog-overlay-transition"
-                      data-motion-props={JSON.stringify(overlayMotionProps)}
-                      initial="initial"
-                      animate="animate"
-                      exit="exit"
-                      variants={overlayMotionProps}
-                      className="fixed inset-0 z-40 bg-black/40"
-                    />
-                  ) : (
-                    <div className="fixed inset-0 z-40 bg-black/40" />
-                  )}
+                <Dialog.Overlay forceMount asChild>
+                  <AnimatedDiv
+                    data-testid="compose-dialog-overlay-transition"
+                    variants={overlayMotionProps}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    className="fixed inset-0 z-40 bg-black/40"
+                  />
                 </Dialog.Overlay>
-                <Dialog.Content
-                  forceMount
-                  asChild={shouldAnimate}
-                  className={
-                    shouldAnimate
-                      ? undefined
-                      : cn(
-                          "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
-                          expanded
-                            ? "inset-4 sm:left-20"
-                            : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
-                        )
-                  }
-                  onKeyDown={shouldAnimate ? undefined : handleKeyDown}
-                  onDragEnter={shouldAnimate ? undefined : handleDragEnter}
-                  onDragLeave={shouldAnimate ? undefined : handleDragLeave}
-                  onDragOver={shouldAnimate ? undefined : handleDragOver}
-                  onDrop={shouldAnimate ? undefined : handleDrop}
-                >
-                  <ContentContainer
-                    {...(shouldAnimate
-                      ? {
-                          "data-testid": "compose-dialog-content-transition",
-                          "data-motion-props": JSON.stringify(contentMotionProps),
-                          initial: "initial",
-                          animate: "animate",
-                          exit: "exit",
-                          variants: contentMotionProps,
-                          className: cn(
-                            "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
-                            expanded
-                              ? "inset-4 sm:left-20"
-                              : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
-                          ),
-                          onKeyDown: handleKeyDown,
-                          onDragEnter: handleDragEnter,
-                          onDragLeave: handleDragLeave,
-                          onDragOver: handleDragOver,
-                          onDrop: handleDrop,
-                        }
-                      : {})}
+                <Dialog.Content forceMount asChild>
+                  <AnimatedDiv
+                    data-testid="compose-dialog-content-transition"
+                    variants={contentMotionProps}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    className={cn(
+                      "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+                      expanded
+                        ? "inset-4 sm:left-20"
+                        : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
+                    )}
+                    onKeyDown={handleKeyDown}
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
                   >
             {/* Drop overlay */}
             {isDragging && (
@@ -813,7 +786,7 @@ export function ComposeDialog() {
                       <motion.span
                         key={sendMutation.isPending ? "pending" : "idle"}
                         data-testid="compose-send-feedback-transition"
-                        data-motion-props={JSON.stringify(sendFeedbackMotionProps)}
+                        data-motion-props={serializedSendFeedbackMotionProps}
                         initial="initial"
                         animate="animate"
                         exit="exit"
@@ -927,7 +900,7 @@ export function ComposeDialog() {
                 </button>
               </div>
             </div>
-                  </ContentContainer>
+                  </AnimatedDiv>
                 </Dialog.Content>
               </Fragment>
             ) : null}

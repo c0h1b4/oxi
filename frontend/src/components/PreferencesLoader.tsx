@@ -3,18 +3,9 @@
 import { useEffect } from "react";
 import { useDisplayPreferences } from "@/hooks/useDisplayPreferences";
 import { resolveMotionConfig } from "@/lib/motion/config";
+import { clearThemeTransitionArtifacts } from "@/lib/motion/theme-spread";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
-
-function clearThemeTransitionArtifacts() {
-  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
-    node.remove();
-  });
-  document.documentElement.classList.remove("theme-transitioning");
-  document.documentElement.classList.remove("disable-transitions");
-  document.documentElement.style.removeProperty("--click-x");
-  document.documentElement.style.removeProperty("--click-y");
-}
 
 function applyTheme(theme: ThemeMode) {
   const root = document.documentElement;

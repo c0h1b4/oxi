@@ -96,7 +96,8 @@ function applyThemeRootClass(nextTheme?: ThemeMode) {
   root.classList.remove("dark");
 }
 
-function copyThemeCustomProperties(source: CSSStyleDeclaration, target: HTMLElement) {
+function copyThemeCustomProperties(
+  source: CSSStyleDeclaration, target: HTMLElement) {
   for (let index = 0; index < source.length; index += 1) {
     const propertyName = source.item(index);
     if (!propertyName.startsWith("--")) {
@@ -104,19 +105,6 @@ function copyThemeCustomProperties(source: CSSStyleDeclaration, target: HTMLElem
     }
     target.style.setProperty(propertyName, source.getPropertyValue(propertyName));
   }
-}
-
-function setRevealMask(
-  element: HTMLElement,
-  x: number,
-  y: number,
-  radius: number,
-) {
-  const mask = `radial-gradient(circle ${radius}px at ${x}px ${y}px, transparent ${radius}px, black ${radius + 1}px)`;
-  element.style.webkitMaskImage = mask;
-  element.style.maskImage = mask;
-  element.style.webkitMaskRepeat = "no-repeat";
-  element.style.maskRepeat = "no-repeat";
 }
 
 function buildSnapshotOverlay(oldTheme: "light" | "dark") {
@@ -248,6 +236,12 @@ function runViewTransition(
   }
 }
 
+function setRevealMask(el: HTMLElement, x: number, y: number, radius: number) {
+  const mask = `radial-gradient(circle ${radius}px at ${x}px ${y}px, transparent ${radius}px, black ${radius + 1}px)`;
+  el.style.webkitMaskImage = mask;
+  el.style.maskImage = mask;
+}
+
 function runSnapshotFallback(
   transitionId: number,
   origin: ThemeTransitionOrigin | null | undefined,
@@ -256,48 +250,44 @@ function runSnapshotFallback(
 ) {
   const root = document.documentElement;
   const transitionOrigin = resolveTransitionOrigin(origin);
-  const oldTheme = resolveThemeMode();
+  const oldTheme = resolveThemeMode(nextTheme) === "dark" ? "light" : "dark";
   const overlay = buildSnapshotOverlay(oldTheme);
-  const maxRadius = Math.hypot(
-    Math.max(transitionOrigin.x, window.innerWidth - transitionOrigin.x),
-    Math.max(transitionOrigin.y, window.innerHeight - transitionOrigin.y),
-  );
 
-  root.style.setProperty("--click-x", `${transitionOrigin.x}px`);
-  root.style.setProperty("--click-y", `${transitionOrigin.y}px`);
+  const maxX = Math.max(transitionOrigin.x, window.innerWidth - transitionOrigin.x);
+  const maxY = Math.max(transitionOrigin.y, window.innerHeight - transitionOrigin.y);
+  const maxRadius = Math.sqrt(maxX * maxX + maxY * maxY) + 16;
+
+  setRevealMask(overlay, transitionOrigin.x, transitionOrigin.y, 0);
+
   root.classList.add("disable-transitions");
   document.body.appendChild(overlay);
 
   applyThemeChange(applyTheme);
   applyThemeRootClass(nextTheme);
 
-  const start = performance.now();
   let frame = 0;
+  let start = 0;
 
   const paint = (timestamp: number) => {
     if (transitionId !== activeTransitionId) {
       return;
     }
-
+    if (!start) start = timestamp;
     const elapsed = Math.min(timestamp - start, FALLBACK_REVEAL_DURATION_MS);
     const progress = elapsed / FALLBACK_REVEAL_DURATION_MS;
     const eased = 0.5 - Math.cos(Math.PI * progress) / 2;
     setRevealMask(overlay, transitionOrigin.x, transitionOrigin.y, maxRadius * eased);
-
     if (progress < 1) {
       frame = window.requestAnimationFrame(paint);
     }
   };
 
-  setRevealMask(overlay, transitionOrigin.x, transitionOrigin.y, 0);
   frame = window.requestAnimationFrame(paint);
 
   const cleanup = () => {
     window.cancelAnimationFrame(frame);
     overlay.remove();
     root.classList.remove("disable-transitions");
-    root.style.removeProperty("--click-x");
-    root.style.removeProperty("--click-y");
   };
 
   const timeout = window.setTimeout(() => {
@@ -314,6 +304,16 @@ function runSnapshotFallback(
     window.clearTimeout(timeout);
     cleanup();
   };
+}
+
+export function clearThemeTransitionArtifacts() {
+  document.querySelectorAll("[data-theme-transition]").forEach((node) => {
+    node.remove();
+  });
+  document.documentElement.classList.remove("theme-transitioning");
+  document.documentElement.classList.remove("disable-transitions");
+  document.documentElement.style.removeProperty("--click-x");
+  document.documentElement.style.removeProperty("--click-y");
 }
 
 export function runThemeSpreadTransition({

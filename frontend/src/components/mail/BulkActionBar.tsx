@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { AnimatePresence } from "framer-motion";
 import {
   Mail,
   MailOpen,
@@ -23,6 +23,7 @@ import { useFolders } from "@/hooks/useFolders";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { useTags, useBulkAddTag } from "@/hooks/useTags";
 import { createFadeSlideVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 export function BulkActionBar() {
   const selectedUids = useUiStore((s) => s.selectedMessageUids);
@@ -42,8 +43,7 @@ export function BulkActionBar() {
   const { data: foldersData } = useFolders();
   const folders = foldersData?.folders ?? [];
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const barMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const barMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const { data: tagsData } = useTags();
   const allTags = tagsData?.tags ?? [];
   const bulkAddTag = useBulkAddTag();
@@ -295,32 +295,21 @@ export function BulkActionBar() {
     </>
   );
 
-  if (!shouldAnimate && !hasSelection) return null;
-
-  if (shouldAnimate) {
-    return (
-      <AnimatePresence>
-        {hasSelection ? (
-          <motion.div
-            key="bulk-action-bar"
-            data-testid="bulk-action-bar-transition"
-            data-motion-props={JSON.stringify(barMotionProps)}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            variants={barMotionProps}
-            className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5"
-          >
-            {actionContent}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-    );
-  }
-
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5">
-      {actionContent}
-    </div>
+    <AnimatePresence>
+      {hasSelection ? (
+        <AnimatedDiv
+          key="bulk-action-bar"
+          data-testid="bulk-action-bar-transition"
+          variants={barMotionProps}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5"
+        >
+          {actionContent}
+        </AnimatedDiv>
+      ) : null}
+    </AnimatePresence>
   );
 }

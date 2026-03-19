@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
@@ -221,6 +220,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         bulkSelectMode={false}
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
+        effectiveAnimationMode="medium"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();
@@ -235,6 +235,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         bulkSelectMode={false}
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
+        effectiveAnimationMode="rich"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();

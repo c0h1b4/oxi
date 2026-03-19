@@ -72,6 +72,7 @@ export interface UiState {
   storedAnimationMode: AnimationMode | null;
   effectiveAnimationMode: AnimationMode;
   searchSortOrder: "date_desc" | "date_asc";
+  searchResultCount: number | null;
 
   setActiveTag: (tagId: string | null) => void;
   setActiveFolder: (folder: string) => void;
@@ -96,6 +97,7 @@ export interface UiState {
   setAnimationModeState: (state: AnimationModeState) => void;
   isAnimationOff: () => boolean;
   setSearchSortOrder: (order: "date_desc" | "date_asc") => void;
+  setSearchResultCount: (count: number | null) => void;
 }
 
 const initial = loadSettings();
@@ -121,6 +123,7 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   storedAnimationMode: null,
   effectiveAnimationMode: DEFAULT_EFFECTIVE_ANIMATION_MODE,
   searchSortOrder: "date_desc",
+  searchResultCount: null,
 
   setActiveTag: (tagId) =>
     set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
@@ -140,7 +143,7 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   setTheme: (theme) => set({ theme }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
-  clearSearch: () => set({ searchQuery: "", searchActive: false }),
+  clearSearch: () => set({ searchQuery: "", searchActive: false, searchResultCount: null }),
   setViewMode: (mode) => set({ viewMode: mode }),
   toggleBulkSelect: (uid) =>
     set((state) => {
@@ -168,4 +171,5 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
     }),
   isAnimationOff: () => useUiStore.getState().effectiveAnimationMode === "off",
   setSearchSortOrder: (order) => set({ searchSortOrder: order }),
+  setSearchResultCount: (count) => set({ searchResultCount: count }),
 }));

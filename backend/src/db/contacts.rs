@@ -206,7 +206,7 @@ pub fn search_contacts(conn: &Connection, query: &str, limit: u32) -> Result<Vec
     Ok(contacts)
 }
 
-/// Search known addresses from message headers (from, to, cc) that match the query.
+/// Search known addresses from the denormalized `known_addresses` table.
 /// Excludes any addresses already present in the contacts table.
 /// Returns distinct addresses ordered by email ascending.
 pub fn search_known_addresses(
@@ -218,33 +218,10 @@ pub fn search_known_addresses(
     let pattern = format!("%{escaped}%");
 
     let sql = r#"
-        SELECT email, name FROM (
-            SELECT email, name,
-                   ROW_NUMBER() OVER (PARTITION BY email ORDER BY LENGTH(name) DESC) AS rn
-            FROM (
-                SELECT from_address AS email, COALESCE(from_name, '') AS name FROM messages
-                WHERE from_address LIKE ?1 ESCAPE '\'
-                AND from_address NOT IN (SELECT email FROM contacts)
-
-                UNION ALL
-
-                SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
-                FROM messages, json_each(to_addresses)
-                WHERE json_valid(to_addresses)
-                AND value->>'address' LIKE ?1 ESCAPE '\'
-                AND value->>'address' NOT IN (SELECT email FROM contacts)
-
-                UNION ALL
-
-                SELECT value->>'address' AS email, COALESCE(value->>'name', '') AS name
-                FROM messages, json_each(cc_addresses)
-                WHERE json_valid(cc_addresses)
-                AND value->>'address' LIKE ?1 ESCAPE '\'
-                AND value->>'address' NOT IN (SELECT email FROM contacts)
-            )
-            WHERE email != ''
-        )
-        WHERE rn = 1
+        SELECT email, name
+        FROM known_addresses
+        WHERE (email LIKE ?1 ESCAPE '\' OR name LIKE ?1 ESCAPE '\')
+          AND email NOT IN (SELECT email FROM contacts)
         ORDER BY email ASC
         LIMIT ?2
     "#;
@@ -267,6 +244,62 @@ pub fn search_known_addresses(
         addresses.push(row.map_err(|e| format!("Failed to read known address row: {e}"))?);
     }
     Ok(addresses)
+}
+
+/// Populate the `known_addresses` table from a single message's header fields.
+/// Uses INSERT OR IGNORE so existing rows are not overwritten.
+pub fn populate_known_addresses(
+    conn: &Connection,
+    from_address: &str,
+    from_name: &str,
+    to_json: &str,
+    cc_json: &str,
+) -> Result<(), String> {
+    // Insert from address.
+    if !from_address.is_empty() {
+        conn.execute(
+            "INSERT INTO known_addresses (email, name) VALUES (?1, ?2)
+             ON CONFLICT(email) DO UPDATE SET name = excluded.name WHERE excluded.name != ''",
+            params![from_address, from_name],
+        )
+        .map_err(|e| format!("Failed to insert known address (from): {e}"))?;
+    }
+
+    // Insert to addresses from JSON array.
+    insert_addresses_from_json(conn, to_json)?;
+
+    // Insert cc addresses from JSON array.
+    insert_addresses_from_json(conn, cc_json)?;
+
+    Ok(())
+}
+
+/// Parse a JSON array of `{"address": "...", "name": "..."}` objects and insert
+/// each into `known_addresses`.
+fn insert_addresses_from_json(conn: &Connection, json: &str) -> Result<(), String> {
+    let entries: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Ok(()), // Invalid JSON, skip silently.
+    };
+
+    for entry in &entries {
+        let email = entry
+            .get("address")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if email.is_empty() {
+            continue;
+        }
+        let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        conn.execute(
+            "INSERT INTO known_addresses (email, name) VALUES (?1, ?2)
+             ON CONFLICT(email) DO UPDATE SET name = excluded.name WHERE excluded.name != ''",
+            params![email, name],
+        )
+        .map_err(|e| format!("Failed to insert known address (json): {e}"))?;
+    }
+
+    Ok(())
 }
 
 /// Increment the contact_count by 1 and set last_contacted to now for the
@@ -447,32 +480,22 @@ mod tests {
     fn test_search_known_addresses_basic() {
         let conn = open_test_db();
 
-        conn.execute(
-            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
-            params![],
+        // Populate known_addresses directly (simulating what happens at sync time).
+        populate_known_addresses(&conn, "alice@test.com", "Alice From", "[]", "[]").unwrap();
+        populate_known_addresses(
+            &conn,
+            "sender@other.com",
+            "Sender",
+            r#"[{"name":"Bob To","address":"bob@test.com"}]"#,
+            "[]",
         )
         .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (1, 'INBOX', '2024-01-01', 'alice@test.com', 'Alice From', '[]', '[]')",
-            params![],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (2, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
-                     '[{\"name\":\"Bob To\",\"address\":\"bob@test.com\"}]', '[]')",
-            params![],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (3, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', '[]',
-                     '[{\"name\":\"Charlie Cc\",\"address\":\"charlie@test.com\"}]')",
-            params![],
+        populate_known_addresses(
+            &conn,
+            "sender@other.com",
+            "Sender",
+            "[]",
+            r#"[{"name":"Charlie Cc","address":"charlie@test.com"}]"#,
         )
         .unwrap();
 
@@ -491,13 +514,6 @@ mod tests {
     fn test_search_known_addresses_excludes_contacts() {
         let conn = open_test_db();
 
-        // Create a test folder.
-        conn.execute(
-            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
-            params![],
-        )
-        .unwrap();
-
         // Add alice@test.com as a contact.
         upsert_contact(
             &conn,
@@ -505,27 +521,22 @@ mod tests {
         )
         .unwrap();
 
-        // Insert messages with addresses.
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (1, 'INBOX', '2024-01-01', 'alice@test.com', 'Alice From', '[]', '[]')",
-            params![],
+        // Populate known_addresses (simulating sync).
+        populate_known_addresses(&conn, "alice@test.com", "Alice From", "[]", "[]").unwrap();
+        populate_known_addresses(
+            &conn,
+            "bob@test.com",
+            "Bob From",
+            r#"[{"name":"Alice To","address":"alice@test.com"}]"#,
+            "[]",
         )
         .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (2, 'INBOX', '2024-01-01', 'bob@test.com', 'Bob From',
-                     '[{\"name\":\"Alice To\",\"address\":\"alice@test.com\"}]', '[]')",
-            params![],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (3, 'INBOX', '2024-01-01', 'charlie@test.com', 'Charlie', '[]',
-                     '[{\"name\":\"Alice Cc\",\"address\":\"alice@test.com\"}]')",
-            params![],
+        populate_known_addresses(
+            &conn,
+            "charlie@test.com",
+            "Charlie",
+            "[]",
+            r#"[{"name":"Alice Cc","address":"alice@test.com"}]"#,
         )
         .unwrap();
 
@@ -544,34 +555,22 @@ mod tests {
     fn test_search_known_addresses_handles_invalid_json() {
         let conn = open_test_db();
 
-        conn.execute(
-            "INSERT OR IGNORE INTO folders (name) VALUES ('INBOX')",
-            params![],
+        // Populate known_addresses (simulating sync).
+        populate_known_addresses(&conn, "valid@test.com", "Valid User", "[]", "[]").unwrap();
+        populate_known_addresses(
+            &conn,
+            "sender@other.com",
+            "Sender",
+            r#"[{"name":"","address":"emptyname@test.com"}]"#,
+            r#"[{"name":"Cc Person","address":"ccperson@test.com"}]"#,
         )
         .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (1, 'INBOX', '2024-01-01', 'valid@test.com', 'Valid User', 
-                     '[]', '[]')",
-            params![],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (2, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
-                     '[{\"name\":\"\",\"address\":\"emptyname@test.com\"}]',
-                     '[{\"name\":\"Cc Person\",\"address\":\"ccperson@test.com\"}]')",
-            params![],
-        )
-        .unwrap();
-
-        conn.execute(
-            "INSERT INTO messages (uid, folder, date, from_address, from_name, to_addresses, cc_addresses)
-             VALUES (3, 'INBOX', '2024-01-01', 'sender@other.com', 'Sender', 
-                     '[{\"name\":\"Json Person\",\"address\":\"json@test.com\"}]', '[]')",
-            params![],
+        populate_known_addresses(
+            &conn,
+            "sender@other.com",
+            "Sender",
+            r#"[{"name":"Json Person","address":"json@test.com"}]"#,
+            "[]",
         )
         .unwrap();
 
@@ -583,5 +582,31 @@ mod tests {
         assert!(emails.contains(&"emptyname@test.com"));
         assert!(emails.contains(&"ccperson@test.com"));
         assert!(emails.contains(&"json@test.com"));
+    }
+
+    #[test]
+    fn test_populate_known_addresses_deduplicates() {
+        let conn = open_test_db();
+
+        populate_known_addresses(&conn, "alice@test.com", "Alice", "[]", "[]").unwrap();
+        // Same email again with non-empty name -- should update the name.
+        populate_known_addresses(&conn, "alice@test.com", "Alice Different", "[]", "[]").unwrap();
+
+        let results = search_known_addresses(&conn, "alice@test.com", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Alice Different");
+    }
+
+    #[test]
+    fn test_populate_known_addresses_skips_invalid_json() {
+        let conn = open_test_db();
+
+        // Invalid JSON in to_addresses should not cause an error.
+        populate_known_addresses(&conn, "sender@test.com", "Sender", "not valid json", "[]")
+            .unwrap();
+
+        let results = search_known_addresses(&conn, "sender@test.com", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].email, "sender@test.com");
     }
 }

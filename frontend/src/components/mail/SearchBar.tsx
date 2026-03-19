@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { HelpCircle, Search, X } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
-import { useSearch } from "@/hooks/useSearch";
 import {
   getFilterLabel,
   isValidCommittedSearch,
@@ -29,10 +28,15 @@ export function SearchBar() {
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
   const setSearchActive = useUiStore((s) => s.setSearchActive);
   const clearSearch = useUiStore((s) => s.clearSearch);
+  const searchResultCount = useUiStore((s) => s.searchResultCount);
 
   const [inputValue, setInputValue] = useState(searchQuery);
   const [showTips, setShowTips] = useState(false);
+  const [mouseHolding, setMouseHolding] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const tipsButtonRef = useRef<HTMLButtonElement>(null);
+  const tipsRef = useRef<HTMLDivElement>(null);
+  const tipsId = useId();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelDebounce = useCallback(() => {
     if (debounceRef.current) {
@@ -40,9 +44,6 @@ export function SearchBar() {
       debounceRef.current = null;
     }
   }, []);
-
-  // Fetch results for displaying the count
-  const { data } = useSearch(searchQuery);
 
   // Parse the current query for filter chips
   const parsed = parseSearchQuery(inputValue);
@@ -152,6 +153,39 @@ export function SearchBar() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // Dismiss tips popover on outside click or Escape
+  useEffect(() => {
+    if (!showTips) return;
+
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        tipsRef.current &&
+        !tipsRef.current.contains(target) &&
+        tipsButtonRef.current &&
+        !tipsButtonRef.current.contains(target)
+      ) {
+        setShowTips(false);
+      }
+    };
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowTips(false);
+        tipsButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("touchstart", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("touchstart", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showTips]);
+
   // Cleanup pending debounce on unmount
   useEffect(() => {
     return () => cancelDebounce();
@@ -194,11 +228,39 @@ export function SearchBar() {
               </button>
             )}
             <button
+              ref={tipsButtonRef}
               type="button"
-              onMouseDown={() => setShowTips(true)}
-              onMouseUp={() => setShowTips(false)}
-              onMouseLeave={() => setShowTips(false)}
-              aria-label="Search tips (hold to show)"
+              onMouseDown={() => {
+                setMouseHolding(true);
+                setShowTips(true);
+              }}
+              onMouseUp={() => {
+                setMouseHolding(false);
+                setShowTips(false);
+              }}
+              onMouseLeave={() => {
+                if (mouseHolding) {
+                  setMouseHolding(false);
+                  setShowTips(false);
+                }
+              }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                setShowTips((prev) => !prev);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setShowTips((prev) => !prev);
+                } else if (e.key === "Escape" && showTips) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowTips(false);
+                }
+              }}
+              aria-expanded={showTips}
+              aria-controls={tipsId}
+              aria-label="Search tips"
               className="flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
             >
               <HelpCircle className="size-3.5" />
@@ -208,6 +270,10 @@ export function SearchBar() {
           {/* Search tips popover */}
           {showTips && (
             <div
+              ref={tipsRef}
+              id={tipsId}
+              role="dialog"
+              aria-label="Search operators"
               className="absolute left-0 top-full z-50 mt-1 w-full rounded-md border border-border bg-popover p-2 shadow-md"
             >
               <p className="mb-1.5 text-xs font-medium text-foreground">
@@ -233,9 +299,9 @@ export function SearchBar() {
             </div>
           )}
         </div>
-        {searchActive && data && (
+        {searchActive && searchResultCount != null && (
           <span className="shrink-0 text-xs text-muted-foreground">
-            {data.total_count} result{data.total_count !== 1 ? "s" : ""}
+            {searchResultCount} result{searchResultCount !== 1 ? "s" : ""}
           </span>
         )}
       </div>

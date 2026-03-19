@@ -1,7 +1,6 @@
-/* eslint-disable react-hooks/refs */
 "use client";
 
-import { useRef, useCallback, useEffect, useState, useMemo } from "react";
+import { useRef, useCallback, useEffect, useState, useReducer, useMemo } from "react";
 import { useUiStore } from "@/stores/useUiStore";
 
 interface EmailRendererProps {
@@ -68,13 +67,17 @@ export function EmailRenderer({
   emailTheme
 }: EmailRendererProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isReady, setIsReady] = useReducer((_: boolean, ready: boolean) => ready, false);
 
   const appTheme = useUiStore((state) => state.theme);
   const effectiveAnimationMode = useUiStore((state) => state.effectiveAnimationMode);
   const resolvedTheme = theme === "auto" ? appTheme : theme;
-  const previousSurfaceRef = useRef<"html" | "text" | "empty" | null>(null);
-  const previousTextSignatureRef = useRef<string | null>(null);
-  const richStreamSessionRef = useRef(0);
+  const [prevTrack, setPrevTrack] = useState<{
+    surface: "html" | "text" | "empty" | null;
+    textSignature: string | null;
+    richStreamSession: number;
+    shouldAnimate: boolean;
+  }>({ surface: null, textSignature: null, richStreamSession: 0, shouldAnimate: false });
 
   const [isSystemDark, setIsSystemDark] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -105,6 +108,15 @@ export function EmailRenderer({
   // Compute a stable key for the iframe — when this changes, React remounts the iframe
   const iframeKey = `${shouldInvert ? "inverted" : "normal"}-${isDark ? "dark" : "light"}-${blockRemoteResources}`;
 
+  // Track iframe key changes to reset ready state
+  const iframeKeyRef = useRef(iframeKey);
+  useEffect(() => {
+    if (iframeKeyRef.current !== iframeKey) {
+      iframeKeyRef.current = iframeKey;
+      setIsReady(false);
+    }
+  }, [iframeKey]);
+
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -134,6 +146,7 @@ export function EmailRenderer({
         };
 
         updateHeight();
+        setIsReady(true);
 
         const images = body.querySelectorAll("img");
         images.forEach((img) => {
@@ -152,6 +165,7 @@ export function EmailRenderer({
       }
     } catch {
       iframe.style.height = "600px";
+      setIsReady(true);
     }
   }, []);
 
@@ -437,33 +451,101 @@ export function EmailRenderer({
   const surface: "html" | "text" | "empty" = wrappedHtml ? "html" : text ? "text" : "empty";
   const textSignature = text ? `${text.length}:${text}` : null;
 
-  const shouldStartRichStream =
-    surface === "text" &&
-    effectiveAnimationMode === "rich" &&
-    (
-      previousSurfaceRef.current == null ||
-      previousSurfaceRef.current === "html" ||
-      previousTextSignatureRef.current !== textSignature
-    );
+  // Adjust state during render (React-recommended pattern for "previous value" tracking).
+  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const needsUpdate =
+    prevTrack.surface !== surface ||
+    (surface === "text" && prevTrack.textSignature !== textSignature);
 
-  if (shouldStartRichStream) {
-    richStreamSessionRef.current += 1;
+  let shouldStartRichStream = prevTrack.shouldAnimate;
+  let richStreamSession = prevTrack.richStreamSession;
+
+  if (needsUpdate) {
+    shouldStartRichStream =
+      surface === "text" &&
+      effectiveAnimationMode === "rich" &&
+      (
+        prevTrack.surface == null ||
+        prevTrack.surface === "html" ||
+        prevTrack.textSignature !== textSignature
+      );
+
+    if (shouldStartRichStream) {
+      richStreamSession = prevTrack.richStreamSession + 1;
+    }
+
+    setPrevTrack({
+      surface,
+      textSignature: surface === "text" ? textSignature : null,
+      richStreamSession,
+      shouldAnimate: shouldStartRichStream,
+    });
   }
-
-  previousSurfaceRef.current = surface;
-  previousTextSignatureRef.current = surface === "text" ? textSignature : null;
 
   if (wrappedHtml) {
     return (
-      <div className="h-full w-full overflow-auto bg-background">
+      <div className="h-full w-full overflow-auto bg-background relative">
+        {!isReady && (
+          <div className="space-y-2 p-4">
+            <div className="h-4 w-full animate-pulse rounded bg-muted" />
+            <div className="h-4 w-full animate-pulse rounded bg-muted" />
+            <div className="h-4 w-5/6 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-full animate-pulse rounded bg-muted" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+          </div>
+        )}
+        {/*
+         * SECURITY: iframe sandbox attribute rationale
+         *
+         * allow-same-origin — Required so the parent can access iframe.contentDocument
+         *   to measure content height (ResizeObserver, scrollHeight), attach image
+         *   load listeners, and dynamically resize the iframe. Without it, the
+         *   browser blocks all cross-document DOM access and the auto-height logic
+         *   in handleIframeLoad breaks entirely.
+         *
+         * allow-popups / allow-popups-to-escape-sandbox — Lets mailto: and http(s)
+         *   links open in new tabs/windows as users expect.
+         *
+         * RISK: allow-same-origin combined with allow-scripts would let embedded
+         *   content access the parent page's cookies, localStorage, and DOM — a
+         *   full same-origin escalation. This is safe ONLY because allow-scripts
+         *   is deliberately omitted: the sandbox blocks all script execution
+         *   (<script> tags, inline handlers, javascript: URLs, etc.), so even if
+         *   email HTML contains malicious JS it cannot run.
+         *
+         * If a future browser bug or spec change weakens the script-blocking
+         *   guarantee, this would become exploitable. Mitigations considered:
+         *
+         *   - Removing allow-same-origin and using postMessage for height: would
+         *     require injecting a <script> into srcdoc (reintroducing allow-scripts),
+         *     which is strictly worse — it trades a theoretical risk for a concrete one.
+         *
+         *   - Serving email HTML from a separate origin (e.g., blob: URL on a
+         *     different subdomain): adds deployment complexity and CORS overhead
+         *     for marginal benefit given the current sandbox guarantees.
+         *
+         *   - Using shadow DOM instead of an iframe: does not provide the same
+         *     style/script isolation as the sandbox attribute.
+         *
+         * Conclusion: the current sandbox="allow-popups allow-popups-to-escape-sandbox
+         *   allow-same-origin" (without allow-scripts) is the best tradeoff. It
+         *   provides full script isolation while preserving the DOM access needed
+         *   for responsive iframe sizing. Re-evaluate if the HTML Sandbox spec
+         *   changes or if we move to a separate-origin rendering service.
+         */}
         <iframe
           key={iframeKey}
           ref={iframeRef}
           scrolling="no"
           sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
           srcDoc={wrappedHtml}
-          className="w-full border-none"
-          style={{ minHeight: "100%" }}
+          className="w-full border-none transition-opacity duration-150"
+          style={{
+            minHeight: "100%",
+            opacity: isReady ? 1 : 0,
+            position: isReady ? "static" : "absolute",
+            pointerEvents: isReady ? "auto" : "none",
+          }}
           title="Email content"
           onLoad={handleIframeLoad}
         />
@@ -492,7 +574,7 @@ export function EmailRenderer({
         return (
           <pre
             data-testid="email-renderer-plaintext-large-reveal"
-            data-stream-session={String(richStreamSessionRef.current)}
+            data-stream-session={String(richStreamSession)}
             className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground transition-opacity duration-200"
             style={{
               animationName: shouldAnimateRich ? "email-plaintext-container-reveal" : "none",
@@ -509,12 +591,12 @@ export function EmailRenderer({
       return (
         <pre
           data-testid="email-renderer-plaintext-rich-stream"
-          data-stream-session={String(richStreamSessionRef.current)}
+          data-stream-session={String(richStreamSession)}
           className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-foreground"
         >
           {lines.map((line, index) => (
             <span
-              key={`${richStreamSessionRef.current}-${index}`}
+              key={`${richStreamSession}-${index}`}
               data-testid="email-renderer-plaintext-line"
               style={{
                 display: "inline-block",

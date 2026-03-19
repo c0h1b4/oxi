@@ -2,12 +2,15 @@
 
 import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { PenLine, X, PanelRight } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
 import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
-import { createFadeSlideVariants } from "@/lib/motion/variants";
+import { createFadeSlideVariants, type MotionVariants } from "@/lib/motion/variants";
+import type { AnimationMode } from "@/lib/motion/config";
+import { ANIMATION_MODES } from "@/lib/motion/config";
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { MessageListItem } from "./MessageListItem";
@@ -15,6 +18,11 @@ import { formatFolderName, isDraftsFolder } from "./FolderTree";
 import { BulkActionBar } from "./BulkActionBar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+/** Pre-computed fade-slide variants keyed by animation mode — avoids per-render allocation. */
+const ROW_MOTION_VARIANTS_BY_MODE: Record<AnimationMode, MotionVariants> = Object.fromEntries(
+  ANIMATION_MODES.map((mode) => [mode, createFadeSlideVariants(mode, "y")]),
+) as Record<AnimationMode, MotionVariants>;
 
 function SkeletonRows({ count, height }: { count: number; height: number }) {
   return (
@@ -261,7 +269,7 @@ export function MessageList() {
 
   // Fetch next page when scrolling near the bottom.
   const virtualItems = virtualizer.getVirtualItems();
-  const rowMotionVariants = createFadeSlideVariants(effectiveAnimationMode, "y");
+  const rowMotionVariants = ROW_MOTION_VARIANTS_BY_MODE[effectiveAnimationMode];
   const prevVisibleUidsRef = useRef<Set<number>>(new Set());
 
   const changedVisibleDelays = new Map<number, number>();
@@ -468,47 +476,23 @@ export function MessageList() {
                     },
                   };
 
-                  if (!shouldAnimateRows) {
-                    return (
-                      <div
-                        key={message.uid}
-                        style={{
-                          position: "absolute",
-                          top: virtualRow.start,
-                          left: 0,
-                          width: "100%",
-                          height: virtualRow.size,
-                        }}
-                      >
-                        <MessageListItem
-                          message={message}
-                          isSelected={selectedMessageUid === message.uid}
-                          density={density}
-                          onClick={(e) => handleClick(message.uid, e)}
-                          bulkSelectMode={bulkSelectMode}
-                          isBulkSelected={selectedMessageUids.includes(message.uid)}
-                          onBulkToggle={toggleBulkSelect}
-                          suppressHover={keyboardNav}
-                        />
-                      </div>
-                    );
-                  }
-
                   return (
-                    <motion.div
+                    <AnimatedDiv
                       key={message.uid}
                       data-testid="message-list-row-transition"
                       data-row-uid={String(message.uid)}
                       data-row-changed={changedVisibleDelays.has(message.uid) ? "true" : "false"}
                       data-row-stagger-delay={String(staggerDelay)}
+                      variants={rowMotionVariants}
+                      initial={rowMotionVariants.initial}
+                      animate={animateValue}
+                      exit={rowMotionVariants.exit}
+                      exposeMotionProps={false}
                       data-motion-props={JSON.stringify({
                         initial: rowMotionVariants.initial,
                         animate: animateValue,
                         exit: rowMotionVariants.exit,
                       })}
-                      initial={rowMotionVariants.initial}
-                      animate={animateValue}
-                      exit={rowMotionVariants.exit}
                       style={{
                         position: "absolute",
                         top: virtualRow.start,
@@ -526,8 +510,9 @@ export function MessageList() {
                         isBulkSelected={selectedMessageUids.includes(message.uid)}
                         onBulkToggle={toggleBulkSelect}
                         suppressHover={keyboardNav}
+                        effectiveAnimationMode={effectiveAnimationMode}
                       />
-                    </motion.div>
+                    </AnimatedDiv>
                   );
                 })}
               </AnimatePresence>

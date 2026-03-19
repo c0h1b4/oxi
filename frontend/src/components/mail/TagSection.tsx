@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { AnimatePresence } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { ChevronRight, Plus, X, Loader2 } from "lucide-react";
 import { useTags, useCreateTag, useDeleteTag } from "@/hooks/useTags";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
@@ -33,9 +34,8 @@ export function TagSection() {
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(PRESET_COLORS[5]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const sectionMotion = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const createFormMotion = createScaleFadeVariants(effectiveAnimationMode);
+  const sectionMotion = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const createFormMotion = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   useEffect(() => {
     if (isCreating) {
@@ -106,85 +106,17 @@ export function TagSection() {
       ))}
 
       {/* Inline create form */}
-      {shouldAnimate ? (
-        <AnimatePresence initial={false}>
-          {isCreating && (
-            <motion.div
-              key="tag-create-form"
-              initial={createFormMotion.initial}
-              animate={createFormMotion.animate}
-              exit={createFormMotion.exit}
-              data-testid="tag-create-form-transition"
-              data-motion-props={JSON.stringify(createFormMotion)}
-              className="flex min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-1.5"
-            >
-              <div className="flex min-w-0 items-center gap-1.5">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCreate();
-                    if (e.key === "Escape") {
-                      setIsCreating(false);
-                      setNewName("");
-                    }
-                  }}
-                  placeholder="Tag name"
-                  className="min-w-0 flex-1 truncate rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-1 focus:ring-ring/50"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCreating(false);
-                    setNewName("");
-                  }}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-
-              {/* Color palette */}
-              <div className="flex gap-1">
-                {PRESET_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setNewColor(color)}
-                    className={cn(
-                      "size-4 rounded-full border-2 transition-transform",
-                      newColor === color
-                        ? "scale-125 border-foreground"
-                        : "border-transparent hover:scale-110",
-                    )}
-                    style={{ backgroundColor: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCreate}
-                disabled={!newName.trim() || createTag.isPending}
-                className={cn(
-                  "rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors",
-                  "disabled:opacity-50",
-                  "hover:bg-primary/90",
-                )}
-              >
-                {createTag.isPending ? "Creating..." : "Create"}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      ) : (
-        isCreating && (
-          <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-1.5">
+      <AnimatePresence initial={false}>
+        {isCreating && (
+          <AnimatedDiv
+            key="tag-create-form"
+            variants={createFormMotion}
+            initial={createFormMotion.initial}
+            animate={createFormMotion.animate}
+            exit={createFormMotion.exit}
+            data-testid="tag-create-form-transition"
+            className="flex min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-1.5"
+          >
             <div className="flex min-w-0 items-center gap-1.5">
               <input
                 ref={inputRef}
@@ -246,9 +178,9 @@ export function TagSection() {
             >
               {createTag.isPending ? "Creating..." : "Create"}
             </button>
-          </div>
-        )
-      )}
+          </AnimatedDiv>
+        )}
+      </AnimatePresence>
     </div>
   );
 
@@ -282,25 +214,21 @@ export function TagSection() {
         </button>
       </div>
 
-      {shouldAnimate ? (
-        <AnimatePresence initial={false}>
-          {!isCollapsed && (
-            <motion.div
-              key="tag-section-body"
-              initial={sectionMotion.initial}
-              animate={sectionMotion.animate}
-              exit={sectionMotion.exit}
-              data-testid="tag-section-body-transition"
-              data-motion-props={JSON.stringify(sectionMotion)}
-              className="overflow-hidden"
-            >
-              {sectionBody}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      ) : (
-        !isCollapsed && sectionBody
-      )}
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <AnimatedDiv
+            key="tag-section-body"
+            variants={sectionMotion}
+            initial={sectionMotion.initial}
+            animate={sectionMotion.animate}
+            exit={sectionMotion.exit}
+            data-testid="tag-section-body-transition"
+            className="overflow-hidden"
+          >
+            {sectionBody}
+          </AnimatedDiv>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

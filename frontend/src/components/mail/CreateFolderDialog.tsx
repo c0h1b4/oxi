@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Dialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCreateFolder } from "@/hooks/useFolders";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 
 interface CreateFolderDialogProps {
   open: boolean;
@@ -20,10 +21,8 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const createFolder = useCreateFolder();
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
-  const ModalContainer = shouldAnimate ? motion.div : "div";
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   // Reset state and focus input when dialog opens.
   useEffect(() => {
@@ -57,47 +56,28 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
       <Dialog.Portal forceMount>
         <AnimatePresence>
           {open ? (
-            <Dialog.Overlay asChild={shouldAnimate} forceMount>
-              {shouldAnimate ? (
-                <motion.div
-                  key="create-folder-overlay"
-                  data-testid="create-folder-overlay-transition"
-                  data-motion-props={JSON.stringify(overlayMotionProps)}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  variants={overlayMotionProps}
-                  className="fixed inset-0 z-50 bg-black/50"
-                />
-              ) : (
-                <div className="fixed inset-0 z-50 bg-black/50" onClick={onClose} />
-              )}
+            <Dialog.Overlay asChild forceMount>
+              <AnimatedDiv
+                key="create-folder-overlay"
+                data-testid="create-folder-overlay-transition"
+                variants={overlayMotionProps}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="fixed inset-0 z-50 bg-black/50"
+              />
             </Dialog.Overlay>
           ) : null}
           {open ? (
-            <Dialog.Content
-              asChild={shouldAnimate}
-              forceMount
-              className={
-                shouldAnimate
-                  ? undefined
-                  : "fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-6 shadow-lg"
-              }
-            >
-              <ModalContainer
+            <Dialog.Content asChild forceMount>
+              <AnimatedDiv
                 key="create-folder-content"
-                {...(shouldAnimate
-                  ? {
-                      "data-testid": "create-folder-content-transition",
-                      "data-motion-props": JSON.stringify(contentMotionProps),
-                      initial: "initial",
-                      animate: "animate",
-                      exit: "exit",
-                      variants: contentMotionProps,
-                      className:
-                        "fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-6 shadow-lg",
-                    }
-                  : {})}
+                data-testid="create-folder-content-transition"
+                variants={contentMotionProps}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-6 shadow-lg"
               >
                 <Dialog.Title className="mb-4 text-base font-semibold text-foreground">
                   Create new folder
@@ -148,7 +128,7 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
                     </Button>
                   </div>
                 </form>
-              </ModalContainer>
+              </AnimatedDiv>
             </Dialog.Content>
           ) : null}
         </AnimatePresence>

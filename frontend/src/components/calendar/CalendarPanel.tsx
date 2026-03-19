@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useMemo } from "react";
+import { AnimatePresence } from "framer-motion";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { useCalendarStore } from "@/stores/useCalendarStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { useCalendarSettings } from "@/hooks/useCalendar";
@@ -17,9 +18,7 @@ export function CalendarPanel() {
   const viewMode = useCalendarStore((s) => s.viewMode);
   const setViewMode = useCalendarStore((s) => s.setViewMode);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const panelTransition = createFadeSlideVariants(effectiveAnimationMode, "x");
-  const PanelContainer = shouldAnimate ? motion.div : "div";
+  const panelTransition = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
   const { data: settings } = useCalendarSettings();
 
   const weekStartsOn = settings?.week_starts_on ?? 0;
@@ -36,78 +35,62 @@ export function CalendarPanel() {
   }, [settings?.default_view]); // eslint-disable-line react-hooks/exhaustive-deps -- only apply on initial settings load
 
   return (
-    <PanelContainer
-      {...(shouldAnimate
-        ? {
-            "data-testid": "calendar-panel-transition",
-            "data-motion-props": JSON.stringify(panelTransition),
-            initial: panelTransition.initial,
-            animate: panelTransition.animate,
-            exit: panelTransition.exit,
-          }
-        : {})}
+    <AnimatedDiv
+      data-testid="calendar-panel-transition"
+      variants={panelTransition}
+      initial={panelTransition.initial}
+      animate={panelTransition.animate}
+      exit={panelTransition.exit}
       className="flex h-full min-w-0 flex-1 flex-col"
     >
       <CalendarHeader />
 
       <div className="flex flex-1 overflow-hidden">
-        {shouldAnimate ? (
-          <AnimatePresence mode="wait" initial={false}>
-            {viewMode === "month" && (
-              <motion.div
-                key="calendar-month-view"
-                data-testid="calendar-month-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
-                initial={panelTransition.initial}
-                animate={panelTransition.animate}
-                exit={panelTransition.exit}
-                className="flex min-h-0 min-w-0 flex-1"
-              >
-                <MonthView weekStartsOn={weekStartsOn} timeFormat={timeFormat} />
-              </motion.div>
-            )}
-            {viewMode === "week" && (
-              <motion.div
-                key="calendar-week-view"
-                data-testid="calendar-week-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
-                initial={panelTransition.initial}
-                animate={panelTransition.animate}
-                exit={panelTransition.exit}
-                className="flex min-h-0 min-w-0 flex-1"
-              >
-                <WeekView weekStartsOn={weekStartsOn} timeFormat={timeFormat} />
-              </motion.div>
-            )}
-            {viewMode === "day" && (
-              <motion.div
-                key="calendar-day-view"
-                data-testid="calendar-day-view-transition"
-                data-motion-props={JSON.stringify(panelTransition)}
-                initial={panelTransition.initial}
-                animate={panelTransition.animate}
-                exit={panelTransition.exit}
-                className="flex min-h-0 min-w-0 flex-1"
-              >
-                <DayView timeFormat={timeFormat} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        ) : (
-          <>
-            {viewMode === "month" && (
+        <AnimatePresence mode="wait" initial={false}>
+          {viewMode === "month" && (
+            <AnimatedDiv
+              key="calendar-month-view"
+              data-testid="calendar-month-view-transition"
+              variants={panelTransition}
+              initial={panelTransition.initial}
+              animate={panelTransition.animate}
+              exit={panelTransition.exit}
+              className="flex min-h-0 min-w-0 flex-1"
+            >
               <MonthView weekStartsOn={weekStartsOn} timeFormat={timeFormat} />
-            )}
-            {viewMode === "week" && (
+            </AnimatedDiv>
+          )}
+          {viewMode === "week" && (
+            <AnimatedDiv
+              key="calendar-week-view"
+              data-testid="calendar-week-view-transition"
+              variants={panelTransition}
+              initial={panelTransition.initial}
+              animate={panelTransition.animate}
+              exit={panelTransition.exit}
+              className="flex min-h-0 min-w-0 flex-1"
+            >
               <WeekView weekStartsOn={weekStartsOn} timeFormat={timeFormat} />
-            )}
-            {viewMode === "day" && <DayView timeFormat={timeFormat} />}
-          </>
-        )}
+            </AnimatedDiv>
+          )}
+          {viewMode === "day" && (
+            <AnimatedDiv
+              key="calendar-day-view"
+              data-testid="calendar-day-view-transition"
+              variants={panelTransition}
+              initial={panelTransition.initial}
+              animate={panelTransition.animate}
+              exit={panelTransition.exit}
+              className="flex min-h-0 min-w-0 flex-1"
+            >
+              <DayView timeFormat={timeFormat} />
+            </AnimatedDiv>
+          )}
+        </AnimatePresence>
       </div>
 
       <EventForm />
       <EventDetail timeFormat={timeFormat} />
-    </PanelContainer>
+    </AnimatedDiv>
   );
 }

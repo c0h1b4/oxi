@@ -55,7 +55,7 @@ jobs:
         run: bun run lint
 
       - name: Test (unit)
-        run: bunx vitest run
+        run: bun run test
 
       - name: Build (static export)
         run: bun run build

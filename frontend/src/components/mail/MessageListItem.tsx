@@ -1,12 +1,12 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Star, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateFlags } from "@/hooks/useMessages";
 import { createScaleFadeVariants } from "@/lib/motion/variants";
-import { useUiStore } from "@/stores/useUiStore";
+import type { AnimationMode } from "@/lib/motion/config";
 import type { MessageTag } from "@/types/tag";
 import type { MessageHeader } from "@/types/message";
 
@@ -35,6 +35,7 @@ interface MessageListItemProps {
   isBulkSelected: boolean;
   onBulkToggle: (uid: number) => void;
   suppressHover?: boolean;
+  effectiveAnimationMode: AnimationMode;
 }
 
 function formatDate(dateStr: string): string {
@@ -107,8 +108,8 @@ export const MessageListItem = memo(function MessageListItem({
   isBulkSelected,
   onBulkToggle,
   suppressHover,
+  effectiveAnimationMode,
 }: MessageListItemProps) {
-  const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
   const sender = message.from_name || message.from_address;
@@ -138,7 +139,8 @@ export const MessageListItem = memo(function MessageListItem({
   };
 
   const [isDragging, setIsDragging] = useState(false);
-  const selectionVariants = createScaleFadeVariants(effectiveAnimationMode);
+  const selectionVariants = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  const serializedSelectionVariants = useMemo(() => JSON.stringify(selectionVariants), [selectionVariants]);
   const shouldAnimateSelection =
     isSelected &&
     (effectiveAnimationMode === "medium" || effectiveAnimationMode === "rich");
@@ -276,7 +278,7 @@ export const MessageListItem = memo(function MessageListItem({
     return (
       <motion.div
         data-testid="message-list-item-selection-transition"
-        data-motion-props={JSON.stringify(selectionVariants)}
+        data-motion-props={serializedSelectionVariants}
         initial={selectionVariants.initial}
         animate={selectionVariants.animate}
         exit={selectionVariants.exit}
@@ -411,7 +413,7 @@ export const MessageListItem = memo(function MessageListItem({
   return (
     <motion.div
       data-testid="message-list-item-selection-transition"
-      data-motion-props={JSON.stringify(selectionVariants)}
+      data-motion-props={serializedSelectionVariants}
       initial={selectionVariants.initial}
       animate={selectionVariants.animate}
       exit={selectionVariants.exit}

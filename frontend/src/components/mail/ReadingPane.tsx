@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { AnimatePresence } from "framer-motion";
 import {
   Paperclip,
   ChevronDown,
@@ -19,6 +19,7 @@ import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useMessage, useUpdateFlags } from "@/hooks/useMessages";
 import { createFadeSlideVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,8 @@ export function ReadingPane() {
   );
 
   const updateFlags = useUpdateFlags();
+
+  const paneVariants = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "x"), [effectiveAnimationMode]);
 
   // When a message is not found on the server (stale cache), deselect it and
   // refresh the message list and search results so the ghost entry disappears.
@@ -134,8 +137,6 @@ export function ReadingPane() {
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const paneVariants = createFadeSlideVariants(effectiveAnimationMode, "x");
 
   const paneContent = (
     <div
@@ -340,23 +341,19 @@ export function ReadingPane() {
     </div>
   );
 
-  if (!shouldAnimate) {
-    return paneContent;
-  }
-
   return (
     <AnimatePresence mode="wait" initial={false}>
-      <motion.div
+      <AnimatedDiv
         key={`reading-pane-${data.uid}`}
         data-testid="reading-pane-message-transition"
-        data-motion-props={JSON.stringify(paneVariants)}
+        variants={paneVariants}
         initial={paneVariants.initial}
         animate={paneVariants.animate}
         exit={paneVariants.exit}
         className="h-full min-w-0 w-full"
       >
         {paneContent}
-      </motion.div>
+      </AnimatedDiv>
     </AnimatePresence>
   );
 }

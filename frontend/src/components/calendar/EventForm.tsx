@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import {
   formatDateTimeLocal,
 } from "./calendarUtils";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { cn } from "@/lib/utils";
 
 export function EventForm() {
@@ -28,10 +29,8 @@ export function EventForm() {
   const closeEventForm = useCalendarStore((s) => s.closeEventForm);
   const selectedDate = useCalendarStore((s) => s.selectedDate);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   const { data: editingEvent } = useCalendarEvent(editingEventId);
   const createEvent = useCreateEvent();
@@ -191,33 +190,22 @@ export function EventForm() {
   return createPortal(
     <AnimatePresence>
       <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {shouldAnimate ? (
-        <motion.div
-          data-testid="calendar-event-form-overlay-transition"
-          data-motion-props={JSON.stringify(overlayMotionProps)}
-          initial={overlayMotionProps.initial}
-          animate={overlayMotionProps.animate}
-          exit={overlayMotionProps.exit}
-          className="absolute inset-0 bg-black/50"
-          onClick={closeEventForm}
-        />
-      ) : (
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={closeEventForm}
-        />
-      )}
+      <AnimatedDiv
+        data-testid="calendar-event-form-overlay-transition"
+        variants={overlayMotionProps}
+        initial={overlayMotionProps.initial}
+        animate={overlayMotionProps.animate}
+        exit={overlayMotionProps.exit}
+        className="absolute inset-0 bg-black/50"
+        onClick={closeEventForm}
+      />
 
-      <ContentContainer
-        {...(shouldAnimate
-          ? {
-              "data-testid": "calendar-event-form-content-transition",
-              "data-motion-props": JSON.stringify(contentMotionProps),
-              initial: contentMotionProps.initial,
-              animate: contentMotionProps.animate,
-              exit: contentMotionProps.exit,
-            }
-          : {})}
+      <AnimatedDiv
+        data-testid="calendar-event-form-content-transition"
+        variants={contentMotionProps}
+        initial={contentMotionProps.initial}
+        animate={contentMotionProps.animate}
+        exit={contentMotionProps.exit}
         className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-xl"
       >
         <div className="flex items-center justify-between mb-4">
@@ -399,7 +387,7 @@ export function EventForm() {
             </Button>
           </div>
         </form>
-      </ContentContainer>
+      </AnimatedDiv>
     </div>
     </AnimatePresence>,
     document.body,

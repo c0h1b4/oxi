@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
@@ -60,6 +59,9 @@ const { mockUiState, mockUseSearch } = vi.hoisted(() => ({
     activeFolder: "INBOX",
     selectedMessageUid: null as number | null,
     effectiveAnimationMode: "medium" as "rich" | "medium" | "subtle" | "off",
+    searchSortOrder: "date_desc" as "date_desc" | "date_asc",
+    setSearchSortOrder: vi.fn(),
+    setSearchResultCount: vi.fn(),
   },
   mockUseSearch: vi.fn(),
 }));

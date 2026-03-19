@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { AlertDialog } from "radix-ui";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
+import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { useUiStore } from "@/stores/useUiStore";
 
 interface DiscardAlertDialogProps {
@@ -17,10 +19,8 @@ export function DiscardAlertDialog({
   onConfirm,
 }: DiscardAlertDialogProps) {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
-  const shouldAnimate = effectiveAnimationMode !== "off";
-  const overlayMotionProps = createFadeSlideVariants(effectiveAnimationMode, "y");
-  const contentMotionProps = createScaleFadeVariants(effectiveAnimationMode);
-  const ContentContainer = shouldAnimate ? motion.div : "div";
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
@@ -28,42 +28,24 @@ export function DiscardAlertDialog({
         <AnimatePresence>
           {open ? (
             <>
-              <AlertDialog.Overlay asChild={shouldAnimate}>
-                {shouldAnimate ? (
-                  <motion.div
-                    data-testid="discard-alert-overlay-transition"
-                    data-motion-props={JSON.stringify(overlayMotionProps)}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    variants={overlayMotionProps}
-                    className="fixed inset-0 z-50 bg-black/40"
-                  />
-                ) : (
-                  <div className="fixed inset-0 z-50 bg-black/40" />
-                )}
+              <AlertDialog.Overlay asChild>
+                <AnimatedDiv
+                  data-testid="discard-alert-overlay-transition"
+                  variants={overlayMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed inset-0 z-50 bg-black/40"
+                />
               </AlertDialog.Overlay>
-              <AlertDialog.Content
-                asChild={shouldAnimate}
-                className={
-                  shouldAnimate
-                    ? undefined
-                    : "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
-                }
-              >
-                <ContentContainer
-                  {...(shouldAnimate
-                    ? {
-                        "data-testid": "discard-alert-content-transition",
-                        "data-motion-props": JSON.stringify(contentMotionProps),
-                        initial: "initial",
-                        animate: "animate",
-                        exit: "exit",
-                        variants: contentMotionProps,
-                        className:
-                          "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl",
-                      }
-                    : {})}
+              <AlertDialog.Content asChild>
+                <AnimatedDiv
+                  data-testid="discard-alert-content-transition"
+                  variants={contentMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
                 >
                   <AlertDialog.Title className="text-base font-semibold">
                     Are you sure?
@@ -87,7 +69,7 @@ export function DiscardAlertDialog({
                       </button>
                     </AlertDialog.Action>
                   </div>
-                </ContentContainer>
+                </AnimatedDiv>
               </AlertDialog.Content>
             </>
           ) : null}

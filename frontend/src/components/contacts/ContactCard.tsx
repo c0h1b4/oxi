@@ -66,11 +66,6 @@ interface ContactCardProps {
   onDelete: (id: string) => void;
   isDeleting: boolean;
   groups?: ContactGroup[];
-  activeGroupId?: string | null;
-}
-
-interface ContactGroupsResponse {
-  groups: ContactGroup[];
 }
 
 export function ContactCard({
@@ -78,7 +73,6 @@ export function ContactCard({
   onDelete,
   isDeleting,
   groups = [],
-  activeGroupId,
 }: ContactCardProps) {
   const addMember = useAddGroupMember();
   const removeMember = useRemoveGroupMember();
