@@ -19,8 +19,12 @@ interface PreparedItem {
   emailPrepared: Fuzzysort.Prepared
 }
 
+/** Names over this length or with spam patterns are excluded from fuzzy matching. */
+function isSpamLikeName(name: string): boolean {
+  return name.length > 50 || /[|]/.test(name)
+}
+
 const MIN_QUERY_LENGTH = 2
-const NAME_WEIGHT = 1.5
 const CONTACT_BOOST = 100
 
 export class FuzzySearcher {
@@ -29,7 +33,9 @@ export class FuzzySearcher {
   setItems(items: SearchableItem[]): void {
     this.preparedItems = items.map((item) => ({
       original: item,
-      namePrepared: item.name ? fuzzysort.prepare(item.name) : null,
+      namePrepared: item.name && !(item.source === "known" && isSpamLikeName(item.name))
+        ? fuzzysort.prepare(item.name)
+        : null,
       emailPrepared: fuzzysort.prepare(item.email),
     }))
   }
@@ -51,19 +57,10 @@ export class FuzzySearcher {
         continue
       }
 
-      let score = 0
-
-      if (nameResult) {
-        score += nameResult.score * NAME_WEIGHT
-      }
-
-      if (emailResult) {
-        score += emailResult.score
-      }
-
-      if (prepared.original.source === "contact") {
-        score += CONTACT_BOOST
-      }
+      const score = Math.max(
+        nameResult ? nameResult.score : -Infinity,
+        emailResult ? emailResult.score : -Infinity,
+      ) + (prepared.original.source === "contact" ? CONTACT_BOOST : 0)
 
       results.push({
         item: prepared.original,

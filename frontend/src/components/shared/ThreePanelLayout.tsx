@@ -10,7 +10,6 @@ import { MessageActionBar } from "@/components/mail/MessageActionBar";
 import { isValidCommittedSearch } from "@/lib/search-parser";
 
 interface ThreePanelLayoutProps {
-  navRail: React.ReactNode;
   sidebar: React.ReactNode;
   messageList: React.ReactNode;
   readingPane: React.ReactNode;
@@ -49,7 +48,6 @@ const MAX_SIDEBAR_WIDTH = 400;
 const MIN_MESSAGE_LIST_WIDTH = 280;
 const MAX_MESSAGE_LIST_WIDTH = 700;
 const MIN_READING_PANE_WIDTH = 420;
-const NAV_RAIL_WIDTH = 56;
 const RESIZE_HANDLE_BUDGET = 8;
 
 function ResizeHandle({
@@ -103,7 +101,6 @@ function ResizeHandle({
 }
 
 export function ThreePanelLayout({
-  navRail,
   sidebar,
   messageList,
   readingPane,
@@ -150,7 +147,6 @@ export function ThreePanelLayout({
     const remaining = Math.floor(
       containerWidth -
       sidebarWidth -
-      NAV_RAIL_WIDTH -
       RESIZE_HANDLE_BUDGET -
       MIN_READING_PANE_WIDTH,
     );
@@ -185,9 +181,6 @@ export function ThreePanelLayout({
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full overflow-hidden">
-      {/* Navigation rail */}
-      {navRail}
-
       {/* Folder sidebar */}
       <aside
         className="shrink-0 overflow-y-auto bg-sidebar"

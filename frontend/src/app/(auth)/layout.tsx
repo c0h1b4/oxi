@@ -12,10 +12,13 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [authenticated, setAuthenticated] = useState(false);
   const setAccounts = useAuthStore((s) => s.setAccounts);
+  const existingAccounts = useAuthStore((s) => s.accounts);
+  const [authenticated, setAuthenticated] = useState(existingAccounts.length > 0);
 
   useEffect(() => {
+    if (authenticated) return;
+
     let cancelled = false;
     fetchAccounts()
       .then((data) => {
@@ -34,7 +37,7 @@ export default function AuthLayout({
     return () => {
       cancelled = true;
     };
-  }, [router, setAccounts]);
+  }, [router, setAccounts, authenticated]);
 
   if (!authenticated) {
     return (

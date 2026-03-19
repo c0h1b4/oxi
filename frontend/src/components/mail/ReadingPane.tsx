@@ -23,7 +23,6 @@ import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { EmailRenderer, hasRemoteResources } from "./EmailRenderer";
 import { ThreadView } from "./ThreadView";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import {
   AddressChip,
   AddressList,
@@ -54,7 +53,7 @@ export function ReadingPane() {
   const queryClient = useQueryClient();
   const selectMessage = useUiStore((s) => s.selectMessage);
 
-  const { data, isLoading, isError, error, isPlaceholderData, refetch } = useMessage(
+  const { data, isLoading, isError, error, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0
   );
@@ -134,19 +133,14 @@ export function ReadingPane() {
     );
   }
 
-  const attachmentBaseUrl = activeAccountId
-    ? `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments?account_id=${encodeURIComponent(activeAccountId)}`
-    : `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
+  const attachmentBaseUrl = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
 
   const paneContent = (
     <div
-      className={cn(
-        "flex h-full w-full flex-col overflow-hidden transition-opacity",
-        isPlaceholderData && "opacity-40 pointer-events-none"
-      )}
+      className="flex h-full w-full flex-col overflow-hidden"
     >
       {/* Header area */}
       <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
@@ -288,6 +282,7 @@ export function ReadingPane() {
         <AttachmentPreviewer
           attachments={data.attachments}
           baseUrl={attachmentBaseUrl}
+          accountId={activeAccountId}
           initialIndex={previewIndex}
           onClose={() => setPreviewIndex(null)}
         />
