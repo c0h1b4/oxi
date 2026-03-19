@@ -9,12 +9,15 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — Frontend build
 # ---------------------------------------------------------------------------
-FROM oven/bun:1 AS frontend-build
+FROM node:20-bookworm-slim AS frontend-build
 
 ARG NEXT_PUBLIC_BASE_PATH
 ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
 
 WORKDIR /app/frontend
+
+# Install bun inside the node image (avoids SIGILL on CI runners)
+RUN npm install -g bun
 
 # Copy dependency manifests first for layer caching
 COPY frontend/package.json frontend/bun.lock ./
@@ -69,10 +72,11 @@ ENV STATIC_DIR=/app/static
 ENV DATA_DIR=/data
 ENV PORT=3001
 ENV HOST=0.0.0.0
+ENV BASE_PATH=
 
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-    CMD curl -f http://localhost:3001/api/health || exit 1
+    CMD curl -f http://localhost:3001${BASE_PATH}/api/health || exit 1
 
 CMD ["./oxi-email-server"]
