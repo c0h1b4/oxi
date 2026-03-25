@@ -287,6 +287,7 @@ pub async fn search_messages(
     }
 
     let sort_order = params.sort.clone();
+    let limit = params.limit;
 
     // Parse structured operators from the query string.
     let parsed = parse_search_query(&query_text);
@@ -298,22 +299,30 @@ pub async fn search_messages(
     let date_to = params.date_to.or(parsed.date_to);
     let has_attachment = params.has_attachment.or(parsed.has_attachment);
 
-    // Open the user's SQLite database.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-
-    // Primary search: SQLite LIKE across all cached messages (subject, from, to).
-    let sqlite_results = db::messages::search_messages_sqlite(
-        &conn,
-        &parsed.text,
-        folder.as_deref(),
-        from.as_deref(),
-        to.as_deref(),
-        date_from,
-        date_to,
-        has_attachment,
-        params.limit,
-    )
+    // Run SQLite queries in spawn_blocking to avoid blocking the Tokio executor.
+    let data_dir = config.data_dir.clone();
+    let user_hash = session.user_hash.clone();
+    let text_clone = parsed.text.clone();
+    let folder_clone = folder.clone();
+    let from_clone = from.clone();
+    let to_clone = to.clone();
+    let sqlite_results = tokio::task::spawn_blocking(move || {
+        let conn = db::pool::open_user_db(&data_dir, &user_hash)
+            .map_err(|e| format!("Database error: {e}"))?;
+        db::messages::search_messages_sqlite(
+            &conn,
+            &text_clone,
+            folder_clone.as_deref(),
+            from_clone.as_deref(),
+            to_clone.as_deref(),
+            date_from,
+            date_to,
+            has_attachment,
+            limit,
+        )
+    })
+    .await
+    .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
     .map_err(|e| AppError::InternalError(format!("Search error: {e}")))?;
 
     // Collect SQLite results as SearchResultItems.
@@ -339,7 +348,8 @@ pub async fn search_messages(
         .collect();
 
     // Secondary search: Tantivy for body text matches not found by SQLite.
-    if !parsed.text.is_empty()
+    // Only add results up to the limit cap.
+    if !parsed.text.is_empty() && results.len() < limit
         && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
         && let Ok((tantivy_results, _)) = user_index.search(&SearchQuery {
             text: parsed.text,
@@ -350,34 +360,50 @@ pub async fn search_messages(
             date_from,
             date_to,
             has_attachment,
-            limit: params.limit,
+            limit,
             offset: params.offset,
         })
     {
-        for sr in &tantivy_results {
-            if seen.contains(&(sr.folder.clone(), sr.uid)) {
+        // Resolve Tantivy UIDs via SQLite in spawn_blocking.
+        let data_dir2 = config.data_dir.clone();
+        let user_hash2 = session.user_hash.clone();
+        let remaining = limit.saturating_sub(results.len());
+        let tantivy_enriched = tokio::task::spawn_blocking(move || {
+            let conn = db::pool::open_user_db(&data_dir2, &user_hash2)
+                .map_err(|e| format!("Database error: {e}"))?;
+            let mut items = Vec::new();
+            for sr in &tantivy_results {
+                if items.len() >= remaining {
+                    break;
+                }
+                if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
+                    items.push((sr.score, sr.snippet.clone(), msg));
+                }
+            }
+            Ok::<_, String>(items)
+        })
+        .await
+        .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+        for (score, snippet, msg) in tantivy_enriched {
+            if seen.contains(&(msg.folder.clone(), msg.uid)) {
                 continue;
             }
-            if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
-                seen.insert((msg.folder.clone(), msg.uid));
-                results.push(SearchResultItem {
-                    uid: msg.uid,
-                    folder: msg.folder,
-                    score: sr.score,
-                    subject: msg.subject,
-                    from_address: msg.from_address,
-                    from_name: msg.from_name,
-                    to_addresses: msg.to_addresses,
-                    date: msg.date,
-                    flags: msg.flags,
-                    has_attachments: msg.has_attachments,
-                    snippet: if sr.snippet.is_empty() {
-                        msg.snippet
-                    } else {
-                        sr.snippet.clone()
-                    },
-                });
-            }
+            seen.insert((msg.folder.clone(), msg.uid));
+            results.push(SearchResultItem {
+                uid: msg.uid,
+                folder: msg.folder,
+                score,
+                subject: msg.subject,
+                from_address: msg.from_address,
+                from_name: msg.from_name,
+                to_addresses: msg.to_addresses,
+                date: msg.date,
+                flags: msg.flags,
+                has_attachments: msg.has_attachments,
+                snippet: if snippet.is_empty() { msg.snippet } else { snippet },
+            });
         }
     }
 
@@ -388,6 +414,9 @@ pub async fn search_messages(
         let db_val = crate::db::messages::parse_date_to_epoch_public(&b.date);
         if sort_asc { da.cmp(&db_val) } else { db_val.cmp(&da) }
     });
+
+    // Cap to requested limit after sorting.
+    results.truncate(limit);
 
     Ok(Json(SearchResponse {
         total_count: results.len(),

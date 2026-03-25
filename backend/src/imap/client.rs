@@ -985,26 +985,35 @@ impl ImapClient for RealImapClient {
 
         let mut quota_result: Option<MailboxQuota> = None;
 
-        // Read responses until we get the tagged OK/NO/BAD.
-        while let Some(resp) = session.read_response().await {
-            let resp = match resp {
-                Ok(r) => r,
-                Err(_) => break,
-            };
-            match resp.parsed() {
-                async_imap::imap_proto::Response::Quota(q) => {
-                    for resource in &q.resources {
-                        if matches!(resource.name, async_imap::imap_proto::types::QuotaResourceName::Storage) {
-                            quota_result = Some(MailboxQuota {
-                                usage_bytes: resource.usage * 1024,
-                                limit_bytes: resource.limit * 1024,
-                            });
+        // Read responses until we get the tagged OK/NO/BAD (15s timeout).
+        let read_result = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            async {
+                while let Some(resp) = session.read_response().await {
+                    let resp = match resp {
+                        Ok(r) => r,
+                        Err(_) => break,
+                    };
+                    match resp.parsed() {
+                        async_imap::imap_proto::Response::Quota(q) => {
+                            for resource in &q.resources {
+                                if matches!(resource.name, async_imap::imap_proto::types::QuotaResourceName::Storage) {
+                                    quota_result = Some(MailboxQuota {
+                                        usage_bytes: resource.usage * 1024,
+                                        limit_bytes: resource.limit * 1024,
+                                    });
+                                }
+                            }
                         }
+                        async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
+                        _ => {}
                     }
                 }
-                async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
-                _ => {}
-            }
+            },
+        ).await;
+
+        if read_result.is_err() {
+            tracing::warn!("GETQUOTAROOT timed out after 15s");
         }
 
         let _ = session.logout().await;
@@ -1025,16 +1034,33 @@ impl ImapClient for RealImapClient {
         }
 
         let mut total: u64 = 0;
-        {
-            let mut fetch_stream = session
-                .uid_fetch("1:*", "RFC822.SIZE")
-                .await
-                .map_err(map_imap_error)?;
 
-            while let Some(result) = fetch_stream.next().await {
-                let fetch = result.map_err(map_imap_error)?;
-                total += fetch.size.unwrap_or(0) as u64;
+        // 60s timeout for fetching all sizes in a folder.
+        let fetch_result = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            async {
+                let mut fetch_stream = session
+                    .uid_fetch("1:*", "RFC822.SIZE")
+                    .await
+                    .map_err(map_imap_error)?;
+
+                while let Some(result) = fetch_stream.next().await {
+                    let fetch = result.map_err(map_imap_error)?;
+                    total += fetch.size.unwrap_or(0) as u64;
+                }
+                Ok::<(), ImapError>(())
+            },
+        ).await;
+
+        match fetch_result {
+            Ok(Err(e)) => {
+                let _ = session.logout().await;
+                return Err(e);
             }
+            Err(_) => {
+                tracing::warn!(folder = %folder, "fetch_folder_size timed out after 60s");
+            }
+            _ => {}
         }
 
         let _ = session.logout().await;

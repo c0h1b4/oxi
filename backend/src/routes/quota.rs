@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -22,7 +23,7 @@ struct QuotaResponse {
 ///
 /// Returns the mailbox storage quota for the authenticated user.
 /// Tries IMAP GETQUOTAROOT first; if no quota is configured, falls back to
-/// summing RFC822.SIZE across all folders via IMAP FETCH.
+/// summing RFC822.SIZE across all folders via IMAP FETCH (with a 90s timeout).
 pub async fn get_quota(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
@@ -51,20 +52,38 @@ pub async fn get_quota(
         },
         None => {
             // No IMAP QUOTA — sum RFC822.SIZE across all folders.
-            let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
-                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-            let folders: Vec<String> = db::folders::get_all_folders(&conn)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|f| f.name)
-                .collect();
+            // Run SQLite access in spawn_blocking to avoid blocking the executor.
+            let data_dir = config.data_dir.clone();
+            let user_hash = session.user_hash.clone();
+            let folders: Vec<String> = tokio::task::spawn_blocking(move || {
+                let conn = db::pool::open_user_db(&data_dir, &user_hash)?;
+                Ok::<_, String>(
+                    db::folders::get_all_folders(&conn)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|f| f.name)
+                        .collect(),
+                )
+            })
+            .await
+            .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-            let mut total: u64 = 0;
-            for folder in &folders {
-                if let Ok(size) = imap_client.fetch_folder_size(&creds, folder).await {
-                    total += size;
+            // Fetch sizes with a 90s overall timeout.
+            let total = tokio::time::timeout(Duration::from_secs(90), async {
+                let mut sum: u64 = 0;
+                for folder in &folders {
+                    if let Ok(size) = imap_client.fetch_folder_size(&creds, folder).await {
+                        sum += size;
+                    }
                 }
-            }
+                sum
+            })
+            .await
+            .unwrap_or_else(|_| {
+                tracing::warn!("Quota folder-size fallback timed out after 90s");
+                0
+            });
 
             QuotaResponse {
                 usage_bytes: if total > 0 { Some(total) } else { None },
