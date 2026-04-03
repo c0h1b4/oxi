@@ -111,7 +111,7 @@ export function NavRail() {
     } catch {
       // Even if the API call fails, redirect to login
     }
-    router.replace("/");
+    router.replace("/login");
   }, [router]);
 
   return (

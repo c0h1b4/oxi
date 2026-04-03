@@ -29,8 +29,9 @@ use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use tower_http::cors::CorsLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use crate::auth::csrf::csrf_protection;
@@ -42,25 +43,81 @@ use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
 use crate::smtp::client::SmtpClient;
 
-/// Per-IP key extractor that falls back to the loopback address when
-/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests using
-/// `oneshot`).  In production the server is started with
-/// `into_make_service_with_connect_info::<SocketAddr>()` so the real
-/// peer IP is always present.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PeerIpKeyExtractorFallback;
+/// Per-IP key extractor that supports trusted reverse proxies.
+///
+/// When the peer IP is in the configured `trusted_proxies` list, the
+/// leftmost `X-Forwarded-For` value is used as the client IP. Otherwise
+/// the direct peer IP is used. Falls back to loopback when
+/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests).
+#[derive(Debug, Clone)]
+struct ProxyAwareIpExtractor {
+    trusted_proxies: Vec<IpAddr>,
+}
 
-impl KeyExtractor for PeerIpKeyExtractorFallback {
+impl KeyExtractor for ProxyAwareIpExtractor {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        // Try ConnectInfo<SocketAddr> first (production path).
-        let ip = req
+        let peer_ip = req
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
-            .map(|ci: &ConnectInfo<SocketAddr>| ci.0.ip());
+            .map(|ci| ci.0.ip())
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-        Ok(ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+        if self.trusted_proxies.contains(&peer_ip)
+            && let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
+            && let Some(first) = forwarded.split(',').next()
+            && let Ok(client_ip) = first.trim().parse::<IpAddr>()
+        {
+            return Ok(client_ip);
+        }
+
+        Ok(peer_ip)
+    }
+}
+
+/// SPA fallback handler that tries `{path}.html` before serving `index.html`.
+///
+/// Next.js static export produces files like `login.html` for `/login` routes,
+/// but `ServeDir` doesn't try the `.html` extension automatically. This handler
+/// runs for any request that doesn't match a static file, mapping clean URLs
+/// (e.g. `/login` → `login.html`) with `index.html` as the final catch-all for
+/// client-side routing.
+async fn spa_fallback(
+    uri: axum::http::Uri,
+    Extension(config): Extension<Arc<AppConfig>>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let static_dir = Path::new(&config.static_dir);
+    let path = uri.path().trim_start_matches('/');
+
+    // Try {path}.html (e.g. /login -> login.html)
+    if !path.is_empty() && !path.contains('.') {
+        let html_path = static_dir.join(format!("{path}.html"));
+        if html_path.is_file()
+            && let Ok(contents) = tokio::fs::read(&html_path).await
+        {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
+    // Fall back to index.html (SPA catch-all)
+    let index_path = static_dir.join("index.html");
+    match tokio::fs::read(&index_path).await {
+        Ok(contents) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            contents,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -98,7 +155,9 @@ pub fn create_router(
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
-        .key_extractor(PeerIpKeyExtractorFallback)
+        .key_extractor(ProxyAwareIpExtractor {
+            trusted_proxies: config.parsed_trusted_proxies(),
+        })
         .period(Duration::from_secs(12))
         .burst_size(5)
         .finish()
@@ -300,12 +359,17 @@ pub fn create_router(
         .merge(ws_route)
         .merge(protected_data);
 
-    let index_path = Path::new(&config.static_dir).join("index.html");
-    let static_service = ServeDir::new(&config.static_dir).fallback(ServeFile::new(index_path));
-
-    let inner = Router::new()
-        .nest("/api", api_router)
-        .fallback_service(static_service);
+    let inner = if config.serve_static {
+        let static_service = ServeDir::new(&config.static_dir);
+        let spa_router = Router::new()
+            .fallback(spa_fallback)
+            .layer(Extension(config.clone()));
+        Router::new()
+            .nest("/api", api_router)
+            .fallback_service(static_service.fallback(spa_router))
+    } else {
+        Router::new().nest("/api", api_router)
+    };
 
     // If BASE_PATH is set (e.g. "/oxi"), nest the entire app under that prefix.
     let router = match config.base_path.as_deref() {
@@ -324,7 +388,26 @@ pub fn create_router(
         .layer(TraceLayer::new_for_http());
 
     if config.environment == "development" {
-        router.layer(CorsLayer::permissive())
+        if let Some(ref origin) = config.cors_origin {
+            let cors = CorsLayer::new()
+                .allow_origin(origin.parse::<HeaderValue>().unwrap())
+                .allow_credentials(true)
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::DELETE,
+                ])
+                .allow_headers([
+                    header::CONTENT_TYPE,
+                    HeaderName::from_static("x-requested-with"),
+                    HeaderName::from_static("x-active-account"),
+                ]);
+            router.layer(cors)
+        } else {
+            router.layer(CorsLayer::permissive())
+        }
     } else {
         router
     }
