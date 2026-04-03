@@ -64,14 +64,12 @@ impl KeyExtractor for ProxyAwareIpExtractor {
             .map(|ci| ci.0.ip())
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-        if self.trusted_proxies.contains(&peer_ip) {
-            if let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-                if let Some(first) = forwarded.split(',').next() {
-                    if let Ok(client_ip) = first.trim().parse::<IpAddr>() {
-                        return Ok(client_ip);
-                    }
-                }
-            }
+        if self.trusted_proxies.contains(&peer_ip)
+            && let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
+            && let Some(first) = forwarded.split(',').next()
+            && let Ok(client_ip) = first.trim().parse::<IpAddr>()
+        {
+            return Ok(client_ip);
         }
 
         Ok(peer_ip)
