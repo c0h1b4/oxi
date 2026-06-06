@@ -46,9 +46,11 @@ fn build_creds(session: &SessionState, config: &AppConfig) -> Result<ImapCredent
 /// `\Deleted`, `\Draft`, `\Recent`) and keyword atoms (`Junk`,
 /// `$Forwarded`, `$MDNSent`, etc.).
 ///
-/// Rejects values containing characters outside the safe IMAP atom
-/// character set (RFC 3501 §9), including whitespace, parentheses,
-/// and control characters.
+/// This is a restricted safe subset of the RFC 3501 §9 atom grammar:
+/// an optional leading `\` followed by `[A-Za-z0-9$_\-.+]`, capped at
+/// 64 characters. The cap is well above any flag seen in practice and
+/// keeps the set narrow enough to exclude whitespace, parentheses, and
+/// control characters without needing to enumerate every RFC exclusion.
 fn is_valid_flag(flag: &str) -> bool {
     if flag.is_empty() || flag.len() > 64 {
         return false;
@@ -888,6 +890,13 @@ pub async fn download_attachment(
         .chars()
         .filter(|c| !c.is_ascii_control())
         .collect();
+    // Fall back to a safe default if stripping left nothing (e.g. the
+    // original filename was composed entirely of control characters).
+    let filename = if filename.is_empty() {
+        format!("attachment_{index}")
+    } else {
+        filename
+    };
     let content_type = attachment.content_type;
 
     // Use inline disposition for types the browser can display natively

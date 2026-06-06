@@ -64,7 +64,7 @@ fn validate_folder_name(name: &str) -> Result<(), AppError> {
             "Folder name contains invalid characters".to_string(),
         ));
     }
-    if name.bytes().any(|b| b < 0x20 || b == 0x7f) {
+    if name.chars().any(|c| c.is_control()) {
         return Err(AppError::BadRequest(
             "Folder name contains invalid characters".to_string(),
         ));
