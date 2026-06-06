@@ -66,7 +66,7 @@ fn is_valid_flag(flag: &str) -> bool {
 fn validate_flags(flags: &[String]) -> Result<(), AppError> {
     for flag in flags {
         if !is_valid_flag(flag) {
-            return Err(AppError::BadRequest(format!("invalid flag: {flag:?}")));
+            return Err(AppError::BadRequest("invalid flag".to_string()));
         }
     }
     Ok(())
