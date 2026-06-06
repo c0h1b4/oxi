@@ -37,6 +37,40 @@ fn build_creds(session: &SessionState, config: &AppConfig) -> Result<ImapCredent
 }
 
 // ---------------------------------------------------------------------------
+// Helper: validate IMAP flags from client input
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if `flag` is a syntactically valid IMAP flag.
+///
+/// Accepts RFC 3501 system flags (`\Seen`, `\Answered`, `\Flagged`,
+/// `\Deleted`, `\Draft`, `\Recent`) and keyword atoms (`Junk`,
+/// `$Forwarded`, `$MDNSent`, etc.).
+///
+/// Rejects values containing characters outside the safe IMAP atom
+/// character set (RFC 3501 §9), including whitespace, parentheses,
+/// and control characters.
+fn is_valid_flag(flag: &str) -> bool {
+    if flag.is_empty() || flag.len() > 64 {
+        return false;
+    }
+    // Strip optional leading backslash (system flags like \Seen).
+    let atom = flag.strip_prefix('\\').unwrap_or(flag);
+    !atom.is_empty()
+        && atom
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'$' | b'_' | b'-' | b'+' | b'.'))
+}
+
+fn validate_flags(flags: &[String]) -> Result<(), AppError> {
+    for flag in flags {
+        if !is_valid_flag(flag) {
+            return Err(AppError::BadRequest(format!("invalid flag: {flag:?}")));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -694,6 +728,8 @@ pub async fn update_flags(
     Path((folder, uid)): Path<(String, u32)>,
     Json(body): Json<UpdateFlagsRequest>,
 ) -> Result<Response, AppError> {
+    validate_flags(&body.flags)?;
+
     let creds = build_creds(&session, &config)?;
 
     // Convert flags to &str slices for the IMAP client.
@@ -841,9 +877,17 @@ pub async fn download_attachment(
         })?;
 
     // Build the response with appropriate headers.
-    let filename = attachment
+    let raw_filename = attachment
         .filename
         .unwrap_or_else(|| format!("attachment_{index}"));
+    // Strip ASCII control characters (U+0000-U+001F and U+007F). MIME
+    // decoders can surface them via quoted-pair escapes in malformed emails,
+    // and HeaderValue rejects those bytes. Non-ASCII Unicode characters
+    // (U+0080 and above) are unaffected and left intact.
+    let filename: String = raw_filename
+        .chars()
+        .filter(|c| !c.is_ascii_control())
+        .collect();
     let content_type = attachment.content_type;
 
     // Use inline disposition for types the browser can display natively
@@ -861,7 +905,7 @@ pub async fn download_attachment(
         .header("content-type", &content_type)
         .header("content-disposition", &disposition)
         .body(axum::body::Body::from(attachment.data))
-        .unwrap())
+        .map_err(|e| AppError::InternalError(format!("Failed to build response: {e}")))?)
 }
 
 /// `DELETE /api/messages/:folder/:uid`

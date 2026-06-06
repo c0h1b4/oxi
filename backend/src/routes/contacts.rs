@@ -531,10 +531,14 @@ pub async fn export_single_contact_handler(
     match contact {
         Some(c) => {
             let vcf = contact_to_vcard(&c);
-            let filename = if c.name.is_empty() {
+            // Strip ASCII control characters (U+0000-U+001F and U+007F) from
+            // the contact name before using it in the Content-Disposition
+            // filename. Non-ASCII Unicode characters are left intact.
+            let safe_name: String = c.name.chars().filter(|c| !c.is_ascii_control()).collect();
+            let filename = if safe_name.is_empty() {
                 "contact.vcf".to_string()
             } else {
-                format!("{}.vcf", c.name.replace(' ', "_"))
+                format!("{}.vcf", safe_name.replace(' ', "_"))
             };
 
             Ok(Response::builder()
@@ -544,7 +548,7 @@ pub async fn export_single_contact_handler(
                     format!("attachment; filename=\"{filename}\""),
                 )
                 .body(axum::body::Body::from(vcf))
-                .unwrap())
+                .map_err(|e| AppError::InternalError(format!("Failed to build response: {e}")))?)
         }
         None => Err(AppError::NotFound(format!("Contact '{id}' not found"))),
     }
