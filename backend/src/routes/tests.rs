@@ -936,6 +936,80 @@
     }
 
     #[tokio::test]
+    async fn update_flags_rejects_invalid_flag_characters() {
+        // Flag values must be IMAP atom characters (RFC 3501 §9). A value
+        // containing a space — e.g. two flags accidentally joined into one
+        // string — must be rejected with 400 before reaching the IMAP client.
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let mock = MockImapClient::new();
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+
+        let mut req = Request::builder()
+            .method("PATCH")
+            .uri("/api/messages/INBOX/1/flags")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app
+            .oneshot(req.body(Body::from(
+                r#"{"flags":["\\Seen \\Flagged"],"add":true}"#,
+            )).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // BAD_REQUEST confirms rejection at the validation layer — the IMAP
+        // error path returns SERVICE_UNAVAILABLE (503), not 400.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "BAD_REQUEST");
+    }
+
+    #[tokio::test]
+    async fn update_flags_rejects_empty_flag() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let mock = MockImapClient::new();
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+
+        let mut req = Request::builder()
+            .method("PATCH")
+            .uri("/api/messages/INBOX/1/flags")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app
+            .oneshot(req.body(Body::from(
+                r#"{"flags":[""],"add":true}"#,
+            )).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn move_message_returns_200() {
         let static_dir = setup_static_dir();
         let data_dir = TempDir::new().unwrap();
@@ -1104,6 +1178,63 @@
         // Verify body bytes match the attachment data.
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(body.as_ref(), &attachment_data);
+    }
+
+    #[tokio::test]
+    async fn download_attachment_strips_control_chars_from_filename() {
+        // MIME decoders can surface control characters in attachment filenames
+        // via quoted-pair escapes. Control characters must be stripped before
+        // the filename is used in the Content-Disposition header.
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+
+        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+            uid: 1,
+            text_plain: Some("text".to_string()),
+            text_html: None,
+            attachments: vec![ImapAttachment {
+                filename: Some("doc\r\nument.pdf".to_string()),
+                content_type: "application/pdf".to_string(),
+                size: 4,
+                data: vec![0u8; 4],
+                content_id: None,
+            }],
+            raw_headers: String::new(),
+        }]);
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+
+        let mut req = Request::builder()
+            .uri("/api/messages/INBOX/1/attachments/0")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let cd = response
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        // Control characters stripped; the rest of the filename is intact.
+        assert!(cd.contains("document.pdf"), "got: {cd}");
+        assert!(!cd.contains('\r'));
+        assert!(!cd.contains('\n'));
     }
 
     #[tokio::test]
@@ -1393,4 +1524,67 @@
             .as_str()
             .unwrap()
             .contains("relay denied"));
+    }
+
+    #[tokio::test]
+    async fn export_contact_strips_control_chars_from_filename() {
+        // A contact name containing control characters must have them stripped
+        // before the name is used in the Content-Disposition header.
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+
+        // Insert a contact whose name contains a newline.
+        let conn = crate::db::pool::open_user_db(
+            data_dir.path().to_str().unwrap(),
+            &user_hash,
+        ).unwrap();
+        let contact = crate::db::contacts::Contact {
+            id: "c1".to_string(),
+            email: "bob@example.com".to_string(),
+            name: "Bob\nSmith".to_string(),
+            company: String::new(),
+            notes: String::new(),
+            is_favorite: false,
+            last_contacted: None,
+            contact_count: 0,
+            source: "manual".to_string(),
+            created_at: "2024-01-01 00:00:00".to_string(),
+            updated_at: "2024-01-01 00:00:00".to_string(),
+        };
+        crate::db::contacts::upsert_contact(&conn, &contact).unwrap();
+        drop(conn);
+
+        let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
+        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+
+        let mut req = Request::builder()
+            .uri("/api/contacts/c1/export")
+            .header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let cd = response
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        // Control character stripped; the rest of the name is intact.
+        assert!(cd.contains("BobSmith.vcf"), "got: {cd}");
+        assert!(!cd.contains('\n'));
     }

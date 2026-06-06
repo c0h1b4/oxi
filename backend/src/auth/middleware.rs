@@ -24,7 +24,7 @@ fn unauthorized() -> Response {
 fn account_expired(account_id: &str) -> Response {
     let body = serde_json::json!({
         "error": {
-            "code": "ACCOUNT_EXPIRED",
+            "code": "ACCOUNT_SESSION_EXPIRED",
             "message": "Account session has expired",
             "status": 401,
             "account_id": account_id,
@@ -277,7 +277,7 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
         assert_eq!(json["error"]["account_id"], session.account_id);
     }
 
@@ -300,7 +300,7 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
     }
 
     #[tokio::test]
@@ -342,7 +342,7 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
     }
 
     #[tokio::test]
@@ -364,7 +364,7 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
     }
 
     #[tokio::test]
@@ -429,7 +429,7 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
     }
 
     #[tokio::test]
