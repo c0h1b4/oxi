@@ -884,8 +884,9 @@ pub async fn download_attachment(
         .unwrap_or_else(|| format!("attachment_{index}"));
     // Strip ASCII control characters (U+0000-U+001F and U+007F). MIME
     // decoders can surface them via quoted-pair escapes in malformed emails,
-    // and HeaderValue rejects those bytes. Non-ASCII Unicode characters
-    // (U+0080 and above) are unaffected and left intact.
+    // and HeaderValue rejects those bytes. HeaderValue::from_str routes
+    // through is_valid (accepts 0x09, 0x20-0x7E, 0x80-0xFF; rejects
+    // 0x00-0x08, 0x0A-0x1F, 0x7F), so non-ASCII UTF-8 bytes are fine.
     let filename: String = raw_filename
         .chars()
         .filter(|c| !c.is_ascii_control())

@@ -969,6 +969,11 @@
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // BAD_REQUEST confirms rejection at the validation layer — the IMAP
+        // error path returns SERVICE_UNAVAILABLE (503), not 400.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "BAD_REQUEST");
     }
 
     #[tokio::test]

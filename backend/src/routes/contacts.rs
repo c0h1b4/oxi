@@ -533,7 +533,9 @@ pub async fn export_single_contact_handler(
             let vcf = contact_to_vcard(&c);
             // Strip ASCII control characters (U+0000-U+001F and U+007F) from
             // the contact name before using it in the Content-Disposition
-            // filename. Non-ASCII Unicode characters are left intact.
+            // filename. HeaderValue::from_str routes through is_valid
+            // (accepts 0x09, 0x20-0x7E, 0x80-0xFF; rejects 0x00-0x08,
+            // 0x0A-0x1F, 0x7F), so non-ASCII UTF-8 bytes are fine.
             let safe_name: String = c.name.chars().filter(|c| !c.is_ascii_control()).collect();
             let filename = if safe_name.is_empty() {
                 "contact.vcf".to_string()
