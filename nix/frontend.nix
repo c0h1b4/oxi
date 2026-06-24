@@ -20,6 +20,10 @@
         '';
 
         installPhase = ''
+          if [ ! -d out ]; then
+            echo "Next static export output 'out' is missing" >&2
+            exit 1
+          fi
           mkdir -p $out
           cp -r out/* $out/
         '';
