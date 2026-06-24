@@ -1,6 +1,6 @@
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::http::{HeaderValue, Request, StatusCode};
     use http_body_util::BodyExt;
     use std::fs;
     use std::time::Duration;
@@ -187,6 +187,39 @@
             .to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn invalid_dev_cors_origin_falls_back_to_default_credentialed_cors() {
+        let dir = setup_static_dir();
+        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+        cfg.cors_origin = Some("bad\norigin".to_string());
+        let config = Arc::new(cfg);
+        let store = test_store();
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/health")
+                    .header("origin", "http://localhost:3000")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static("http://localhost:3000"))
+        );
+        assert_eq!(
+            response.headers().get("access-control-allow-credentials"),
+            Some(&HeaderValue::from_static("true"))
+        );
     }
 
     #[tokio::test]

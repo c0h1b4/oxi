@@ -34,6 +34,28 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
+const DEFAULT_DEV_CORS_ORIGIN: &str = "http://localhost:3000";
+
+fn development_cors(origin: Option<&str>) -> CorsLayer {
+    let origin = origin.unwrap_or(DEFAULT_DEV_CORS_ORIGIN);
+
+    CorsLayer::new()
+        .allow_origin(origin.parse::<HeaderValue>().expect("default dev CORS origin must be valid"))
+        .allow_credentials(true)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-requested-with"),
+            HeaderName::from_static("x-active-account"),
+        ])
+}
+
 use crate::auth::csrf::csrf_protection;
 use crate::auth::middleware::auth_guard;
 use crate::auth::session::SessionStore;
@@ -389,26 +411,29 @@ pub fn create_router(
 
     if config.environment == "development" {
         if let Some(ref origin) = config.cors_origin {
-            let cors = CorsLayer::new()
-                .allow_origin(origin.parse::<HeaderValue>().unwrap())
-                .allow_credentials(true)
-                .allow_methods([
-                    Method::GET,
-                    Method::POST,
-                    Method::PUT,
-                    Method::PATCH,
-                    Method::DELETE,
-                ])
-                .allow_headers([
-                    header::CONTENT_TYPE,
-                    HeaderName::from_static("x-requested-with"),
-                    HeaderName::from_static("x-active-account"),
-                ]);
-            router.layer(cors)
+            match origin.parse::<HeaderValue>() {
+                Ok(_) => router.layer(development_cors(Some(origin))),
+                Err(error) => {
+                    tracing::warn!(
+                        cors_origin = %origin,
+                        fallback_origin = DEFAULT_DEV_CORS_ORIGIN,
+                        %error,
+                        "invalid CORS_ORIGIN; falling back to default development CORS"
+                    );
+                    router.layer(development_cors(None))
+                }
+            }
         } else {
-            router.layer(CorsLayer::permissive())
+            router.layer(development_cors(None))
         }
     } else {
+        if config.cors_origin.is_some() {
+            tracing::warn!(
+                environment = %config.environment,
+                cors_origin = ?config.cors_origin,
+                "cors_origin is set outside development; auth cookies stay SameSite=Strict"
+            );
+        }
         router
     }
 }

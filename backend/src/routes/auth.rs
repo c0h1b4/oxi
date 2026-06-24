@@ -625,4 +625,42 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "logged_out");
     }
+
+    fn test_config(environment: &str, cors_origin: Option<&str>) -> AppConfig {
+        AppConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+            imap_host: None,
+            imap_port: 993,
+            smtp_host: None,
+            smtp_port: 587,
+            tls_enabled: true,
+            data_dir: "/data".to_string(),
+            session_timeout_hours: 24,
+            static_dir: "./static".to_string(),
+            environment: environment.to_string(),
+            base_path: None,
+            serve_static: true,
+            cors_origin: cors_origin.map(str::to_string),
+            trusted_proxies: None,
+        }
+    }
+
+    #[test]
+    fn same_site_is_lax_for_development_cross_origin() {
+        let config = test_config("development", Some("http://localhost:3000"));
+        assert_eq!(same_site_policy(&config), "Lax");
+
+        let cookie = browser_cookie("browser", 3600, false, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Lax"));
+    }
+
+    #[test]
+    fn same_site_stays_strict_outside_development() {
+        let config = test_config("production", Some("https://app.example.com"));
+        assert_eq!(same_site_policy(&config), "Strict");
+
+        let cookie = browser_cookie("browser", 3600, true, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
 }
