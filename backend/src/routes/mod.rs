@@ -59,7 +59,7 @@ fn development_cors(origin: Option<&str>) -> CorsLayer {
 use crate::auth::csrf::csrf_protection;
 use crate::auth::middleware::auth_guard;
 use crate::auth::session::SessionStore;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, TrustedProxy};
 use crate::imap::client::ImapClient;
 use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
@@ -67,13 +67,39 @@ use crate::smtp::client::SmtpClient;
 
 /// Per-IP key extractor that supports trusted reverse proxies.
 ///
-/// When the peer IP is in the configured `trusted_proxies` list, the
-/// leftmost `X-Forwarded-For` value is used as the client IP. Otherwise
-/// the direct peer IP is used. Falls back to loopback when
-/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests).
+/// When the direct peer IP is in the configured `trusted_proxies` list,
+/// `X-Forwarded-For` is walked from right to left. Trusted proxy hops on the
+/// right are skipped and the nearest untrusted address becomes the client IP.
+/// If the header is missing or malformed, the direct peer IP is used. Falls
+/// back to loopback when `ConnectInfo<SocketAddr>` is unavailable (e.g. in
+/// unit tests).
 #[derive(Debug, Clone)]
 struct ProxyAwareIpExtractor {
-    trusted_proxies: Vec<IpAddr>,
+    trusted_proxies: Vec<TrustedProxy>,
+}
+
+impl ProxyAwareIpExtractor {
+    fn is_trusted(&self, ip: &IpAddr) -> bool {
+        self.trusted_proxies
+            .iter()
+            .any(|trusted| trusted.contains(ip))
+    }
+
+    fn forwarded_client_ip(&self, forwarded: &str, peer_ip: IpAddr) -> Option<IpAddr> {
+        let mut current_hop = peer_ip;
+
+        for entry in forwarded.split(',').rev() {
+            let forwarded_ip = entry.trim().parse::<IpAddr>().ok()?;
+
+            if !self.is_trusted(&current_hop) {
+                return Some(current_hop);
+            }
+
+            current_hop = forwarded_ip;
+        }
+
+        Some(current_hop)
+    }
 }
 
 impl KeyExtractor for ProxyAwareIpExtractor {
@@ -86,10 +112,9 @@ impl KeyExtractor for ProxyAwareIpExtractor {
             .map(|ci| ci.0.ip())
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-        if self.trusted_proxies.contains(&peer_ip)
+        if self.is_trusted(&peer_ip)
             && let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
-            && let Some(first) = forwarded.split(',').next()
-            && let Ok(client_ip) = first.trim().parse::<IpAddr>()
+            && let Some(client_ip) = self.forwarded_client_ip(forwarded, peer_ip)
         {
             return Ok(client_ip);
         }

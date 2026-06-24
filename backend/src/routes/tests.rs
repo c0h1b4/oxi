@@ -1,11 +1,14 @@
     use super::*;
     use axum::body::Body;
+    use axum::extract::ConnectInfo;
     use axum::http::{HeaderValue, Request, StatusCode};
     use http_body_util::BodyExt;
     use std::fs;
+    use std::net::{IpAddr, SocketAddr};
     use std::time::Duration;
     use tempfile::TempDir;
     use tower::ServiceExt;
+    use tower_governor::key_extractor::KeyExtractor;
 
     use crate::imap::client::mock::MockImapClient;
     use crate::imap::client::{
@@ -120,6 +123,35 @@
         Arc::new(crate::realtime::idle::IdleManager::new())
     }
 
+    fn test_proxy_extractor(trusted_proxies: Option<&str>) -> ProxyAwareIpExtractor {
+        let mut config = (*test_config("/tmp")).clone();
+        config.trusted_proxies = trusted_proxies.map(str::to_string);
+        ProxyAwareIpExtractor {
+            trusted_proxies: config.parsed_trusted_proxies(),
+        }
+    }
+
+    fn extract_ip(
+        extractor: &ProxyAwareIpExtractor,
+        peer: &str,
+        forwarded: Option<&str>,
+    ) -> IpAddr {
+        let peer_addr = SocketAddr::new(peer.parse().unwrap(), 443);
+        let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo::<SocketAddr>(peer_addr));
+
+        if let Some(forwarded) = forwarded {
+            request.headers_mut().insert(
+                "x-forwarded-for",
+                HeaderValue::from_str(forwarded).unwrap(),
+            );
+        }
+
+        extractor.extract(&request).unwrap()
+    }
+
     /// Helper: create a multi-account session for testing protected routes.
     /// Returns (browser_id, account_id, token) for use in request headers.
     fn setup_test_account(
@@ -154,6 +186,58 @@
     /// Migrations are applied automatically by `open_user_db`.
     fn provision_user_db(data_dir: &str, user_hash: &str) {
         let _conn = crate::db::pool::open_user_db(data_dir, user_hash).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Proxy-aware IP extraction tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trusted_ipv4_proxy_uses_forwarded_client_ip() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "10.0.0.10",
+            Some("203.0.113.9, 10.1.1.1, 10.2.2.2"),
+        );
+
+        assert_eq!(client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn untrusted_peer_ignores_spoofed_forwarded_header() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "198.51.100.20",
+            Some("203.0.113.9, 10.1.1.1"),
+        );
+
+        assert_eq!(client_ip, "198.51.100.20".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn trusted_ipv6_cidr_uses_forwarded_client_ip() {
+        let extractor = test_proxy_extractor(Some("2001:db8:abcd::/48"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "2001:db8:abcd::10",
+            Some("2001:db8::123, 2001:db8:abcd::20"),
+        );
+
+        assert_eq!(client_ip, "2001:db8::123".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn malformed_forwarded_header_falls_back_to_peer_ip() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(&extractor, "10.0.0.10", Some("203.0.113.9, garbage"));
+
+        assert_eq!(client_ip, "10.0.0.10".parse::<IpAddr>().unwrap());
     }
 
     // -----------------------------------------------------------------------
