@@ -68,6 +68,7 @@ pub struct AppConfig {
     pub cors_origin: Option<String>,
 
     /// Comma-separated list of trusted proxy IPs that are allowed to set X-Forwarded-For.
+    // TODO: This accepts individual IPs only today, not CIDR ranges.
     #[serde(default)]
     pub trusted_proxies: Option<String>,
 }
