@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 
 use figment::{Figment, providers::Env};
+use ipnet::IpNet;
 use serde::Deserialize;
 
 /// Application configuration loaded via figment.
@@ -67,10 +68,24 @@ pub struct AppConfig {
     #[serde(default)]
     pub cors_origin: Option<String>,
 
-    /// Comma-separated list of trusted proxy IPs that are allowed to set X-Forwarded-For.
-    // TODO: This accepts individual IPs only today, not CIDR ranges.
+    /// Comma-separated list of trusted proxy IPs or CIDR ranges that are allowed to set X-Forwarded-For.
     #[serde(default)]
     pub trusted_proxies: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrustedProxy {
+    Ip(IpAddr),
+    Cidr(IpNet),
+}
+
+impl TrustedProxy {
+    pub fn contains(&self, ip: &IpAddr) -> bool {
+        match self {
+            Self::Ip(trusted_ip) => trusted_ip == ip,
+            Self::Cidr(network) => network.contains(ip),
+        }
+    }
 }
 
 fn default_host() -> String {
@@ -114,9 +129,9 @@ fn default_serve_static() -> bool {
 }
 
 impl AppConfig {
-    /// Parse the `trusted_proxies` field into a list of `IpAddr` values.
+    /// Parse the `trusted_proxies` field into IP or CIDR entries.
     /// Logs warnings for unparseable entries.
-    pub fn parsed_trusted_proxies(&self) -> Vec<IpAddr> {
+    pub fn parsed_trusted_proxies(&self) -> Vec<TrustedProxy> {
         let Some(ref proxies) = self.trusted_proxies else {
             return vec![];
         };
@@ -127,8 +142,11 @@ impl AppConfig {
                 if trimmed.is_empty() {
                     return None;
                 }
-                match trimmed.parse::<IpAddr>() {
-                    Ok(ip) => Some(ip),
+                if let Ok(ip) = trimmed.parse::<IpAddr>() {
+                    return Some(TrustedProxy::Ip(ip));
+                }
+                match trimmed.parse::<IpNet>() {
+                    Ok(network) => Some(TrustedProxy::Cidr(network)),
                     Err(e) => {
                         tracing::warn!(entry = trimmed, error = %e, "ignoring unparseable trusted proxy");
                         None
@@ -235,5 +253,55 @@ mod tests {
             std::env::remove_var("IMAP_HOST");
             std::env::remove_var("DATA_DIR");
         }
+    }
+
+    #[test]
+    fn parsed_trusted_proxies_accepts_individual_ip() {
+        let config = AppConfig {
+            trusted_proxies: Some("127.0.0.1".to_string()),
+            ..Figment::new().extract().expect("defaults should load")
+        };
+
+        assert_eq!(
+            config.parsed_trusted_proxies(),
+            vec![TrustedProxy::Ip("127.0.0.1".parse().unwrap())]
+        );
+    }
+
+    #[test]
+    fn parsed_trusted_proxies_matches_cidr() {
+        let config = AppConfig {
+            trusted_proxies: Some("10.0.0.0/8".to_string()),
+            ..Figment::new().extract().expect("defaults should load")
+        };
+
+        let parsed = config.parsed_trusted_proxies();
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].contains(&"10.1.2.3".parse().unwrap()));
+    }
+
+    #[test]
+    fn parsed_trusted_proxies_does_not_match_outside_cidr() {
+        let config = AppConfig {
+            trusted_proxies: Some("10.0.0.0/8".to_string()),
+            ..Figment::new().extract().expect("defaults should load")
+        };
+
+        let parsed = config.parsed_trusted_proxies();
+        assert_eq!(parsed.len(), 1);
+        assert!(!parsed[0].contains(&"192.168.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn parsed_trusted_proxies_ignores_invalid_entries() {
+        let config = AppConfig {
+            trusted_proxies: Some("bad-entry,127.0.0.1,10.0.0.0/8/extra".to_string()),
+            ..Figment::new().extract().expect("defaults should load")
+        };
+
+        assert_eq!(
+            config.parsed_trusted_proxies(),
+            vec![TrustedProxy::Ip("127.0.0.1".parse().unwrap())]
+        );
     }
 }
