@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { toast } from "sonner";
+import { useFolders } from "@/hooks/useFolders";
+import { findJunkFolder } from "@/lib/mail-folders";
 import {
   Reply,
   ReplyAll,
@@ -69,6 +72,7 @@ export function MessageActionBar() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
+  const { data: folderData } = useFolders();
   const deleteMessage = useDeleteMessage();
 
   const { data } = useMessage(activeFolder, selectedMessageUid ?? 0);
@@ -188,7 +192,13 @@ export function MessageActionBar() {
 
   const handleJunk = () => {
     if (!data) return;
-    moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Junk", uid: data.uid });
+    const toFolder = findJunkFolder(folderData?.folders ?? []);
+    if (!toFolder) {
+      toast.error("No Spam or Junk folder found. Select a destination using Move to folder.");
+      return;
+    }
+    if (toFolder === activeFolder || moveMessage.isPending) return;
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
   };
 
   const handleToggleStar = () => {
@@ -344,7 +354,7 @@ export function MessageActionBar() {
       )}
 
       {/* Junk */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleJunk}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || moveMessage.isPending || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk}>
         <AlertCircle className="size-4" />
         <span className="hidden xl:inline">Junk</span>
       </Button>

@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import {
   useQuery,
   useInfiniteQuery,
   useMutation,
   useQueryClient,
-  keepPreviousData,
 } from "@tanstack/react-query";
 import type { InfiniteData } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost, apiDelete } from "@/lib/api";
 import { useWsStatus } from "@/lib/ws-context";
 import { useUiStore } from "@/stores/useUiStore";
-import type { MessagesResponse, MessageDetail, MessageHeader } from "@/types/message";
+import type { MessagesResponse, MessageDetail, SearchResponse } from "@/types/message";
 
 const PER_PAGE = 50;
 
@@ -31,7 +31,6 @@ export function useMessages(folder: string) {
     },
     enabled: !!folder,
     refetchInterval: status === "connected" ? false : 60_000,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -43,6 +42,7 @@ export function useMessage(folder: string, uid: number) {
         `/messages/${encodeURIComponent(folder)}/${uid}`,
       ),
     enabled: !!folder && uid > 0,
+    staleTime: 60_000,
     retry: (failureCount, error) => {
       // Don't retry "not found" — the message was deleted from IMAP.
       if (error instanceof Error && error.message.includes("not found")) return false;
@@ -80,6 +80,7 @@ export function useUpdateFlags() {
 export function useMoveMessage() {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ["move-message"],
     mutationFn: ({
       fromFolder,
       toFolder,
@@ -97,7 +98,7 @@ export function useMoveMessage() {
     onMutate: async ({ fromFolder, toFolder, uid }) => {
       // Auto-advance: if the moved message is selected, select the next (or previous) message.
       const { selectedMessageUid, selectMessage } = useUiStore.getState();
-      if (selectedMessageUid === uid) {
+      if (useUiStore.getState().activeFolder === fromFolder && selectedMessageUid === uid) {
         const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(["messages", fromFolder]);
         if (prev) {
           const allMessages = prev.pages.flatMap((p) => p.messages);
@@ -112,8 +113,17 @@ export function useMoveMessage() {
       // Cancel in-flight fetches so they don't overwrite our optimistic update.
       await Promise.all([
         queryClient.cancelQueries({ queryKey: ["messages", fromFolder] }),
-        queryClient.cancelQueries({ queryKey: ["messages", toFolder] })
+        queryClient.cancelQueries({ queryKey: ["messages", toFolder] }),
+        queryClient.cancelQueries({ queryKey: ["search"] })
       ]);
+
+      const searchSnapshots = queryClient.getQueriesData<SearchResponse>({ queryKey: ["search"] });
+      for (const [key, search] of searchSnapshots) {
+        if (!search) continue;
+        const results = search.results.filter(item => !(item.folder === fromFolder && item.uid === uid));
+        const removed = search.results.length - results.length;
+        if (removed) queryClient.setQueryData(key, { ...search, results, total_count: Math.max(0, search.total_count - removed) });
+      }
 
       const prevFrom = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
         ["messages", fromFolder],
@@ -121,15 +131,6 @@ export function useMoveMessage() {
       const prevTo = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
         ["messages", toFolder],
       );
-
-      // Find the message in the source folder cache.
-      let movedMsg: MessageHeader | undefined;
-      if (prevFrom) {
-        for (const page of prevFrom.pages) {
-          movedMsg = page.messages.find((m) => m.uid === uid);
-          if (movedMsg) break;
-        }
-      }
 
       // Remove from source folder cache.
       if (prevFrom) {
@@ -146,33 +147,30 @@ export function useMoveMessage() {
         );
       }
 
-      // Insert into destination folder cache (first page) with a placeholder
-      // UID. The background refetch will reconcile with the real UID.
-      if (movedMsg && prevTo) {
-        const entry: MessageHeader = {
-          ...movedMsg,
-          folder: toFolder,
-        };
-        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-          ["messages", toFolder],
-          {
-            ...prevTo,
-            pages: prevTo.pages.map((page, i) =>
-              i === 0
-                ? {
-                  ...page,
-                  messages: [entry, ...page.messages],
-                  total_count: page.total_count + 1,
-                }
-                : { ...page, total_count: page.total_count + 1 },
-            ),
-          },
-        );
-      }
+      // IMAP UIDs are folder-local. Only a destination refetch can supply
+      // the moved message's new UID; never insert a source UID here.
 
-      return { prevFrom, prevTo };
+      return { prevFrom, prevTo, searchSnapshots, selectedMessageUid, advancedSelection: useUiStore.getState().selectedMessageUid };
     },
-    onError: (_err, { fromFolder, toFolder }, context) => {
+    onError: (err, { fromFolder, toFolder, uid }, context) => {
+      // Restore only this move's result, not a whole snapshot that could
+      // resurrect other messages being moved concurrently.
+      for (const [key, snapshot] of context?.searchSnapshots ?? []) {
+        const item = snapshot?.results.find(result => result.folder === fromFolder && result.uid === uid);
+        if (!item) continue;
+        queryClient.setQueryData<SearchResponse>(key, current => {
+          if (!current || current.results.some(result => result.folder === fromFolder && result.uid === uid)) return current;
+          const results = [...current.results];
+          const index = snapshot!.results.indexOf(item);
+          results.splice(Math.min(index, results.length), 0, item);
+          return { ...current, results, total_count: current.total_count + 1 };
+        });
+      }
+      toast.error(err instanceof Error ? err.message : "Failed to move message");
+      const ui = useUiStore.getState();
+      if (context && ui.activeFolder === fromFolder && ui.selectedMessageUid === context.advancedSelection) {
+        ui.selectMessage(context.selectedMessageUid);
+      }
       // Rollback on failure.
       if (context?.prevFrom) {
         queryClient.setQueryData(["messages", fromFolder], context.prevFrom);
@@ -186,6 +184,9 @@ export function useMoveMessage() {
       queryClient.invalidateQueries({ queryKey: ["messages", fromFolder] });
       queryClient.invalidateQueries({ queryKey: ["messages", toFolder] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      if (queryClient.isMutating({ mutationKey: ["move-message"] }) === 1) {
+        queryClient.invalidateQueries({ queryKey: ["search"] });
+      }
     },
   });
 }
