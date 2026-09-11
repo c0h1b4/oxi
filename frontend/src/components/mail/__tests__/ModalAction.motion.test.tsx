@@ -138,7 +138,7 @@ vi.mock("cmdk", () => {
   CommandRoot.Group = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
     <div {...props}>{children}</div>
   );
-  CommandRoot.Item = ({ children, onSelect, ...props }: React.HTMLAttributes<HTMLDivElement> & { onSelect?: () => void }) => (
+  CommandRoot.Item = ({ children, onSelect, ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onSelect"> & { onSelect?: () => void }) => (
     <button type="button" onClick={onSelect} {...props}>{children}</button>
   );
 

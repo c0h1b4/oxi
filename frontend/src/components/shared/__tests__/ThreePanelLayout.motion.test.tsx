@@ -38,7 +38,6 @@ import { ThreePanelLayout } from "../ThreePanelLayout";
 function renderLayout() {
   return render(
     <ThreePanelLayout
-      navRail={<div data-testid="nav-rail" />}
       sidebar={<div data-testid="sidebar" />}
       messageList={<div data-testid="message-list" />}
       readingPane={<div data-testid="reading-pane" />}
@@ -83,7 +82,6 @@ describe("ThreePanelLayout motion transitions", () => {
     mockUiState.searchQuery = "from:alice";
     rerender(
       <ThreePanelLayout
-        navRail={<div data-testid="nav-rail" />}
         sidebar={<div data-testid="sidebar" />}
         messageList={<div data-testid="message-list" />}
         readingPane={<div data-testid="reading-pane" />}
@@ -155,7 +153,6 @@ describe("ThreePanelLayout motion transitions", () => {
     mockUiState.searchQuery = "test";
     rerender(
       <ThreePanelLayout
-        navRail={<div data-testid="nav-rail" />}
         sidebar={<div data-testid="sidebar" />}
         messageList={<div data-testid="message-list" />}
         readingPane={<div data-testid="reading-pane" />}
