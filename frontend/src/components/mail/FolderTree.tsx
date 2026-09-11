@@ -193,6 +193,7 @@ function FolderItem({
 }) {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const setActiveFolder = useUiStore((s) => s.setActiveFolder);
+  const clearSearch = useUiStore((s) => s.clearSearch);
   const isActive = activeFolder === folder.name;
   const isFetching = useIsFetching({ queryKey: ["messages", folder.name] });
   const moveMessage = useMoveMessage();
@@ -272,7 +273,10 @@ function FolderItem({
       onDrop={handleDrop}
     >
       <button
-        onClick={() => setActiveFolder(folder.name)}
+        onClick={() => {
+          clearSearch();
+          setActiveFolder(folder.name);
+        }}
         aria-current={isActive ? "page" : undefined}
         className={cn(
           "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",

@@ -447,6 +447,7 @@ pub async fn get_message(
     // Treat a cache hit with missing attachments_json as stale (pre-V006 cache).
     // Re-fetch from IMAP so attachments and inline images are properly resolved.
     let usable_cache = cached_body.filter(|c| c.attachments_json.is_some());
+    let fetched_body = usable_cache.is_none();
 
     let (body_html, body_text, attachments, raw_headers, email_theme) = if let Some(cached) = usable_cache {
         let attachments: Vec<AttachmentMeta> = cached
@@ -505,7 +506,7 @@ pub async fn get_message(
             .map(|(i, a)| AttachmentMeta {
                 id: i.to_string(),
                 filename: a.filename.clone(),
-                content_type: a.content_type.clone(),
+                content_type: preview_content_type(&a.content_type, a.filename.as_deref(), &a.data),
                 size: a.size,
                 content_id: a.content_id.clone(),
             })
@@ -611,9 +612,9 @@ pub async fn get_message(
 
     // Re-index message with full body text for search.
     // Skip indexing for Spam/Junk/Trash folders.
-    if let Some(ref text) = body_text
+    if fetched_body
+        && let Some(ref text) = body_text
         && !UserIndex::is_excluded_folder(&folder)
-        && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
     {
         let indexable = IndexableMessage {
             uid: msg.uid,
@@ -626,7 +627,13 @@ pub async fn get_message(
             date_epoch: crate::db::messages::parse_date_to_epoch_public(&msg.date),
             has_attachments: msg.has_attachments,
         };
-        let _ = user_index.index_message(&indexable);
+        let search_engine = Arc::clone(&search_engine);
+        let user_hash = session.user_hash.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Ok(user_index) = search_engine.open_user_index(&user_hash) {
+                let _ = user_index.index_message(&indexable);
+            }
+        });
     }
 
     // Build thread using full References chain.
@@ -758,6 +765,7 @@ pub async fn move_message_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
+    Extension(search_engine): Extension<Arc<SearchEngine>>,
     Json(body): Json<MoveMessageRequest>,
 ) -> Result<Response, AppError> {
     let creds = build_creds(&session, &config)?;
@@ -783,6 +791,20 @@ pub async fn move_message_handler(
     // 404s when trying to fetch the message body.
     db::messages::delete_message(&conn, &body.from_folder, body.uid)
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+
+    // Remove the old folder/UID pair from search too. Destination UIDs are
+    // discovered during folder sync; Spam/Junk intentionally remain unindexed.
+    let user_hash = session.user_hash.clone();
+    let from_folder = body.from_folder.clone();
+    let uid = body.uid;
+    let search_result = tokio::task::spawn_blocking(move || {
+        let index = search_engine.open_user_index(&user_hash)?;
+        index.delete_message(uid, &from_folder)
+    }).await;
+    if !matches!(search_result, Ok(Ok(()))) {
+        // The IMAP move already succeeded: do not trigger a false client rollback.
+        tracing::warn!(?search_result, "Failed to remove moved message from search index");
+    }
 
     // Refresh source folder unread count (now accurate since the row is gone).
     db::folders::refresh_unread_count(&conn, &body.from_folder)
@@ -844,7 +866,7 @@ pub async fn download_attachment(
     let filename = attachment
         .filename
         .unwrap_or_else(|| format!("attachment_{index}"));
-    let content_type = attachment.content_type;
+    let content_type = preview_content_type(&attachment.content_type, Some(&filename), &attachment.data);
 
     // Use inline disposition for types the browser can display natively
     // (PDF, images) so the preview works; use attachment for everything else.
@@ -862,6 +884,35 @@ pub async fn download_attachment(
         .header("content-disposition", &disposition)
         .body(axum::body::Body::from(attachment.data))
         .unwrap())
+}
+
+fn preview_content_type(content_type: &str, filename: Option<&str>, data: &[u8]) -> String {
+    let media_type = content_type.split(';').next().unwrap_or("").trim();
+    if media_type.eq_ignore_ascii_case("application/pdf")
+        || (media_type.eq_ignore_ascii_case("application/octet-stream")
+            && filename.is_some_and(|name| name.to_ascii_lowercase().ends_with(".pdf"))
+            && data.starts_with(b"%PDF-"))
+    {
+        "application/pdf".to_string()
+    } else {
+        content_type.to_string()
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::preview_content_type;
+
+    #[test]
+    fn normalizes_pdf_media_types() {
+        assert_eq!(preview_content_type("Application/PDF; name=test.pdf", None, b""), "application/pdf");
+        assert_eq!(preview_content_type("application/octet-stream", Some("TEST.PDF"), b"%PDF-1.7"), "application/pdf");
+    }
+
+    #[test]
+    fn does_not_trust_filename_alone() {
+        assert_eq!(preview_content_type("application/octet-stream", Some("test.pdf"), b"not a pdf"), "application/octet-stream");
+    }
 }
 
 /// `DELETE /api/messages/:folder/:uid`
