@@ -20,14 +20,12 @@ import { useUiStore } from "@/stores/useUiStore";
 import { formatFileSize } from "./utils";
 import { IcsPreview } from "./IcsPreview";
 import type { Attachment } from "@/types/message";
+import { isPdfAttachment } from "@/lib/mail-file-types";
 
 function isCalendarType(ct: string): boolean {
   return ct === "text/calendar" || ct === "application/ics";
 }
 
-function isPdfType(ct: string): boolean {
-  return ct.toLowerCase() === "application/pdf";
-}
 
 interface AttachmentPreviewerProps {
   attachments: Attachment[];
@@ -175,7 +173,7 @@ export function AttachmentPreviewer({
                         alt={thumb.filename ?? ""}
                         className="size-full object-cover"
                       />
-                    ) : isPdfType(thumb.content_type) ? (
+                    ) : isPdfAttachment(thumb.content_type, thumb.filename) ? (
                       <FileText className="size-6 text-muted-foreground" />
                     ) : isCalendarType(thumb.content_type) ? (
                       <CalendarDays className="size-6 text-muted-foreground" />
@@ -197,7 +195,7 @@ export function AttachmentPreviewer({
                 alt={att.filename ?? "Attachment"}
                 className="max-h-full max-w-full object-contain"
               />
-            ) : isPdfType(att.content_type) ? (
+            ) : isPdfAttachment(att.content_type, att.filename) ? (
               <iframe
                 src={url}
                 className="h-full w-full border-none"
