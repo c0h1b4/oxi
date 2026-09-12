@@ -2,7 +2,11 @@ import { toast } from "sonner";
 
 import { useAuthStore } from "@/stores/useAuthStore";
 
-const API_BASE = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL
+  || (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api";
+
+const CREDENTIALS: RequestCredentials = process.env.NEXT_PUBLIC_API_URL
+  ? "include" : "same-origin";
 
 interface ApiError {
   code?: string;
@@ -32,7 +36,7 @@ function handleAccountSessionExpired(error: ApiError): void {
     fetch(`${API_BASE}/auth/accounts/${error.accountId}`, {
       method: "DELETE",
       headers: { "X-Requested-With": "XMLHttpRequest" },
-      credentials: "same-origin",
+      credentials: CREDENTIALS,
     }).catch(() => {});
   }
 }
@@ -51,7 +55,7 @@ function getActiveAccountHeader(): Record<string, string> {
 
 export async function fetchAccounts(): Promise<AccountsResponse> {
   const res = await fetch(`${API_BASE}/auth/accounts`, {
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
   });
 
   if (!res.ok) {
@@ -78,7 +82,7 @@ export async function apiPost<T>(
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
     body: JSON.stringify(body),
   });
 
@@ -94,7 +98,7 @@ export async function apiGet<T>(path: string): Promise<T> {
     headers: {
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
   });
 
   if (!res.ok) {
@@ -115,7 +119,7 @@ export async function apiPatch<T>(
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
     body: JSON.stringify(body),
   });
 
@@ -136,7 +140,7 @@ export async function apiPostFormData<T>(
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
     body: formData,
   });
 
@@ -158,7 +162,7 @@ export async function apiPut<T>(
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
     body: JSON.stringify(body),
   });
 
@@ -176,7 +180,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: CREDENTIALS,
   });
 
   if (!res.ok) {

@@ -734,7 +734,9 @@ mod tests {
 
     #[test]
     fn sliding_window_refreshes_expiry() {
-        let store = SessionStore::new(Duration::from_millis(150));
+        // Use generous margins so the test is reliable under CI / Nix sandbox
+        // CPU pressure where sleeps can overshoot significantly.
+        let store = SessionStore::new(Duration::from_millis(800));
         let browser_id = store.create_browser();
 
         let (token, _account_id) = store.add_account_to_browser(
@@ -750,10 +752,10 @@ mod tests {
             true,
         );
 
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(400));
         assert!(store.get(&token).is_some());
 
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(400));
         assert!(store.get(&token).is_some());
     }
 

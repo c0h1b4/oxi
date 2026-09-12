@@ -1,11 +1,14 @@
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::extract::ConnectInfo;
+    use axum::http::{HeaderValue, Request, StatusCode};
     use http_body_util::BodyExt;
     use std::fs;
+    use std::net::{IpAddr, SocketAddr};
     use std::time::Duration;
     use tempfile::TempDir;
     use tower::ServiceExt;
+    use tower_governor::key_extractor::KeyExtractor;
 
     use crate::imap::client::mock::MockImapClient;
     use crate::imap::client::{
@@ -29,6 +32,9 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
@@ -47,6 +53,9 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
@@ -65,6 +74,9 @@
             static_dir: static_dir.to_string(),
             environment: "development".to_string(),
             base_path: None,
+            serve_static: true,
+            cors_origin: None,
+            trusted_proxies: None,
         })
     }
 
@@ -111,6 +123,35 @@
         Arc::new(crate::realtime::idle::IdleManager::new())
     }
 
+    fn test_proxy_extractor(trusted_proxies: Option<&str>) -> ProxyAwareIpExtractor {
+        let mut config = (*test_config("/tmp")).clone();
+        config.trusted_proxies = trusted_proxies.map(str::to_string);
+        ProxyAwareIpExtractor {
+            trusted_proxies: config.parsed_trusted_proxies(),
+        }
+    }
+
+    fn extract_ip(
+        extractor: &ProxyAwareIpExtractor,
+        peer: &str,
+        forwarded: Option<&str>,
+    ) -> IpAddr {
+        let peer_addr = SocketAddr::new(peer.parse().unwrap(), 443);
+        let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo::<SocketAddr>(peer_addr));
+
+        if let Some(forwarded) = forwarded {
+            request.headers_mut().insert(
+                "x-forwarded-for",
+                HeaderValue::from_str(forwarded).unwrap(),
+            );
+        }
+
+        extractor.extract(&request).unwrap()
+    }
+
     /// Helper: create a multi-account session for testing protected routes.
     /// Returns (browser_id, account_id, token) for use in request headers.
     fn setup_test_account(
@@ -148,6 +189,58 @@
     }
 
     // -----------------------------------------------------------------------
+    // Proxy-aware IP extraction tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trusted_ipv4_proxy_uses_forwarded_client_ip() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "10.0.0.10",
+            Some("203.0.113.9, 10.1.1.1, 10.2.2.2"),
+        );
+
+        assert_eq!(client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn untrusted_peer_ignores_spoofed_forwarded_header() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "198.51.100.20",
+            Some("203.0.113.9, 10.1.1.1"),
+        );
+
+        assert_eq!(client_ip, "198.51.100.20".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn trusted_ipv6_cidr_uses_forwarded_client_ip() {
+        let extractor = test_proxy_extractor(Some("2001:db8:abcd::/48"));
+
+        let client_ip = extract_ip(
+            &extractor,
+            "2001:db8:abcd::10",
+            Some("2001:db8::123, 2001:db8:abcd::20"),
+        );
+
+        assert_eq!(client_ip, "2001:db8::123".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn malformed_forwarded_header_falls_back_to_peer_ip() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+
+        let client_ip = extract_ip(&extractor, "10.0.0.10", Some("203.0.113.9, garbage"));
+
+        assert_eq!(client_ip, "10.0.0.10".parse::<IpAddr>().unwrap());
+    }
+
+    // -----------------------------------------------------------------------
     // Existing tests (updated to pass imap_client)
     // -----------------------------------------------------------------------
 
@@ -178,6 +271,39 @@
             .to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn invalid_dev_cors_origin_falls_back_to_default_credentialed_cors() {
+        let dir = setup_static_dir();
+        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+        cfg.cors_origin = Some("bad\norigin".to_string());
+        let config = Arc::new(cfg);
+        let store = test_store();
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/health")
+                    .header("origin", "http://localhost:3000")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static("http://localhost:3000"))
+        );
+        assert_eq!(
+            response.headers().get("access-control-allow-credentials"),
+            Some(&HeaderValue::from_static("true"))
+        );
     }
 
     #[tokio::test]

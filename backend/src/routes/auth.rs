@@ -35,35 +35,47 @@ fn default_tls() -> bool {
     true
 }
 
-fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool) -> String {
+fn same_site_policy(config: &AppConfig) -> &'static str {
+    if config.environment == "development" && config.cors_origin.is_some() {
+        "Lax"
+    } else {
+        "Strict"
+    }
+}
+
+fn cookie_path(config: &AppConfig) -> &str {
+    config.base_path.as_deref().unwrap_or("/")
+}
+
+fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}={};{} SameSite=Strict; Path=/; Max-Age={}",
-        BROWSER_COOKIE, browser_id, secure_flag, max_age_secs
+        "{}={};{} SameSite={}; Path={}; Max-Age={}",
+        BROWSER_COOKIE, browser_id, secure_flag, same_site, path, max_age_secs
     )
 }
 
-fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool) -> String {
+fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "oxi_session_{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        account_id, token, secure_flag, max_age_secs
+        "oxi_session_{}={};{} HttpOnly; SameSite={}; Path={}; Max-Age={}",
+        account_id, token, secure_flag, same_site, path, max_age_secs
     )
 }
 
-fn clearing_browser_cookie(secure: bool) -> String {
+fn clearing_browser_cookie(secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        BROWSER_COOKIE, secure_flag
+        "{}=;{} HttpOnly; SameSite={}; Path={}; Max-Age=0",
+        BROWSER_COOKIE, secure_flag, same_site, path
     )
 }
 
-fn clearing_account_cookie(account_id: &str, secure: bool) -> String {
+fn clearing_account_cookie(account_id: &str, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "oxi_session_{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        account_id, secure_flag
+        "oxi_session_{}=;{} HttpOnly; SameSite={}; Path={}; Max-Age=0",
+        account_id, secure_flag, same_site, path
     )
 }
 
@@ -269,8 +281,10 @@ pub async fn login(
 
             let max_age = session_hours * 3600;
             let secure = config.environment != "development";
-            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure);
-            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure);
+            let same_site = same_site_policy(&config);
+            let path = cookie_path(&config);
+            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure, same_site, path);
+            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure, same_site, path);
 
             let response = (
                 StatusCode::CREATED,
@@ -346,7 +360,8 @@ pub async fn list_accounts(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let secure = config.environment != "development";
-    
+    let same_site = same_site_policy(&config);
+
     let browser_id = extract_browser_id(&headers);
 
     let Some(browser_id) = browser_id else {
@@ -362,7 +377,7 @@ pub async fn list_accounts(
     let browser_exists = store.browser_exists(&browser_id);
     if !browser_exists {
         tracing::debug!(browser_id = %browser_id, "list_accounts: browser_id not found on server");
-        let clear_browser = clearing_browser_cookie(secure);
+        let clear_browser = clearing_browser_cookie(secure, same_site, cookie_path(&config));
         return (
             StatusCode::OK,
             [
@@ -397,16 +412,16 @@ pub async fn list_accounts(
                 }));
             } else {
                 store.remove_account(&session.account_id);
-                clear_cookies.push(clearing_account_cookie(&session.account_id, secure));
+                clear_cookies.push(clearing_account_cookie(&session.account_id, secure, same_site, cookie_path(&config)));
             }
         } else {
             store.remove_account(&session.account_id);
         }
     }
-    
+
     for account_id in session_map.keys() {
         if !browser_account_ids.contains(account_id) {
-            clear_cookies.push(clearing_account_cookie(account_id, secure));
+            clear_cookies.push(clearing_account_cookie(account_id, secure, same_site, cookie_path(&config)));
         }
     }
 
@@ -415,7 +430,7 @@ pub async fn list_accounts(
             browser_id = %browser_id,
             "list_accounts: no valid accounts found"
         );
-        let clear_browser = clearing_browser_cookie(secure);
+        let clear_browser = clearing_browser_cookie(secure, same_site, cookie_path(&config));
         let body = serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string();
         
         let mut response = axum::response::Response::new(axum::body::Body::from(body));
@@ -508,7 +523,8 @@ pub async fn remove_account(
     store.remove_account(&account_id);
 
     let secure = config.environment != "development";
-    let cookie = clearing_account_cookie(&account_id, secure);
+    let same_site = same_site_policy(&config);
+    let cookie = clearing_account_cookie(&account_id, secure, same_site, cookie_path(&config));
 
     (
         StatusCode::OK,
@@ -534,19 +550,23 @@ pub async fn logout(
 
     let mut cookies_to_clear: Vec<String> = Vec::new();
 
+    let secure = config.environment != "development";
+    let same_site = same_site_policy(&config);
+
     if let Some(ref browser_id) = browser_id {
         let accounts = store.get_browser_accounts(browser_id);
         for account in accounts {
             cookies_to_clear.push(clearing_account_cookie(
                 &account.account_id,
-                config.environment != "development",
+                secure,
+                same_site,
+                cookie_path(&config),
             ));
         }
         store.remove_browser(browser_id);
     }
 
-    let secure = config.environment != "development";
-    cookies_to_clear.push(clearing_browser_cookie(secure));
+    cookies_to_clear.push(clearing_browser_cookie(secure, same_site, cookie_path(&config)));
 
     let response = (
         StatusCode::OK,
@@ -604,5 +624,43 @@ mod tests {
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "logged_out");
+    }
+
+    fn test_config(environment: &str, cors_origin: Option<&str>) -> AppConfig {
+        AppConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+            imap_host: None,
+            imap_port: 993,
+            smtp_host: None,
+            smtp_port: 587,
+            tls_enabled: true,
+            data_dir: "/data".to_string(),
+            session_timeout_hours: 24,
+            static_dir: "./static".to_string(),
+            environment: environment.to_string(),
+            base_path: None,
+            serve_static: true,
+            cors_origin: cors_origin.map(str::to_string),
+            trusted_proxies: None,
+        }
+    }
+
+    #[test]
+    fn same_site_is_lax_for_development_cross_origin() {
+        let config = test_config("development", Some("http://localhost:3000"));
+        assert_eq!(same_site_policy(&config), "Lax");
+
+        let cookie = browser_cookie("browser", 3600, false, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Lax"));
+    }
+
+    #[test]
+    fn same_site_stays_strict_outside_development() {
+        let config = test_config("production", Some("https://app.example.com"));
+        assert_eq!(same_site_policy(&config), "Strict");
+
+        let cookie = browser_cookie("browser", 3600, true, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Strict"));
     }
 }
