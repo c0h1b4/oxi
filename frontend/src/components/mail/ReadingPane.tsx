@@ -75,16 +75,16 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
-  // Auto-switch to plain text mode for plaintext-only emails
-  useEffect(() => {
-    if (data && !data.html && data.text) {
-      setBodyMode("plain");
-    } else {
-      setBodyMode("html");
-    }
+  // Reset message-specific choices before rendering a different message.
+  // Include account/folder because IMAP UIDs are not globally unique. The
+  // loaded key also handles the transition from loading to available data.
+  const displayKey = JSON.stringify([activeAccountId, activeFolder, selectedMessageUid, data?.folder, data?.uid]);
+  const [previousDisplayKey, setPreviousDisplayKey] = useState<string | null>(null);
+  if (displayKey !== previousDisplayKey) {
+    setPreviousDisplayKey(displayKey);
+    setBodyMode(data && !data.html && data.text ? "plain" : "html");
     setEmailTheme("auto");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.uid]);
+  }
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {

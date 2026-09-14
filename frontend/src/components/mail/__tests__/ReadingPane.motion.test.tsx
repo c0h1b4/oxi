@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
 
@@ -128,6 +128,40 @@ function setMessage(uid: number) {
 }
 
 describe("ReadingPane motion transitions", () => {
+  it("resets body/theme choices for folder-local UIDs but preserves choices on refetch", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.activeFolder = "INBOX";
+    mockUiState.selectedMessageUid = 1;
+    setMessage(1);
+    const { rerender } = render(<ReadingPane />);
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto theme" }));
+    setMessage(1);
+    rerender(<ReadingPane />);
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Light mode" })).toBeTruthy();
+    mockUiState.activeFolder = "Archive";
+    const result = mockUseMessage();
+    mockUseMessage.mockReturnValue({ ...result, data: { ...result.data, folder: "Archive" } });
+    rerender(<ReadingPane />);
+    expect(screen.getByRole("button", { name: "Plain text" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Auto theme" })).toBeTruthy();
+    mockUiState.activeFolder = "INBOX";
+  });
+
+  it("chooses plain text when a plaintext-only message finishes loading", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.selectedMessageUid = 1;
+    mockUseMessage.mockReturnValue({ data: undefined, isLoading: true });
+    const { rerender } = render(<ReadingPane />);
+    setMessage(1);
+    const result = mockUseMessage();
+    mockUseMessage.mockReturnValue({ ...result, data: { ...result.data, html: null } });
+    rerender(<ReadingPane />);
+    expect(screen.queryByTestId("email-renderer")).toBeNull();
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+  });
+
   it("animates content transition when selected UID changes", () => {
     mockUiState.effectiveAnimationMode = "medium";
     mockUiState.selectedMessageUid = 1;

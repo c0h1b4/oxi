@@ -59,7 +59,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
 
   const emailInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  // Reset only form fields on reopen, before stale values reach the dialog.
+  // Keep the component mounted so its close animation can finish.
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (open !== previousOpen) {
+    setPreviousOpen(open);
     if (open) {
       setEmail("");
       setPassword("");
@@ -74,6 +78,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
         smtpPort: "587",
         smtpTls: true,
       });
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
       const timer = setTimeout(() => emailInputRef.current?.focus(), 50);
       return () => clearTimeout(timer);
     }
