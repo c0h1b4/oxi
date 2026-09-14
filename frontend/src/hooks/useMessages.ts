@@ -123,10 +123,13 @@ export function useUpdateFlags() {
   });
 }
 
-export function useMoveMessage() {
+export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
   const queryClient = useQueryClient();
-  return useMutation({
+  const mutation = useMutation({
     mutationKey: ["move-message"],
+    // Queued moves apply optimism immediately; requests and reconciliation
+    // run FIFO across hook instances sharing this QueryClient.
+    scope: queued ? { id: "queued-message-moves" } : undefined,
     mutationFn: ({
       fromFolder,
       toFolder,
@@ -145,7 +148,14 @@ export function useMoveMessage() {
         if (prev) {
           const allMessages = prev.pages.flatMap((p) => p.messages);
           const idx = allMessages.findIndex((m) => m.uid === uid);
-          const nextMsg = allMessages[idx + 1] ?? allMessages[idx - 1] ?? null;
+          const pendingUids = new Set(queryClient.getMutationCache()
+            .findAll({ mutationKey: ["move-message"], status: "pending" })
+            .map(move => move.state.variables as MoveMessageVariables)
+            .filter(move => move.fromFolder === fromFolder)
+            .map(move => move.uid));
+          const available = (message: MessagesResponse["messages"][number]) => !pendingUids.has(message.uid);
+          const nextMsg = allMessages.slice(idx + 1).find(available)
+            ?? allMessages.slice(0, Math.max(0, idx)).reverse().find(available);
           selectMessage(nextMsg?.uid ?? null);
         } else {
           selectMessage(null);
@@ -240,6 +250,19 @@ export function useMoveMessage() {
       reconcileSearchAfterMoves(queryClient);
     },
   });
+  return {
+    ...mutation,
+    mutate: (...args: Parameters<typeof mutation.mutate>) => {
+      const [variables] = args;
+      // Synchronous cache lookup also catches double-clicks before rerender.
+      if (queued && queryClient.getMutationCache().findAll({ mutationKey: ["move-message"], status: "pending" })
+        .some(move => {
+          const pending = move.state.variables as MoveMessageVariables;
+          return pending.fromFolder === variables.fromFolder && pending.uid === variables.uid;
+        })) return;
+      mutation.mutate(...args);
+    },
+  };
 }
 
 export function useDeleteMessage() {

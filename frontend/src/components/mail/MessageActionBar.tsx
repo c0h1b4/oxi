@@ -72,6 +72,7 @@ export function MessageActionBar() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
+  const junkQueue = useMoveMessage({ queued: true });
   const { data: folderData } = useFolders();
   const deleteMessage = useDeleteMessage();
 
@@ -197,8 +198,8 @@ export function MessageActionBar() {
       toast.error("No Spam or Junk folder found. Select a destination using Move to folder.");
       return;
     }
-    if (toFolder === activeFolder || moveMessage.isPending) return;
-    moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
+    if (toFolder === activeFolder || data.uid !== selectedMessageUid || data.folder !== activeFolder) return;
+    junkQueue.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
   };
 
   const handleToggleStar = () => {
@@ -354,7 +355,7 @@ export function MessageActionBar() {
       )}
 
       {/* Junk */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || moveMessage.isPending || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk}>
         <AlertCircle className="size-4" />
         <span className="hidden xl:inline">Junk</span>
       </Button>

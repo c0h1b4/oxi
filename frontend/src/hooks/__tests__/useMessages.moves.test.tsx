@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { hideMovedMessages, useMessages, useMoveMessage, useUpdateFlags } from "../useMessages";
 import { apiGet, apiPost, apiPatch } from "@/lib/api";
 import type { MessageHeader } from "@/types/message";
+import { useUiStore } from "@/stores/useUiStore";
 
 vi.mock("@/lib/api", () => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDelete: vi.fn() }));
 vi.mock("@/lib/ws-context", () => ({ useWsStatus: () => ({ status: "connected" }) }));
@@ -188,4 +189,41 @@ it("keeps a slower sibling hidden after the first move reconciles", async () => 
     await waitFor(() => expect(result.current.b.isSuccess).toBe(true));
     expect(result.current.list.data?.pages[0].messages).toEqual([]);
   } finally { unmount(); client.clear(); }
+});
+
+it("queues rapid Junk clicks locally, deduplicates, and continues FIFO after a failure", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  let messages = [{ uid: 7, folder: "INBOX" }, { uid: 8, folder: "INBOX" }, { uid: 9, folder: "INBOX" }];
+  const page = () => ({ messages: [...messages], total_count: messages.length, page: 0, per_page: 50 });
+  client.setQueryData(["messages", "INBOX"], { pages: [page()], pageParams: [0] });
+  const a = deferred<unknown>(), b = deferred<unknown>();
+  vi.mocked(apiPost).mockReset().mockImplementationOnce(() => a.promise).mockImplementationOnce(() => b.promise);
+  vi.mocked(apiGet).mockImplementation(async () => page());
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => ({ list: useMessages("INBOX"), queue: useMoveMessage({ queued: true }) }), { wrapper });
+  try {
+    useUiStore.setState({ activeFolder: "INBOX", selectedMessageUid: 7 });
+    act(() => {
+      result.current.queue.mutate({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 });
+      result.current.queue.mutate({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 });
+    });
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    expect(useUiStore.getState().selectedMessageUid).toBe(8);
+    act(() => result.current.queue.mutate({ fromFolder: "INBOX", toFolder: "Junk", uid: 8 }));
+    await waitFor(() => expect(result.current.list.data?.pages[0].messages.map(m => m.uid)).toEqual([9]));
+    expect(useUiStore.getState().selectedMessageUid).toBe(9);
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(client.isMutating({ mutationKey: ["move-message"] })).toBe(2);
+    act(() => a.reject(new Error("First move failed")));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.list.data?.pages[0].messages.map(m => m.uid)).toEqual([7, 9]));
+    expect(useUiStore.getState().selectedMessageUid).toBe(9);
+    messages = messages.filter(m => m.uid !== 8);
+    act(() => b.resolve({}));
+    await waitFor(() => expect(client.isMutating({ mutationKey: ["move-message"] })).toBe(0));
+    expect(vi.mocked(apiPost).mock.calls.map(call => call[1])).toEqual([
+      { from_folder: "INBOX", to_folder: "Junk", uid: 7 },
+      { from_folder: "INBOX", to_folder: "Junk", uid: 8 },
+    ]);
+  } finally { unmount(); client.clear(); useUiStore.setState({ selectedMessageUid: null }); }
 });
