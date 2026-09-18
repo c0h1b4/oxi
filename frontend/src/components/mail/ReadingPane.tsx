@@ -17,6 +17,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocale } from "@/hooks/useI18n";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import {
@@ -43,6 +44,7 @@ import {
 type BodyMode = "html" | "plain";
 
 export function ReadingPane() {
+  const locale = useLocale();
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
@@ -171,7 +173,7 @@ export function ReadingPane() {
             {data.from_name || data.from_address}
             {messageView.senderDetailsOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
           </button>
-          {" "}on {humanizeDate(data.date)}
+          {" "}on {humanizeDate(locale, data.date)}
         </div>
 
         <div className="break-words text-sm text-foreground">

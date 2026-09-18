@@ -238,6 +238,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
         effectiveAnimationMode="medium"
+        locale="en"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();
@@ -253,6 +254,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
         effectiveAnimationMode="rich"
+        locale="en"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();

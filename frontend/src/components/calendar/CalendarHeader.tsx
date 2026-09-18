@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, Plus, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCalendarStore } from "@/stores/useCalendarStore";
+import { useLocale } from "@/hooks/useI18n";
 import { formatMonthYear, formatDayHeader } from "./calendarUtils";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,8 @@ export function CalendarHeader() {
   const openEventForm = useCalendarStore((s) => s.openEventForm);
 
   const goToday = () => setDate(new Date());
+
+  const locale = useLocale();
 
   const goPrev = () => {
     const d = new Date(selectedDate);
@@ -41,8 +44,8 @@ export function CalendarHeader() {
 
   const headerText =
     viewMode === "day"
-      ? formatDayHeader(selectedDate)
-      : formatMonthYear(selectedDate);
+      ? formatDayHeader(locale, selectedDate)
+      : formatMonthYear(locale, selectedDate);
 
   const viewModes: Array<{ label: string; value: "month" | "week" | "day" }> = [
     { label: "Month", value: "month" },

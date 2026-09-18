@@ -3,6 +3,7 @@
 import { memo, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Star, Paperclip } from "lucide-react";
+import { formatListDate } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 import { useUpdateFlags } from "@/hooks/useMessages";
 import { createScaleFadeVariants } from "@/lib/motion/variants";
@@ -36,59 +37,7 @@ interface MessageListItemProps {
   onBulkToggle: (uid: number) => void;
   suppressHover?: boolean;
   effectiveAnimationMode: AnimationMode;
-}
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-
-  // Guard against invalid dates
-  if (isNaN(date.getTime())) return dateStr;
-
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (isToday) {
-    return date.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  // Check if same week (within last 7 days)
-  const msPerDay = 86_400_000;
-  const daysDiff = Math.floor(
-    (now.getTime() - date.getTime()) / msPerDay,
-  );
-
-  const time = date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  if (daysDiff < 7 && daysDiff >= 0) {
-    const day = date.toLocaleDateString(undefined, { weekday: "short" });
-    return `${day} ${time}`;
-  }
-
-  // Same year
-  if (date.getFullYear() === now.getFullYear()) {
-    const day = date.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-    return `${day} ${time}`;
-  }
-
-  // Older
-  const day = date.toLocaleDateString(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-  });
-  return `${day} ${time}`;
+  locale: string;
 }
 
 function formatSize(bytes: number): string {
@@ -109,11 +58,12 @@ export const MessageListItem = memo(function MessageListItem({
   onBulkToggle,
   suppressHover,
   effectiveAnimationMode,
+  locale,
 }: MessageListItemProps) {
   const isUnread = !message.flags.includes("\\Seen");
   const isFlagged = message.flags.includes("\\Flagged");
   const sender = message.from_name || message.from_address;
-  const formattedDate = formatDate(message.date);
+  const formattedDate = formatListDate(locale, message.date);
   const formattedSize = formatSize(message.size);
   const updateFlags = useUpdateFlags();
   const [isHovered, setIsHovered] = useState(false);
