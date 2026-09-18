@@ -13,6 +13,8 @@ import {
   formatTime,
   getEventColorClasses,
 } from "./calendarUtils";
+import { useLocale } from "@/hooks/useI18n";
+import { formatDate } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 import type { CalendarEvent } from "@/types/calendar";
 
@@ -27,6 +29,7 @@ export function WeekView({ weekStartsOn, timeFormat }: WeekViewProps) {
   const selectEvent = useCalendarStore((s) => s.selectEvent);
   const openEventForm = useCalendarStore((s) => s.openEventForm);
   const setViewMode = useCalendarStore((s) => s.setViewMode);
+  const locale = useLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const days = useMemo(
@@ -111,7 +114,7 @@ export function WeekView({ weekStartsOn, timeFormat }: WeekViewProps) {
             )}
           >
             <div className="text-xs text-muted-foreground">
-              {day.toLocaleDateString("en-US", { weekday: "short" })}
+              {formatDate(locale, day, { weekday: "short" })}
             </div>
             <div
               className={cn(

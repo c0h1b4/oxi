@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Tooltip } from "radix-ui";
 import { apiPost } from "@/lib/api";
+import { useT } from "@/hooks/useI18n";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
 import { useComposeStore } from "@/stores/useComposeStore";
@@ -38,7 +39,8 @@ function NavButton({
   disabled?: boolean;
   onClick?: (event: NavButtonClickEvent) => void;
 }) {
-  const tooltipLabel = disabled ? `${label} (coming soon)` : label;
+  const t = useT();
+  const tooltipLabel = disabled ? t("nav.comingSoon", { label }) : label;
 
   return (
     <Tooltip.Root>
@@ -85,6 +87,7 @@ const THEME_STORAGE_KEY = "oxi-theme";
 export function NavRail() {
   const { status: wsStatus, failCount: wsFailCount } = useWsStatus();
   const router = useRouter();
+  const t = useT();
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
   const setTheme = useUiStore((s) => s.setTheme);
@@ -126,30 +129,30 @@ export function NavRail() {
         <div className="flex flex-col items-center gap-1">
           <NavButton
             icon={<PenSquare className="size-5" />}
-            label="Compose"
+            label={t("nav.compose")}
             onClick={() => useComposeStore.getState().openCompose()}
           />
           <NavButton
             icon={<Mail className="size-5" />}
-            label="Mail"
+            label={t("nav.mail")}
             active={viewMode === "mail"}
             onClick={() => setViewMode("mail")}
           />
           <NavButton
             icon={<Users className="size-5" />}
-            label="Contacts"
+            label={t("nav.contacts")}
             active={viewMode === "contacts"}
             onClick={() => setViewMode(viewMode === "contacts" ? "mail" : "contacts")}
           />
           <NavButton
             icon={<Calendar className="size-5" />}
-            label="Calendar"
+            label={t("nav.calendar")}
             active={viewMode === "calendar"}
             onClick={() => setViewMode(viewMode === "calendar" ? "mail" : "calendar")}
           />
           <NavButton
             icon={<Settings className="size-5" />}
-            label="Settings"
+            label={t("nav.settings")}
             active={viewMode === "settings"}
             onClick={() => setViewMode(viewMode === "settings" ? "mail" : "settings")}
           />
@@ -170,17 +173,17 @@ export function NavRail() {
                 <Moon className="size-5" />
               )
             }
-            label={resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+            label={resolvedTheme === "dark" ? t("nav.lightMode") : t("nav.darkMode")}
             onClick={toggleTheme}
           />
           <NavButton
             icon={<Keyboard className="size-5" />}
-            label="Keyboard shortcuts"
+            label={t("nav.shortcuts")}
             onClick={() => useUiStore.getState().setShortcutsOpen(true)}
           />
           <NavButton
             icon={<LogOut className="size-5" />}
-            label="Logout"
+            label={t("nav.logout")}
             onClick={handleLogout}
           />
         </div>

@@ -1,0 +1,106 @@
+{
+  "common": {
+    "host": "Host",
+    "port": "Port",
+    "useTls": "Use TLS"
+  },
+  "login": {
+    "tagline": "Sign in to your account",
+    "title": "Welcome back",
+    "subtitle": "Enter your credentials to continue",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "rememberMe": "Keep me logged in",
+    "serverConfig": "Server configuration (optional)",
+    "imapSettings": "IMAP Settings",
+    "smtpSettings": "SMTP Settings",
+    "imapHostPlaceholder": "imap.example.com",
+    "smtpHostPlaceholder": "smtp.example.com",
+    "submit": "Sign in",
+    "submitting": "Signing in...",
+    "footer": "Secure, private, and fast email."
+  },
+  "nav": {
+    "compose": "Compose",
+    "mail": "Mail",
+    "contacts": "Contacts",
+    "calendar": "Calendar",
+    "settings": "Settings",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
+    "shortcuts": "Keyboard shortcuts",
+    "logout": "Logout",
+    "comingSoon": "{label} (coming soon)",
+    "connection": {
+      "connected": "Connected",
+      "syncing": "Syncing...",
+      "reconnecting": "Reconnecting...",
+      "disconnected": "Disconnected"
+    }
+  },
+  "settings": {
+    "display": {
+      "title": "Display",
+      "subtitle": "Customize the appearance and layout of the app.",
+      "loading": "Loading display settings...",
+      "reset": "Reset to defaults",
+      "updateFailed": "Failed to update: {message}",
+      "resetFailed": "Failed to reset: {message}",
+      "density": {
+        "label": "Density",
+        "description": "Controls the spacing of the message list",
+        "compact": "Compact",
+        "comfortable": "Comfortable"
+      },
+      "theme": {
+        "label": "Theme",
+        "description": "Choose light, dark, or match your system",
+        "light": "Light",
+        "dark": "Dark",
+        "system": "System"
+      },
+      "composeFormat": {
+        "label": "Compose format",
+        "description": "Default format for new emails",
+        "html": "HTML",
+        "text": "Plain text"
+      },
+      "animations": {
+        "label": "Animations",
+        "description": "Choose how much motion to use in the interface",
+        "rich": "Rich",
+        "medium": "Medium",
+        "subtle": "Subtle",
+        "off": "Off"
+      },
+      "deepIndex": {
+        "label": "Search indexing",
+        "description": "Index message bodies for full-text search (uses more bandwidth)",
+        "off": "Headers only",
+        "on": "Full text"
+      },
+      "language": {
+        "label": "Language",
+        "description": "Interface language"
+      }
+    }
+  },
+  "locales": {
+    "en": "English",
+    "es": "Español"
+  },
+  "errors": {
+    "unexpected": "An unexpected error occurred",
+    "UNAUTHORIZED": "Invalid email or password",
+    "SERVER_UNREACHABLE": "Could not reach the mail server ({message})",
+    "DUPLICATE_ACCOUNT": "This account is already logged in",
+    "BAD_REQUEST": "The server rejected the request",
+    "CSRF_REJECTED": "The request was blocked for security reasons. Reload the page and try again.",
+    "ACCOUNT_EXPIRED": "Account session has expired",
+    "NOT_FOUND": "Not found",
+    "SERVICE_UNAVAILABLE": "The service is unavailable. Try again in a moment.",
+    "INTERNAL_ERROR": "Something went wrong on the server"
+  }
+}

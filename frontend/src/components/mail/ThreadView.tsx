@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronRight, ChevronUp, Paperclip } from "lucide-react";
+import { useLocale } from "@/hooks/useI18n";
+import { formatDateTime } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import type { MessageHeader } from "@/types/message";
@@ -49,20 +51,12 @@ function avatarColor(identifier: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function formatThreadDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+function formatThreadDate(locale: string, dateStr: string): string {
+  return formatDateTime(locale, dateStr);
 }
 
 export function ThreadView({ thread, currentUid }: ThreadViewProps) {
+  const locale = useLocale();
   const selectMessage = useUiStore((s) => s.selectMessage);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentRef = useRef<HTMLButtonElement>(null);
@@ -192,7 +186,7 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <span className="text-xs text-muted-foreground">
-                          {formatThreadDate(msg.date)}
+                          {formatThreadDate(locale, msg.date)}
                         </span>
                         <ChevronUp className="size-3.5 text-muted-foreground" />
                       </div>
@@ -242,7 +236,7 @@ export function ThreadView({ thread, currentUid }: ThreadViewProps) {
                         <Paperclip className="size-3 text-muted-foreground" />
                       )}
                       <span className="text-xs text-muted-foreground">
-                        {formatThreadDate(msg.date)}
+                        {formatThreadDate(locale, msg.date)}
                       </span>
                       <ChevronDown className="size-3.5 text-muted-foreground" />
                     </div>

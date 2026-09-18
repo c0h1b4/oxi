@@ -15,6 +15,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocale } from "@/hooks/useI18n";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useMessage, useUpdateFlags } from "@/hooks/useMessages";
@@ -37,6 +38,7 @@ type HeaderMode = "summary" | "details";
 type BodyMode = "html" | "plain";
 
 export function ReadingPane() {
+  const locale = useLocale();
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
@@ -154,7 +156,7 @@ export function ReadingPane() {
               name={data.from_name || null}
             />
             {" "}
-            on {humanizeDate(data.date)}
+            on {humanizeDate(locale, data.date)}
           </div>
         ) : (
           <>
@@ -179,7 +181,7 @@ export function ReadingPane() {
             )}
 
             <div className="text-sm text-muted-foreground">
-              {humanizeDate(data.date)}
+              {humanizeDate(locale, data.date)}
             </div>
           </>
         )}

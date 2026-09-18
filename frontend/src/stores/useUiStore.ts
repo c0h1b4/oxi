@@ -2,9 +2,11 @@
 
 import { create, type UseBoundStore, type StoreApi } from "zustand";
 
+import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "@/lib/i18n";
 import type { AnimationMode } from "@/lib/motion/config";
 
 const STORAGE_KEY = "oxi-ui-settings";
+const LOCALE_STORAGE_KEY = "oxi-locale";
 
 interface PersistedSettings {
   sidebarWidth: number;
@@ -42,6 +44,30 @@ function saveSettings(settings: Partial<PersistedSettings>) {
   }
 }
 
+/**
+ * Read synchronously at module scope so the first render already uses the right
+ * locale. The stored value is a mirror of the `language` display preference;
+ * PreferencesLoader corrects it once the API responds.
+ */
+function loadLocale(): Locale {
+  if (typeof window === "undefined") return DEFAULT_LOCALE;
+  try {
+    const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (stored) return normalizeLocale(stored);
+    return normalizeLocale(navigator.language);
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
+function saveLocale(locale: Locale) {
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // ignore
+  }
+}
+
 export type ThemeMode = "light" | "dark" | "system";
 
 const DEFAULT_EFFECTIVE_ANIMATION_MODE: AnimationMode = "medium";
@@ -59,6 +85,7 @@ export interface UiState {
   readingPaneVisible: boolean;
   density: "compact" | "comfortable";
   theme: ThemeMode;
+  locale: Locale;
   searchQuery: string;
   searchActive: boolean;
   viewMode: "mail" | "contacts" | "settings" | "calendar";
@@ -82,6 +109,7 @@ export interface UiState {
   setReadingPaneVisible: (visible: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
   setTheme: (theme: ThemeMode) => void;
+  setLocale: (locale: Locale) => void;
   setSearchQuery: (query: string) => void;
   setSearchActive: (active: boolean) => void;
   clearSearch: () => void;
@@ -101,6 +129,7 @@ export interface UiState {
 }
 
 const initial = loadSettings();
+const initialLocale = loadLocale();
 
 export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set) => ({
   activeFolder: "INBOX",
@@ -110,6 +139,7 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   readingPaneVisible: true,
   density: "comfortable",
   theme: "system",
+  locale: initialLocale,
   searchQuery: "",
   searchActive: false,
   viewMode: "mail",
@@ -141,6 +171,10 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
   setDensity: (density) => set({ density }),
   setTheme: (theme) => set({ theme }),
+  setLocale: (locale) => {
+    saveLocale(locale);
+    set({ locale });
+  },
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
   clearSearch: () => set({ searchQuery: "", searchActive: false, searchResultCount: null }),

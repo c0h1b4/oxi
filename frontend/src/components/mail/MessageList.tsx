@@ -13,6 +13,8 @@ import type { AnimationMode } from "@/lib/motion/config";
 import { ANIMATION_MODES } from "@/lib/motion/config";
 import { useUiStore } from "@/stores/useUiStore";
 import { useComposeStore } from "@/stores/useComposeStore";
+import { useLocale } from "@/hooks/useI18n";
+import { humanizeDate } from "@/lib/i18n/format";
 import { MessageListItem } from "./MessageListItem";
 import { formatFolderName, isDraftsFolder } from "./FolderTree";
 import { BulkActionBar } from "./BulkActionBar";
@@ -43,43 +45,8 @@ function SkeletonRows({ count, height }: { count: number; height: number }) {
   );
 }
 
-function humanizeDate(iso: string): string {
-  const date = new Date(iso);
-  if (isNaN(date.getTime())) return iso;
-
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-
-  if (diffMinutes < 1) return "just now";
-  if (diffMinutes < 60) {
-    return diffMinutes === 1 ? "1 minute ago" : `${diffMinutes} minutes ago`;
-  }
-  if (diffHours < 24) {
-    return diffHours === 1 ? "1 hour ago" : `${diffHours} hours ago`;
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (
-    date.getFullYear() === yesterday.getFullYear() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getDate() === yesterday.getDate()
-  ) {
-    return "yesterday";
-  }
-
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
 function DraftItems() {
+  const locale = useLocale();
   const { data } = useListDrafts(true);
   const deleteDraft = useDeleteDraft();
   const openDraft = useComposeStore((s) => s.openDraft);
@@ -141,7 +108,7 @@ function DraftItems() {
               {draft.to || "No recipient"}
             </span>
             <span className="shrink-0 text-xs font-normal text-muted-foreground">
-              {humanizeDate(draft.updated_at)}
+              {humanizeDate(locale, draft.updated_at)}
             </span>
             <button
               onClick={(e) => {
@@ -197,6 +164,7 @@ export function MessageList() {
   const bulkSelectMode = useUiStore((s) => s.bulkSelectMode);
   const keyboardNav = useUiStore((s) => s.keyboardNav);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const locale = useLocale();
   const toggleBulkSelect = useUiStore((s) => s.toggleBulkSelect);
   const selectAllMessages = useUiStore((s) => s.selectAllMessages);
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
@@ -511,6 +479,7 @@ export function MessageList() {
                         onBulkToggle={toggleBulkSelect}
                         suppressHover={keyboardNav}
                         effectiveAnimationMode={effectiveAnimationMode}
+                        locale={locale}
                       />
                     </AnimatedDiv>
                   );

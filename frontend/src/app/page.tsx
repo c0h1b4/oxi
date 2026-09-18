@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiPost, fetchAccounts } from "@/lib/api";
+import { useT } from "@/hooks/useI18n";
+import { translateError } from "@/lib/i18n/error";
 import { useAuthStore } from "@/stores/useAuthStore";
 
 function getCookie(name: string): string | null {
@@ -32,6 +34,7 @@ interface ServerConfig {
 
 export default function Home() {
   const router = useRouter();
+  const t = useT();
   const setAccounts = useAuthStore((s) => s.setAccounts);
   const setActiveAccount = useAuthStore((s) => s.setActiveAccount);
   const [checking, setChecking] = useState(true);
@@ -114,9 +117,7 @@ export default function Home() {
       setActiveAccount(response.account.id);
       router.push("/mail");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "An unexpected error occurred",
-      );
+      setError(translateError(t, err));
     } finally {
       setLoading(false);
     }
@@ -139,17 +140,15 @@ export default function Home() {
             oxi<span className="text-primary">.email</span>
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in to your account
+            {t("login.tagline")}
           </p>
         </div>
 
         {/* Login Card */}
         <Card className="rounded-lg">
           <CardHeader>
-            <CardTitle className="text-lg">Welcome back</CardTitle>
-            <CardDescription>
-              Enter your credentials to continue
-            </CardDescription>
+            <CardTitle className="text-lg">{t("login.title")}</CardTitle>
+            <CardDescription>{t("login.subtitle")}</CardDescription>
           </CardHeader>
           <CardContent>
             {error && (
@@ -159,11 +158,11 @@ export default function Home() {
             )}
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("login.email")}</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={t("login.emailPlaceholder")}
                   autoComplete="email"
                   required
                   disabled={loading}
@@ -172,11 +171,11 @@ export default function Home() {
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("login.password")}</Label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter your password"
+                  placeholder={t("login.passwordPlaceholder")}
                   autoComplete="current-password"
                   required
                   disabled={loading}
@@ -193,7 +192,7 @@ export default function Home() {
                   disabled={loading}
                   className="size-4 rounded border-muted-foreground/40 accent-primary"
                 />
-                <span className="text-sm text-muted-foreground">Keep me logged in</span>
+                <span className="text-sm text-muted-foreground">{t("login.rememberMe")}</span>
               </label>
 
               <button
@@ -201,21 +200,21 @@ export default function Home() {
                 onClick={() => setShowServerConfig(!showServerConfig)}
                 className="text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                {showServerConfig ? "▼" : "▶"} Server configuration (optional)
+                {showServerConfig ? "▼" : "▶"} {t("login.serverConfig")}
               </button>
 
               {showServerConfig && (
                 <div className="flex flex-col gap-3 rounded-md border border-border p-3">
                   <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    IMAP Settings
+                    {t("login.imapSettings")}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="imapHost" className="text-xs">Host</Label>
+                      <Label htmlFor="imapHost" className="text-xs">{t("common.host")}</Label>
                       <Input
                         id="imapHost"
                         type="text"
-                        placeholder="imap.example.com"
+                        placeholder={t("login.imapHostPlaceholder")}
                         disabled={loading}
                         value={serverConfig.imapHost}
                         onChange={(e) => setServerConfig({ ...serverConfig, imapHost: e.target.value })}
@@ -223,7 +222,7 @@ export default function Home() {
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="imapPort" className="text-xs">Port</Label>
+                      <Label htmlFor="imapPort" className="text-xs">{t("common.port")}</Label>
                       <Input
                         id="imapPort"
                         type="number"
@@ -244,19 +243,19 @@ export default function Home() {
                       disabled={loading}
                       className="size-3 rounded border-muted-foreground/40 accent-primary"
                     />
-                    <span className="text-xs text-muted-foreground">Use TLS</span>
+                    <span className="text-xs text-muted-foreground">{t("common.useTls")}</span>
                   </label>
 
                   <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">
-                    SMTP Settings
+                    {t("login.smtpSettings")}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="smtpHost" className="text-xs">Host</Label>
+                      <Label htmlFor="smtpHost" className="text-xs">{t("common.host")}</Label>
                       <Input
                         id="smtpHost"
                         type="text"
-                        placeholder="smtp.example.com"
+                        placeholder={t("login.smtpHostPlaceholder")}
                         disabled={loading}
                         value={serverConfig.smtpHost}
                         onChange={(e) => setServerConfig({ ...serverConfig, smtpHost: e.target.value })}
@@ -264,7 +263,7 @@ export default function Home() {
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="smtpPort" className="text-xs">Port</Label>
+                      <Label htmlFor="smtpPort" className="text-xs">{t("common.port")}</Label>
                       <Input
                         id="smtpPort"
                         type="number"
@@ -285,7 +284,7 @@ export default function Home() {
                       disabled={loading}
                       className="size-3 rounded border-muted-foreground/40 accent-primary"
                     />
-                    <span className="text-xs text-muted-foreground">Use TLS</span>
+                    <span className="text-xs text-muted-foreground">{t("common.useTls")}</span>
                   </label>
                 </div>
               )}
@@ -296,7 +295,7 @@ export default function Home() {
                 size="lg"
                 disabled={loading}
               >
-                {loading ? "Signing in..." : "Sign in"}
+                {loading ? t("login.submitting") : t("login.submit")}
               </Button>
             </form>
           </CardContent>
@@ -304,7 +303,7 @@ export default function Home() {
 
         {/* Footer */}
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Secure, private, and fast email.
+          {t("login.footer")}
         </p>
       </div>
     </div>

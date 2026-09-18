@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { ArrowDown, ArrowUp, Loader2, Paperclip, X } from "lucide-react";
+import { useLocale } from "@/hooks/useI18n";
+import { formatListDate } from "@/lib/i18n/format";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/useUiStore";
 import { useSearch } from "@/hooks/useSearch";
@@ -16,62 +18,19 @@ import {
 } from "@/lib/search-parser";
 import type { SearchResultItem } from "@/types/message";
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-
-  const now = new Date();
-  const isToday =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (isToday) {
-    return date.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  const msPerDay = 86_400_000;
-  const daysDiff = Math.floor((now.getTime() - date.getTime()) / msPerDay);
-  const time = date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  if (daysDiff < 7 && daysDiff >= 0) {
-    const day = date.toLocaleDateString(undefined, { weekday: "short" });
-    return `${day} ${time}`;
-  }
-
-  if (date.getFullYear() === now.getFullYear()) {
-    const day = date.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-    return `${day} ${time}`;
-  }
-
-  const day = date.toLocaleDateString(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-  });
-  return `${day} ${time}`;
-}
-
 function SearchResultRow({
   result,
   isSelected,
   onClick,
+  locale,
 }: {
   result: SearchResultItem;
   isSelected: boolean;
   onClick: () => void;
+  locale: string;
 }) {
   const sender = result.from_name || result.from_address;
-  const formattedDate = formatDate(result.date);
+  const formattedDate = formatListDate(locale, result.date);
   const isUnread = !result.flags.includes("\\Seen");
   const isFlagged = result.flags.includes("\\Flagged");
 
@@ -134,6 +93,7 @@ function SearchResultRow({
 }
 
 export function SearchResults() {
+  const locale = useLocale();
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
   const setSearchActive = useUiStore((s) => s.setSearchActive);
@@ -349,6 +309,7 @@ export function SearchResults() {
                           selectedMessageUid === result.uid
                         }
                         onClick={() => handleResultClick(result)}
+                        locale={locale}
                       />
                     </AnimatedDiv>
                   ))}

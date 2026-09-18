@@ -9,18 +9,8 @@ import {
 } from "@/hooks/useContactGroups";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
-
-function formatDate(dateStr: string): string {
-  try {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return dateStr;
-  }
-}
+import { useLocale } from "@/hooks/useI18n";
+import { formatShortDate } from "@/lib/i18n/format";
 
 function InitialsAvatar({
   name,
@@ -74,6 +64,7 @@ export function ContactCard({
   isDeleting,
   groups = [],
 }: ContactCardProps) {
+  const locale = useLocale();
   const addMember = useAddGroupMember();
   const removeMember = useRemoveGroupMember();
 
@@ -228,10 +219,10 @@ export function ContactCard({
             <div className="flex items-center gap-4 text-xs text-muted-foreground/70">
               <div className="flex items-center gap-1">
                 <Clock className="size-3" />
-                <span>Created {formatDate(contact.created_at)}</span>
+                <span>Created {formatShortDate(locale, contact.created_at)}</span>
               </div>
               {contact.last_contacted && (
-                <span>Last contacted {formatDate(contact.last_contacted)}</span>
+                <span>Last contacted {formatShortDate(locale, contact.last_contacted)}</span>
               )}
               {contact.contact_count > 0 && (
                 <span>{contact.contact_count} interactions</span>

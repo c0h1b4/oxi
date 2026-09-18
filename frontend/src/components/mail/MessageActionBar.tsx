@@ -40,6 +40,7 @@ import {
   buildReferences,
 } from "@/lib/email-utils";
 import type { EmailAddress } from "@/types/message";
+import { useLocale } from "@/hooks/useI18n";
 import { useIdentities } from "@/hooks/useIdentities";
 import type { Identity } from "@/types/identity";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
@@ -68,6 +69,7 @@ function formatAddressList(addresses: EmailAddress[]): string {
 }
 
 export function MessageActionBar() {
+  const locale = useLocale();
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const updateFlags = useUpdateFlags();
@@ -112,8 +114,8 @@ export function MessageActionBar() {
       cc: "",
       subject: buildReplySubject(data.subject),
       body: hasHtml
-        ? buildReplyBodyHtml(data.html!, data.from_address, data.date)
-        : buildReplyBody(data.text, data.from_address, data.date),
+        ? buildReplyBodyHtml(locale, data.html!, data.from_address, data.date)
+        : buildReplyBody(locale, data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
       fromIdentityId: matchedId,
@@ -143,8 +145,8 @@ export function MessageActionBar() {
       cc: ccList,
       subject: buildReplySubject(data.subject),
       body: hasHtml
-        ? buildReplyBodyHtml(data.html!, data.from_address, data.date)
-        : buildReplyBody(data.text, data.from_address, data.date),
+        ? buildReplyBodyHtml(locale, data.html!, data.from_address, data.date)
+        : buildReplyBody(locale, data.text, data.from_address, data.date),
       inReplyTo: messageId,
       references: buildReferences(refs, messageId),
       fromIdentityId: matchedId,
@@ -159,8 +161,8 @@ export function MessageActionBar() {
     useComposeStore.getState().openForward({
       subject: buildForwardSubject(data.subject),
       body: hasHtml
-        ? buildForwardBodyHtml(data.html!, data.from_address, data.date, data.subject, toList)
-        : buildForwardBody(data.text, data.from_address, data.date, data.subject, toList),
+        ? buildForwardBodyHtml(locale, data.html!, data.from_address, data.date, data.subject, toList)
+        : buildForwardBody(locale, data.text, data.from_address, data.date, data.subject, toList),
       isHtml: hasHtml,
     });
   };

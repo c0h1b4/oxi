@@ -1,3 +1,5 @@
+import { formatDateTime } from "@/lib/i18n/format";
+
 /**
  * Email utility functions for reply, reply-all, and forward.
  */
@@ -38,11 +40,12 @@ export function buildForwardSubject(subject: string): string {
  * Build a quoted reply body from the original message text.
  */
 export function buildReplyBody(
+  locale: string,
   text: string | null,
   from: string,
   date: string,
 ): string {
-  const formattedDate = formatQuoteDate(date);
+  const formattedDate = formatQuoteDate(locale, date);
   const header = `\nOn ${formattedDate}, ${from} wrote:\n`;
   const quoted = quoteText(text ?? "");
   return `\n${header}${quoted}`;
@@ -52,13 +55,14 @@ export function buildReplyBody(
  * Build a forwarded message body with a preamble.
  */
 export function buildForwardBody(
+  locale: string,
   text: string | null,
   from: string,
   date: string,
   subject: string,
   to: string,
 ): string {
-  const formattedDate = formatQuoteDate(date);
+  const formattedDate = formatQuoteDate(locale, date);
   const lines = [
     "",
     "---------- Forwarded message ----------",
@@ -89,11 +93,12 @@ export function buildReferences(
  * Build a quoted reply body in HTML from the original HTML content.
  */
 export function buildReplyBodyHtml(
+  locale: string,
   html: string,
   from: string,
   date: string,
 ): string {
-  const formattedDate = formatQuoteDate(date);
+  const formattedDate = formatQuoteDate(locale, date);
   return [
     '<p><br></p>',
     `<p>On ${formattedDate}, ${from} wrote:</p>`,
@@ -105,13 +110,14 @@ export function buildReplyBodyHtml(
  * Build a forwarded message body in HTML from the original HTML content.
  */
 export function buildForwardBodyHtml(
+  locale: string,
   html: string,
   from: string,
   date: string,
   subject: string,
   to: string,
 ): string {
-  const formattedDate = formatQuoteDate(date);
+  const formattedDate = formatQuoteDate(locale, date);
   return [
     '<p><br></p>',
     '<p>---------- Forwarded message ----------</p>',
@@ -133,18 +139,6 @@ function quoteText(text: string): string {
     .join("\n");
 }
 
-function formatQuoteDate(iso: string): string {
-  try {
-    const date = new Date(iso);
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return iso;
-  }
+function formatQuoteDate(locale: string, iso: string): string {
+  return formatDateTime(locale, iso, { withYear: true });
 }
