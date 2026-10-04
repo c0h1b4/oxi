@@ -18,14 +18,33 @@ IMAP CLOSE, which would expunge deleted messages. Selected-mailbox operations
 always SELECT their own folder; STATUS and LIST do not rely on prior selection.
 
 Pooled paths: LIST, SELECT status, extended STATUS, headers, body, UID/flag
-reconciliation and CONDSTORE changed flags. The public trait and HTTP API remain
-unchanged. Dedicated realtime IDLE sessions still use `connect` directly.
+reconciliation, CONDSTORE changed flags, quota and folder-size reads. The public
+trait and HTTP API remain unchanged. Dedicated realtime IDLE sessions still use `connect` directly.
 
 Follow-up: pool mutations after auditing MOVE/UID EXPUNGE fallbacks that catch
-protocol errors, and pool quota/folder-size reads after making their raw-response
-and timeout paths explicitly discard incomplete sessions. These paths retain
-fresh connections and logout in this change.
+protocol errors. Mutations retain fresh connections and logout.
+
+Quota reads return sessions only after a matching tagged OK, including an empty
+quota result. Unsupported QUOTA (NO/BAD) returns None but discards the lease.
+Errors, EOF and quota timeouts discard it too. Folder-size reads reuse sessions
+after successful FETCH completion (or an empty SELECT); a timed-out FETCH retains
+the existing partial-size result but discards the unfinished session.
+
+Debug logs include a short credential-identity digest prefix and checkout/return
+actions (connect, reuse, discard, recycle), without logging credentials.
 
 Tests use a local plaintext fake IMAP server and the actual async-imap client to
 verify login reuse, error disposal, failed NOOP recovery, exclusive checkout
 bounds, abandoned leases, credential isolation and stale-session eviction.
+
+An ignored TLS regression can be run against a real server with credentials in
+`TEST_IMAP_HOST`, `TEST_IMAP_EMAIL`, and `TEST_IMAP_PASSWORD`:
+`cargo test real_tls_reads_reuse_one_login -- --ignored --nocapture`.
+It asserts one connection for repeated LIST/SELECT/header/quota/size operations
+on a server that returns tagged OK for quota requests (including no quota).
+
+The original read-path pool did reuse TLS sessions, but omitted quota and size
+reads. A server returning OK without quota data sends `/api/quota` into its
+per-folder size fallback, opening and logging out one fresh connection per
+folder while ordinary pooled sessions remain open. Regression coverage now
+includes that fallback rather than only LIST and SELECT operations.

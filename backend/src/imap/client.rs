@@ -184,7 +184,7 @@ pub trait ImapClient: Send + Sync {
 /// Production IMAP client that uses `async-imap` and `mail-parser`.
 ///
 /// Read operations reuse bounded, exclusively leased authenticated sessions.
-/// Writes and raw quota/size commands retain dedicated connections for now.
+/// Writes retain dedicated connections for now.
 #[derive(Default)]
 pub struct RealImapClient {
     pool: super::pool::ConnectionPool,
@@ -959,54 +959,58 @@ impl ImapClient for RealImapClient {
     }
 
     async fn get_quota(&self, creds: &ImapCredentials) -> Result<Option<MailboxQuota>, ImapError> {
-        let mut session = connect(creds).await?;
-
-        // Send GETQUOTAROOT INBOX — the server responds with QUOTAROOT + QUOTA lines.
-        // If the server doesn't support QUOTA, it returns NO — we treat that as None.
-        let req_id = match session.run_command("GETQUOTAROOT INBOX").await {
-            Ok(id) => id,
-            Err(_) => {
-                let _ = session.logout().await;
-                return Ok(None);
-            }
-        };
-
-        let mut quota_result: Option<MailboxQuota> = None;
-
-        // Read responses until we get the tagged OK/NO/BAD (15s timeout).
-        let read_result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            while let Some(resp) = session.read_response().await {
-                let resp = match resp {
-                    Ok(r) => r,
-                    Err(_) => break,
-                };
-                match resp.parsed() {
-                    async_imap::imap_proto::Response::Quota(q) => {
+        use async_imap::imap_proto::{Response, Status};
+        let mut session = self.pool.checkout(creds).await?;
+        let req_id = session
+            .run_command("GETQUOTAROOT INBOX")
+            .await
+            .map_err(map_imap_error)?;
+        // Only a matching tagged OK makes this session reusable. Unsupported
+        // QUOTA still returns None, but NO/BAD, EOF, IO errors and timeouts discard it.
+        let (quota, reusable) = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let mut quota = None;
+            while let Some(response) = session.read_response().await {
+                let response = response.map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
+                match response.parsed() {
+                    Response::Quota(q) => {
                         for resource in &q.resources {
                             if matches!(
                                 resource.name,
                                 async_imap::imap_proto::types::QuotaResourceName::Storage
                             ) {
-                                quota_result = Some(MailboxQuota {
+                                quota = Some(MailboxQuota {
                                     usage_bytes: resource.usage * 1024,
                                     limit_bytes: resource.limit * 1024,
                                 });
                             }
                         }
                     }
-                    async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
+                    Response::Done { tag, status, .. } if *tag == req_id => {
+                        return match status {
+                            Status::Ok => Ok((quota, true)),
+                            Status::No | Status::Bad => Ok((None, false)),
+                            _ => Err(ImapError::ProtocolError(
+                                "unexpected GETQUOTAROOT status".into(),
+                            )),
+                        };
+                    }
+                    Response::Data {
+                        status: Status::Bye,
+                        ..
+                    } => break,
                     _ => {}
                 }
             }
+            Err(ImapError::ConnectionFailed(
+                "connection lost during GETQUOTAROOT".into(),
+            ))
         })
-        .await;
-
-        if read_result.is_err() {
-            tracing::warn!("GETQUOTAROOT timed out after 15s");
+        .await
+        .map_err(|_| ImapError::ConnectionFailed("GETQUOTAROOT timed out after 15s".into()))??;
+        if reusable {
+            session.recycle();
         }
-
-        let _ = session.logout().await;
-        Ok(quota_result)
+        Ok(quota)
     }
 
     async fn fetch_folder_size(
@@ -1014,43 +1018,65 @@ impl ImapClient for RealImapClient {
         creds: &ImapCredentials,
         folder: &str,
     ) -> Result<u64, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
         let mailbox = session.select(folder).await.map_err(map_imap_error)?;
         if mailbox.exists == 0 {
-            let _ = session.logout().await;
+            session.recycle();
             return Ok(0);
         }
 
         let mut total: u64 = 0;
 
-        // 60s timeout for fetching all sizes in a folder.
+        // Require a tagged completion: async-imap's FETCH stream hides tagged
+        // NO/BAD and can end at EOF, which is unsafe when returning a pooled session.
         let fetch_result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-            let mut fetch_stream = session
-                .uid_fetch("1:*", "RFC822.SIZE")
+            use async_imap::imap_proto::{Response, Status, types::AttributeValue};
+            let req_id = session
+                .run_command("UID FETCH 1:* (RFC822.SIZE)")
                 .await
                 .map_err(map_imap_error)?;
-
-            while let Some(result) = fetch_stream.next().await {
-                let fetch = result.map_err(map_imap_error)?;
-                total += fetch.size.unwrap_or(0) as u64;
+            while let Some(response) = session.read_response().await {
+                let response = response.map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
+                match response.parsed() {
+                    Response::Fetch(_, attributes) => {
+                        for attribute in attributes {
+                            if let AttributeValue::Rfc822Size(size) = attribute {
+                                total += u64::from(*size);
+                            }
+                        }
+                    }
+                    Response::Done { tag, status, .. } if *tag == req_id => {
+                        return if *status == Status::Ok {
+                            Ok(())
+                        } else {
+                            Err(ImapError::ProtocolError(
+                                "folder-size FETCH rejected".into(),
+                            ))
+                        };
+                    }
+                    Response::Data {
+                        status: Status::Bye,
+                        ..
+                    } => break,
+                    _ => {}
+                }
             }
-            Ok::<(), ImapError>(())
+            Err(ImapError::ConnectionFailed(
+                "connection lost during folder-size FETCH".into(),
+            ))
         })
         .await;
 
         match fetch_result {
             Ok(Err(e)) => {
-                let _ = session.logout().await;
                 return Err(e);
             }
             Err(_) => {
                 tracing::warn!(folder = %folder, "fetch_folder_size timed out after 60s");
             }
-            _ => {}
+            Ok(Ok(())) => session.recycle(),
         }
-
-        let _ = session.logout().await;
         Ok(total)
     }
 }

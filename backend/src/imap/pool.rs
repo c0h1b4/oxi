@@ -34,12 +34,13 @@ struct PoolInner {
     reaper_started: AtomicBool,
 }
 struct UserPool {
+    identity_prefix: u32,
     slots: Arc<Semaphore>,
     idle: Mutex<Vec<(Instant, Session)>>,
 }
 
 // Length-prefix fields to avoid ambiguous identities. Never retain plaintext passwords.
-fn identity(creds: &ImapCredentials) -> [u8; 32] {
+pub(super) fn identity(creds: &ImapCredentials) -> [u8; 32] {
     let mut hash = Sha256::new();
     for field in [
         creds.host.as_bytes(),
@@ -107,14 +108,16 @@ impl ConnectionPool {
                 }
             });
         }
+        let key = identity(creds);
         let user = self
             .inner
             .users
             .lock()
             .unwrap()
-            .entry(identity(creds))
+            .entry(key)
             .or_insert_with(|| {
                 Arc::new(UserPool {
+                    identity_prefix: u32::from_be_bytes(key[..4].try_into().unwrap()),
                     slots: Arc::new(Semaphore::new(MAX_SESSIONS)),
                     idle: Mutex::new(Vec::new()),
                 })
@@ -135,13 +138,28 @@ impl ConnectionPool {
                     Ok(Ok(()))
                 )
             {
+                tracing::debug!(
+                    pool_identity = format_args!("{:08x}", user.identity_prefix),
+                    action = "reuse",
+                    "IMAP pool checkout"
+                );
                 return Ok(Lease {
                     session: Some(session),
                     user,
                     _permit: permit,
                 });
             }
+            tracing::debug!(
+                pool_identity = format_args!("{:08x}", user.identity_prefix),
+                action = "discard",
+                "IMAP pool validation failed or session expired"
+            );
         }
+        tracing::debug!(
+            pool_identity = format_args!("{:08x}", user.identity_prefix),
+            action = "connect",
+            "IMAP pool checkout"
+        );
         // Bound TCP, TLS and LOGIN together, retaining connect's TCP timeout too.
         let session = tokio::time::timeout(CHECK_TIMEOUT, connect(creds))
             .await
@@ -163,6 +181,11 @@ pub(crate) struct Lease {
 }
 impl Lease {
     pub(crate) fn recycle(mut self) {
+        tracing::debug!(
+            pool_identity = format_args!("{:08x}", self.user.identity_prefix),
+            action = "recycle",
+            "IMAP pool return"
+        );
         self.user
             .idle
             .lock()
@@ -195,6 +218,17 @@ mod tests {
         Arc<AtomicBool>,
         tokio::task::JoinHandle<()>,
     ) {
+        server_with_quota("{tag} OK no quota configured\r\n").await
+    }
+
+    async fn server_with_quota(
+        quota_reply: &'static str,
+    ) -> (
+        ImapCredentials,
+        Arc<AtomicUsize>,
+        Arc<AtomicBool>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let creds = ImapCredentials {
             host: "127.0.0.1".into(),
@@ -219,6 +253,7 @@ mod tests {
                         .await
                         .unwrap();
                     let mut line = String::new();
+                    let mut selected = String::new();
                     loop {
                         line.clear();
                         if socket.read_line(&mut line).await.unwrap_or(0) == 0 {
@@ -228,13 +263,43 @@ mod tests {
                         if line.contains(" NOOP") && kill.swap(false, Ordering::SeqCst) {
                             break;
                         }
-                        let response = if line.contains(" LOGIN ") {
+                        if line.contains(" GETQUOTAROOT ") && quota_reply.is_empty() {
+                            break;
+                        }
+                        if line.contains(" UID FETCH ") && selected == "stalled" {
+                            // No completion. The caller must discard on cancellation/timeout.
+                            continue;
+                        }
+                        let response = if line.contains(" GETQUOTAROOT ") {
+                            quota_reply.replace("{tag}", tag)
+                        } else if line.contains(" UID FETCH ") && selected == "broken" {
+                            break;
+                        } else if line.contains(" UID FETCH ") && selected == "rejected" {
+                            format!("{tag} NO fetch rejected\r\n")
+                        } else if line.contains(" UID FETCH ") {
+                            format!("* 1 FETCH (UID 1 RFC822.SIZE 42)\r\n{tag} OK fetched\r\n")
+                        } else if line.contains(" LOGIN ") {
                             count.fetch_add(1, Ordering::SeqCst);
                             format!("{tag} OK authenticated\r\n")
                         } else if line.contains(" LIST ") {
                             format!("* LIST () \"/\" \"INBOX\"\r\n{tag} OK listed\r\n")
-                        } else if line.contains(" SELECT ") {
+                        } else if line.contains(" SELECT ") && line.contains("missing") {
                             format!("{tag} NO missing folder\r\n")
+                        } else if line.contains(" SELECT ") {
+                            selected = line
+                                .split_whitespace()
+                                .nth(2)
+                                .unwrap()
+                                .trim_matches('"')
+                                .to_string();
+                            let exists = if selected == "INBOX" || selected == "Archive" {
+                                0
+                            } else {
+                                1
+                            };
+                            format!(
+                                "* {exists} EXISTS\r\n* OK [UIDVALIDITY 1] stable\r\n* OK [UIDNEXT 1] next\r\n{tag} OK selected\r\n"
+                            )
                         } else {
                             format!("{tag} OK done\r\n")
                         };
@@ -322,6 +387,108 @@ mod tests {
         kill_noop.store(true, Ordering::SeqCst);
         client.list_folders(&creds).await.unwrap();
         assert_eq!(logins.load(Ordering::SeqCst), 2);
+        task.abort();
+    }
+    #[tokio::test]
+    #[ignore = "requires TEST_IMAP_HOST, TEST_IMAP_EMAIL and TEST_IMAP_PASSWORD"]
+    async fn real_tls_reads_reuse_one_login() {
+        let creds = ImapCredentials {
+            host: std::env::var("TEST_IMAP_HOST").expect("TEST_IMAP_HOST required"),
+            port: 993,
+            tls: true,
+            email: std::env::var("TEST_IMAP_EMAIL").expect("TEST_IMAP_EMAIL required"),
+            password: std::env::var("TEST_IMAP_PASSWORD").expect("TEST_IMAP_PASSWORD required"),
+        };
+        let client = RealImapClient::default();
+        let before = super::super::connection::connection_count(&creds);
+        for _ in 0..3 {
+            client.list_folders(&creds).await.unwrap();
+            client.folder_status(&creds, "INBOX").await.unwrap();
+            client.fetch_headers(&creds, "INBOX", "1:1").await.unwrap();
+            let quota = client.get_quota(&creds).await.unwrap();
+            println!("Server returned quota: {}", quota.is_some());
+            client.fetch_folder_size(&creds, "INBOX").await.unwrap();
+        }
+        let connections = super::super::connection::connection_count(&creds) - before;
+        println!("15 TLS read operations established {connections} connections");
+        assert_eq!(connections, 1);
+    }
+
+    #[tokio::test]
+    async fn quota_fallback_reads_reuse_the_request_pool() {
+        let (creds, logins, _, task) = server().await;
+        let client = RealImapClient::default();
+        for _ in 0..5 {
+            client.list_folders(&creds).await.unwrap();
+            assert!(client.get_quota(&creds).await.unwrap().is_none());
+            // A server without a configured quota triggers a size read per folder.
+            assert_eq!(client.fetch_folder_size(&creds, "INBOX").await.unwrap(), 0);
+            assert_eq!(
+                client.fetch_folder_size(&creds, "Archive").await.unwrap(),
+                0
+            );
+        }
+        assert_eq!(logins.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn quota_payload_is_consumed_before_reuse() {
+        let (creds, logins, _, task) = server_with_quota(
+            "* QUOTAROOT INBOX root\r\n* QUOTA root (STORAGE 10 100)\r\n{tag} OK quota\r\n",
+        )
+        .await;
+        let client = RealImapClient::default();
+        for _ in 0..3 {
+            let quota = client.get_quota(&creds).await.unwrap().unwrap();
+            assert_eq!(quota.usage_bytes, 10 * 1024);
+            assert_eq!(quota.limit_bytes, 100 * 1024);
+            client.list_folders(&creds).await.unwrap();
+        }
+        assert_eq!(logins.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn rejected_or_interrupted_quota_discards_session() {
+        for reply in [
+            "{tag} NO unsupported\r\n",
+            "{tag} BAD unsupported\r\n",
+            "* BYE closing\r\n",
+            "",
+        ] {
+            let (creds, logins, _, task) = server_with_quota(reply).await;
+            let client = RealImapClient::default();
+            let result = client.get_quota(&creds).await;
+            if reply.contains("unsupported") {
+                assert!(result.unwrap().is_none());
+            } else {
+                assert!(result.is_err());
+            }
+            client.list_folders(&creds).await.unwrap();
+            assert_eq!(logins.load(Ordering::SeqCst), 2);
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn folder_size_completion_reuses_and_incomplete_work_discards() {
+        let (creds, logins, _, task) = server().await;
+        let client = RealImapClient::default();
+        for _ in 0..3 {
+            assert_eq!(client.fetch_folder_size(&creds, "Full").await.unwrap(), 42);
+        }
+        assert_eq!(logins.load(Ordering::SeqCst), 1);
+        for folder in ["rejected", "broken", "stalled"] {
+            let result = tokio::time::timeout(
+                Duration::from_millis(200),
+                client.fetch_folder_size(&creds, folder),
+            )
+            .await;
+            assert!(!matches!(result, Ok(Ok(_))));
+            client.list_folders(&creds).await.unwrap();
+        }
+        assert_eq!(logins.load(Ordering::SeqCst), 4);
         task.abort();
     }
 }
