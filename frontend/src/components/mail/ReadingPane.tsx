@@ -78,6 +78,7 @@ export function ReadingPane() {
   // Auto-switch to plain text mode for plaintext-only emails
   useEffect(() => {
     if (data && !data.html && data.text) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBodyMode("plain");
     } else {
       setBodyMode("html");

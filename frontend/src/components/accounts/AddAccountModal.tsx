@@ -61,6 +61,7 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEmail("");
       setPassword("");
       setError(null);
