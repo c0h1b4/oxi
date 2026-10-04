@@ -3,7 +3,8 @@ use futures::StreamExt;
 
 use super::connection::map_imap_error;
 use super::parse::{
-    decode_rfc2047, flag_to_string, has_attachments, imap_address_to_email, name_attribute_to_string,
+    decode_rfc2047, flag_to_string, has_attachments, imap_address_to_email,
+    name_attribute_to_string,
 };
 
 pub use super::error::ImapError;
@@ -21,7 +22,7 @@ pub mod mock;
 /// Abstraction over IMAP operations.
 ///
 /// Every method receives explicit connection parameters so that the trait
-/// remains stateless — no persistent connections are held.
+/// keeps its API independent of connection management.
 ///
 /// The `Send + Sync` bounds allow implementations to be shared across
 /// Tokio tasks and stored in `Arc`.
@@ -166,10 +167,7 @@ pub trait ImapClient: Send + Sync {
 
     /// Fetch mailbox quota via IMAP GETQUOTAROOT.
     /// Returns `None` if the server doesn't support quotas.
-    async fn get_quota(
-        &self,
-        creds: &ImapCredentials,
-    ) -> Result<Option<MailboxQuota>, ImapError>;
+    async fn get_quota(&self, creds: &ImapCredentials) -> Result<Option<MailboxQuota>, ImapError>;
 
     /// Fetch the total size of all messages in a folder via UID FETCH 1:* (RFC822.SIZE).
     async fn fetch_folder_size(
@@ -185,10 +183,12 @@ pub trait ImapClient: Send + Sync {
 
 /// Production IMAP client that uses `async-imap` and `mail-parser`.
 ///
-/// This is a stateless unit struct — every method creates a fresh connection,
-/// performs the operation, and disconnects.
-pub struct RealImapClient;
-
+/// Read operations reuse bounded, exclusively leased authenticated sessions.
+/// Writes and raw quota/size commands retain dedicated connections for now.
+#[derive(Default)]
+pub struct RealImapClient {
+    pool: super::pool::ConnectionPool,
+}
 
 // ---- Trait implementation -------------------------------------------------
 
@@ -199,28 +199,25 @@ impl ImapClient for RealImapClient {
         creds: &ImapCredentials,
         folder: &str,
     ) -> Result<FolderStatus, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
-        let mailbox = session
-            .select(folder)
-            .await
-            .map_err(|e| match &e {
-                async_imap::error::Error::No(msg)
-                    if msg.to_lowercase().contains("not found")
-                        || msg.to_lowercase().contains("doesn't exist")
-                        || msg.to_lowercase().contains("does not exist")
-                        || msg.to_lowercase().contains("no such") =>
-                {
-                    ImapError::FolderNotFound(folder.to_string())
-                }
-                _ => map_imap_error(e),
-            })?;
+        let mailbox = session.select(folder).await.map_err(|e| match &e {
+            async_imap::error::Error::No(msg)
+                if msg.to_lowercase().contains("not found")
+                    || msg.to_lowercase().contains("doesn't exist")
+                    || msg.to_lowercase().contains("does not exist")
+                    || msg.to_lowercase().contains("no such") =>
+            {
+                ImapError::FolderNotFound(folder.to_string())
+            }
+            _ => map_imap_error(e),
+        })?;
 
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
         let exists = mailbox.exists;
         let uid_next = mailbox.uid_next.unwrap_or(0);
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(FolderStatus {
             uid_validity,
             exists,
@@ -229,7 +226,7 @@ impl ImapClient for RealImapClient {
     }
 
     async fn list_folders(&self, creds: &ImapCredentials) -> Result<Vec<ImapFolder>, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
         let folders = {
             let names_stream = session
@@ -257,7 +254,7 @@ impl ImapClient for RealImapClient {
                 .collect()
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(folders)
     }
 
@@ -267,22 +264,19 @@ impl ImapClient for RealImapClient {
         folder: &str,
         uid_range: &str,
     ) -> Result<Vec<ImapMessageHeader>, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
-        session
-            .select(folder)
-            .await
-            .map_err(|e| match &e {
-                async_imap::error::Error::No(msg)
-                    if msg.to_lowercase().contains("not found")
-                        || msg.to_lowercase().contains("doesn't exist")
-                        || msg.to_lowercase().contains("does not exist")
-                        || msg.to_lowercase().contains("no such") =>
-                {
-                    ImapError::FolderNotFound(folder.to_string())
-                }
-                _ => map_imap_error(e),
-            })?;
+        session.select(folder).await.map_err(|e| match &e {
+            async_imap::error::Error::No(msg)
+                if msg.to_lowercase().contains("not found")
+                    || msg.to_lowercase().contains("doesn't exist")
+                    || msg.to_lowercase().contains("does not exist")
+                    || msg.to_lowercase().contains("no such") =>
+            {
+                ImapError::FolderNotFound(folder.to_string())
+            }
+            _ => map_imap_error(e),
+        })?;
 
         let headers = {
             // Fetch ENVELOPE, FLAGS, BODYSTRUCTURE, RFC822.SIZE, and threading headers.
@@ -310,9 +304,8 @@ impl ImapClient for RealImapClient {
 
                 // Parse threading headers from the small HEADER.FIELDS response.
                 let raw_header_bytes = fetch.header();
-                let parsed_threading = raw_header_bytes.and_then(|raw| {
-                    mail_parser::MessageParser::default().parse(raw)
-                });
+                let parsed_threading = raw_header_bytes
+                    .and_then(|raw| mail_parser::MessageParser::default().parse(raw));
 
                 let (subject, from, to, cc, date) = if let Some(env) = fetch.envelope() {
                     let subject = env
@@ -359,9 +352,9 @@ impl ImapClient for RealImapClient {
                 };
 
                 // Extract threading headers from the small HEADER.FIELDS response.
-                let message_id = parsed_threading.as_ref().and_then(|p| {
-                    p.message_id().map(|s| format!("<{s}>"))
-                });
+                let message_id = parsed_threading
+                    .as_ref()
+                    .and_then(|p| p.message_id().map(|s| format!("<{s}>")));
                 let in_reply_to = parsed_threading.as_ref().and_then(|p| {
                     let val = p.in_reply_to();
                     val.as_text().map(|s| format!("<{s}>"))
@@ -369,7 +362,12 @@ impl ImapClient for RealImapClient {
                 let references = parsed_threading.as_ref().and_then(|p| {
                     let val = p.references();
                     val.as_text_list()
-                        .map(|list| list.iter().map(|s| format!("<{s}>")).collect::<Vec<_>>().join(" "))
+                        .map(|list| {
+                            list.iter()
+                                .map(|s| format!("<{s}>"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
                         .or_else(|| val.as_text().map(|s| format!("<{s}>")))
                 });
 
@@ -423,7 +421,7 @@ impl ImapClient for RealImapClient {
             headers
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(headers)
     }
 
@@ -433,22 +431,19 @@ impl ImapClient for RealImapClient {
         folder: &str,
         uid: u32,
     ) -> Result<ImapMessageBody, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
-        session
-            .select(folder)
-            .await
-            .map_err(|e| match &e {
-                async_imap::error::Error::No(msg)
-                    if msg.to_lowercase().contains("not found")
-                        || msg.to_lowercase().contains("doesn't exist")
-                        || msg.to_lowercase().contains("does not exist")
-                        || msg.to_lowercase().contains("no such") =>
-                {
-                    ImapError::FolderNotFound(folder.to_string())
-                }
-                _ => map_imap_error(e),
-            })?;
+        session.select(folder).await.map_err(|e| match &e {
+            async_imap::error::Error::No(msg)
+                if msg.to_lowercase().contains("not found")
+                    || msg.to_lowercase().contains("doesn't exist")
+                    || msg.to_lowercase().contains("does not exist")
+                    || msg.to_lowercase().contains("no such") =>
+            {
+                ImapError::FolderNotFound(folder.to_string())
+            }
+            _ => map_imap_error(e),
+        })?;
 
         let uid_str = uid.to_string();
         let body = {
@@ -482,7 +477,8 @@ impl ImapClient for RealImapClient {
             let text_plain: Option<String> = parsed.body_text(0).map(|s| s.to_string());
 
             let has_html_part = parsed.parts.iter().any(|part| {
-                part.content_type().is_some_and(|ct| ct.ctype() == "text" && ct.subtype() == Some("html"))
+                part.content_type()
+                    .is_some_and(|ct| ct.ctype() == "text" && ct.subtype() == Some("html"))
             });
 
             let text_html: Option<String> = if has_html_part {
@@ -505,8 +501,7 @@ impl ImapClient for RealImapClient {
 
             // Collect explicit attachments.
             for attachment in parsed.attachments() {
-                let filename: Option<String> =
-                    attachment.attachment_name().map(|s| s.to_string());
+                let filename: Option<String> = attachment.attachment_name().map(|s| s.to_string());
                 let content_type: String = attachment.content_type().map_or_else(
                     || "application/octet-stream".to_string(),
                     |ct: &mail_parser::ContentType<'_>| {
@@ -538,9 +533,7 @@ impl ImapClient for RealImapClient {
                     continue;
                 }
                 // Skip if this is a text/html or text/plain body part.
-                let is_text = part
-                    .content_type()
-                    .is_some_and(|ct| ct.ctype() == "text");
+                let is_text = part.content_type().is_some_and(|ct| ct.ctype() == "text");
                 if is_text {
                     continue;
                 }
@@ -550,7 +543,10 @@ impl ImapClient for RealImapClient {
                     .trim_matches(|c| c == '<' || c == '>')
                     .to_string();
                 // Skip if we already captured this part via attachments().
-                if attachments.iter().any(|a| a.content_id.as_deref() == Some(&cid)) {
+                if attachments
+                    .iter()
+                    .any(|a| a.content_id.as_deref() == Some(&cid))
+                {
                     continue;
                 }
                 let content_type: String = part.content_type().map_or_else(
@@ -590,7 +586,7 @@ impl ImapClient for RealImapClient {
             }
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(body)
     }
 
@@ -684,10 +680,7 @@ impl ImapClient for RealImapClient {
     ) -> Result<(), ImapError> {
         let mut session = connect(creds).await?;
 
-        session
-            .select(from_folder)
-            .await
-            .map_err(map_imap_error)?;
+        session.select(from_folder).await.map_err(map_imap_error)?;
 
         let uid_str = uid.to_string();
 
@@ -713,8 +706,7 @@ impl ImapClient for RealImapClient {
                 }
 
                 {
-                    let expunge_stream =
-                        session.expunge().await.map_err(map_imap_error)?;
+                    let expunge_stream = session.expunge().await.map_err(map_imap_error)?;
                     let mut expunge_stream = std::pin::pin!(expunge_stream);
                     while let Some(r) = expunge_stream.next().await {
                         r.map_err(map_imap_error)?;
@@ -792,12 +784,7 @@ impl ImapClient for RealImapClient {
             Some(format!("({})", flags_str.join(" ")))
         };
         session
-            .append(
-                folder,
-                flags_joined.as_deref(),
-                None,
-                message_bytes,
-            )
+            .append(folder, flags_joined.as_deref(), None, message_bytes)
             .await
             .map_err(map_imap_error)?;
 
@@ -870,22 +857,19 @@ impl ImapClient for RealImapClient {
         creds: &ImapCredentials,
         folder: &str,
     ) -> Result<Vec<(u32, Vec<String>)>, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
-        session
-            .select(folder)
-            .await
-            .map_err(|e| match &e {
-                async_imap::error::Error::No(msg)
-                    if msg.to_lowercase().contains("not found")
-                        || msg.to_lowercase().contains("doesn't exist")
-                        || msg.to_lowercase().contains("does not exist")
-                        || msg.to_lowercase().contains("no such") =>
-                {
-                    ImapError::FolderNotFound(folder.to_string())
-                }
-                _ => map_imap_error(e),
-            })?;
+        session.select(folder).await.map_err(|e| match &e {
+            async_imap::error::Error::No(msg)
+                if msg.to_lowercase().contains("not found")
+                    || msg.to_lowercase().contains("doesn't exist")
+                    || msg.to_lowercase().contains("does not exist")
+                    || msg.to_lowercase().contains("no such") =>
+            {
+                ImapError::FolderNotFound(folder.to_string())
+            }
+            _ => map_imap_error(e),
+        })?;
 
         let results = {
             let mut fetch_stream = session
@@ -904,7 +888,7 @@ impl ImapClient for RealImapClient {
             items
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(results)
     }
 
@@ -913,10 +897,13 @@ impl ImapClient for RealImapClient {
         creds: &ImapCredentials,
         folder: &str,
     ) -> Result<FolderStatusExtended, ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
         let mailbox = session
-            .status(folder, "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)")
+            .status(
+                folder,
+                "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)",
+            )
             .await
             .map_err(map_imap_error)?;
 
@@ -928,7 +915,7 @@ impl ImapClient for RealImapClient {
             highest_modseq: mailbox.highest_modseq.unwrap_or(0),
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok(result)
     }
 
@@ -938,7 +925,7 @@ impl ImapClient for RealImapClient {
         folder: &str,
         since_modseq: u64,
     ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
-        let mut session = connect(creds).await?;
+        let mut session = self.pool.checkout(creds).await?;
 
         let mailbox = session
             .select_condstore(folder)
@@ -949,7 +936,10 @@ impl ImapClient for RealImapClient {
 
         let items = {
             let mut fetch_stream = session
-                .uid_fetch("1:*", format!("(UID FLAGS) (CHANGEDSINCE {})", since_modseq))
+                .uid_fetch(
+                    "1:*",
+                    format!("(UID FLAGS) (CHANGEDSINCE {})", since_modseq),
+                )
                 .await
                 .map_err(map_imap_error)?;
 
@@ -964,14 +954,11 @@ impl ImapClient for RealImapClient {
             items
         };
 
-        let _ = session.logout().await;
+        session.recycle();
         Ok((items, new_modseq))
     }
 
-    async fn get_quota(
-        &self,
-        creds: &ImapCredentials,
-    ) -> Result<Option<MailboxQuota>, ImapError> {
+    async fn get_quota(&self, creds: &ImapCredentials) -> Result<Option<MailboxQuota>, ImapError> {
         let mut session = connect(creds).await?;
 
         // Send GETQUOTAROOT INBOX — the server responds with QUOTAROOT + QUOTA lines.
@@ -987,31 +974,32 @@ impl ImapClient for RealImapClient {
         let mut quota_result: Option<MailboxQuota> = None;
 
         // Read responses until we get the tagged OK/NO/BAD (15s timeout).
-        let read_result = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            async {
-                while let Some(resp) = session.read_response().await {
-                    let resp = match resp {
-                        Ok(r) => r,
-                        Err(_) => break,
-                    };
-                    match resp.parsed() {
-                        async_imap::imap_proto::Response::Quota(q) => {
-                            for resource in &q.resources {
-                                if matches!(resource.name, async_imap::imap_proto::types::QuotaResourceName::Storage) {
-                                    quota_result = Some(MailboxQuota {
-                                        usage_bytes: resource.usage * 1024,
-                                        limit_bytes: resource.limit * 1024,
-                                    });
-                                }
+        let read_result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while let Some(resp) = session.read_response().await {
+                let resp = match resp {
+                    Ok(r) => r,
+                    Err(_) => break,
+                };
+                match resp.parsed() {
+                    async_imap::imap_proto::Response::Quota(q) => {
+                        for resource in &q.resources {
+                            if matches!(
+                                resource.name,
+                                async_imap::imap_proto::types::QuotaResourceName::Storage
+                            ) {
+                                quota_result = Some(MailboxQuota {
+                                    usage_bytes: resource.usage * 1024,
+                                    limit_bytes: resource.limit * 1024,
+                                });
                             }
                         }
-                        async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
-                        _ => {}
                     }
+                    async_imap::imap_proto::Response::Done { tag, .. } if *tag == req_id => break,
+                    _ => {}
                 }
-            },
-        ).await;
+            }
+        })
+        .await;
 
         if read_result.is_err() {
             tracing::warn!("GETQUOTAROOT timed out after 15s");
@@ -1037,21 +1025,19 @@ impl ImapClient for RealImapClient {
         let mut total: u64 = 0;
 
         // 60s timeout for fetching all sizes in a folder.
-        let fetch_result = tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            async {
-                let mut fetch_stream = session
-                    .uid_fetch("1:*", "RFC822.SIZE")
-                    .await
-                    .map_err(map_imap_error)?;
+        let fetch_result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            let mut fetch_stream = session
+                .uid_fetch("1:*", "RFC822.SIZE")
+                .await
+                .map_err(map_imap_error)?;
 
-                while let Some(result) = fetch_stream.next().await {
-                    let fetch = result.map_err(map_imap_error)?;
-                    total += fetch.size.unwrap_or(0) as u64;
-                }
-                Ok::<(), ImapError>(())
-            },
-        ).await;
+            while let Some(result) = fetch_stream.next().await {
+                let fetch = result.map_err(map_imap_error)?;
+                total += fetch.size.unwrap_or(0) as u64;
+            }
+            Ok::<(), ImapError>(())
+        })
+        .await;
 
         match fetch_result {
             Ok(Err(e)) => {
