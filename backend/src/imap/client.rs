@@ -26,6 +26,7 @@ pub mod mock;
 /// The `Send + Sync` bounds allow implementations to be shared across
 /// Tokio tasks and stored in `Arc`.
 #[allow(dead_code)]
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ImapClient: Send + Sync {
     /// List all folders (mailboxes) on the server.
