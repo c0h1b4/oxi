@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-
-const expiredAccountResponse = JSON.parse(readFileSync(
-  new URL("../../../../backend/tests/fixtures/account-session-expired.json", import.meta.url),
-  "utf8",
-));
+import { URL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "@/stores/useAuthStore";
 import {
   apiDelete,
@@ -18,6 +14,11 @@ import {
 import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+
+const expiredAccountResponse = JSON.parse(readFileSync(
+  new URL("../../../../backend/tests/fixtures/account-session-expired.json", import.meta.url),
+  "utf8",
+));
 
 const expiredAccount = {
   id: expiredAccountResponse.error.accountId,
