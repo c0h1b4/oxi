@@ -42,7 +42,6 @@ export function ReadingPane() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
-  const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
   const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
@@ -56,6 +55,9 @@ export function ReadingPane() {
   const { data, isLoading, isError, error, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0
+  );
+  const [bodyMode, setBodyMode] = useState<BodyMode>(
+    data && !data.html && data.text ? "plain" : "html"
   );
 
   const updateFlags = useUpdateFlags();
@@ -75,16 +77,17 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
-  // Auto-switch to plain text mode for plaintext-only emails
-  useEffect(() => {
-    if (data && !data.html && data.text) {
-      setBodyMode("plain");
-    } else {
-      setBodyMode("html");
-    }
+  const displayedMessageKey = data
+    ? JSON.stringify([activeAccountId, data.folder, data.uid])
+    : null;
+  const [previousMessageKey, setPreviousMessageKey] = useState(displayedMessageKey);
+
+  // Adjust message-specific state before rendering the newly selected message.
+  if (displayedMessageKey !== previousMessageKey) {
+    setPreviousMessageKey(displayedMessageKey);
+    setBodyMode(data && !data.html && data.text ? "plain" : "html");
     setEmailTheme("auto");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.uid]);
+  }
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
