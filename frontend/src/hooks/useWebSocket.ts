@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { apiUrl } from "@/lib/api-url";
 
 export type WsStatus = "connected" | "connecting" | "disconnected";
 
@@ -69,15 +70,8 @@ export function useWebSocket(onEvent?: (event: MailEvent) => void) {
 
       setStatus("connecting");
 
-      let wsUrl: string;
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      if (apiUrl) {
-        wsUrl = apiUrl.replace(/^http/, "ws") + "/ws";
-      } else {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-        wsUrl = `${protocol}//${window.location.host}${basePath}/api/ws`;
-      }
+      const wsUrl = new URL(apiUrl("/ws"), window.location.origin);
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

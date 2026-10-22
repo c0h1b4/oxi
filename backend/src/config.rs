@@ -129,6 +129,14 @@ fn default_serve_static() -> bool {
 }
 
 impl AppConfig {
+    /// Use the root path when no reverse-proxy prefix is configured.
+    pub fn normalized_base_path(&self) -> &str {
+        self.base_path
+            .as_deref()
+            .filter(|path| !path.is_empty())
+            .unwrap_or("/")
+    }
+
     /// Parse the `trusted_proxies` field into IP or CIDR entries.
     /// Logs warnings for unparseable entries.
     pub fn parsed_trusted_proxies(&self) -> Vec<TrustedProxy> {

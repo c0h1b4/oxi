@@ -1,3 +1,16 @@
+import { apiUrl } from "@/lib/api-url";
+
+/** Replace this draft's backend image URLs, including account queries, with MIME CIDs. */
+export function inlineImagesToCid(html: string, draftId: string | null): string {
+  if (!draftId) return html;
+  const prefix = apiUrl(`/drafts/${draftId}/attachments/`);
+  return html.replace(/\bsrc=(['"])(.*?)\1/gi, (attribute, quote, url: string) => {
+    if (!url.startsWith(prefix)) return attribute;
+    const match = /^([^/?]+)\/content(?:\?[^"']*)?$/.exec(url.slice(prefix.length));
+    return match ? `src=${quote}cid:${match[1]}${quote}` : attribute;
+  });
+}
+
 /** Count the total number of recipients across To, Cc, Bcc fields. */
 export function countRecipients(...fields: string[]): number {
   return fields.reduce(

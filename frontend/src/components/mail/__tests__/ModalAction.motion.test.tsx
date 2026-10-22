@@ -138,7 +138,7 @@ vi.mock("cmdk", () => {
   CommandRoot.Group = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
     <div {...props}>{children}</div>
   );
-  CommandRoot.Item = ({ children, onSelect, ...props }: React.HTMLAttributes<HTMLDivElement> & { onSelect?: () => void }) => (
+  CommandRoot.Item = ({ children, onSelect, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { onSelect?: () => void }) => (
     <button type="button" onClick={onSelect} {...props}>{children}</button>
   );
 
@@ -242,6 +242,7 @@ vi.mock("../ComposeDialog/index", () => ({
   formatFileSize: () => "1 KB",
   stripHtml: (value: string) => value,
   generateId: () => "draft-1",
+  inlineImagesToCid: (body: string) => body,
   DiscardAlertDialog: () => null,
   AttachmentPreviewDialog: () => null,
 }));

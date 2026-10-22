@@ -7,6 +7,7 @@ self:
 }:
 let
   cfg = config.services.oxi;
+  basePath = if cfg.basePath == null then "" else cfg.basePath;
 in
 {
   options.services.oxi = {
@@ -14,8 +15,13 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.system}.default;
-      description = "The oxi package to use.";
+      default = self.packages.${pkgs.system}.default.override { inherit basePath; };
+      defaultText = lib.literalExpression ''
+        self.packages.''${pkgs.system}.default.override {
+          basePath = if config.services.oxi.basePath == null then "" else config.services.oxi.basePath;
+        }
+      '';
+      description = "The oxi package to use. Its oxiBasePath passthru must match basePath.";
     };
 
     host = lib.mkOption {
@@ -91,11 +97,27 @@ in
     basePath = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "Optional base path prefix for reverse proxy subpath.";
+      description = ''
+        Reverse proxy subpath (for example /oxi), without a trailing slash.
+        null or "" serves at the root. The default package builds the static
+        frontend for this prefix. Custom packages must expose matching
+        passthru.oxiBasePath metadata.
+      '';
     };
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = basePath == "" || builtins.match "/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*" basePath != null;
+        message = "services.oxi.basePath must be empty or a slash-prefixed path without a trailing slash (for example /oxi).";
+      }
+      {
+        assertion = (cfg.package.oxiBasePath or null) == basePath;
+        message = "services.oxi.package must expose oxiBasePath matching services.oxi.basePath; build it with .override { basePath = ...; }. The frontend prefix is fixed at build time.";
+      }
+    ];
+
     users.users.${cfg.user} = {
       isSystemUser = true;
       group = cfg.group;
@@ -122,9 +144,7 @@ in
         SESSION_TIMEOUT_HOURS = toString cfg.sessionTimeoutHours;
         ENVIRONMENT = "production";
         RUST_LOG = cfg.rustLog;
-      }
-      // lib.optionalAttrs (cfg.basePath != null) {
-        BASE_PATH = cfg.basePath;
+        BASE_PATH = basePath;
       };
 
       serviceConfig = {

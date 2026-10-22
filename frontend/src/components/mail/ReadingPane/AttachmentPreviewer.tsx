@@ -1,5 +1,7 @@
 "use client";
 
+import { ApiDownloadLink } from "@/components/shared/ApiDownloadLink";
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence } from "framer-motion";
@@ -131,14 +133,14 @@ export function AttachmentPreviewer({
                   </button>
                 </>
               )}
-              <a
+              <ApiDownloadLink
                 href={url}
-                download={att.filename ?? undefined}
+                download={att.filename ?? "attachment"}
                 className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="Download"
               >
                 <Download className="size-4" />
-              </a>
+              </ApiDownloadLink>
               <Dialog.Close asChild>
                 <button
                   className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -211,14 +213,14 @@ export function AttachmentPreviewer({
                 <p className="text-sm text-muted-foreground">
                   Preview not available for this file type
                 </p>
-                <a
+                <ApiDownloadLink
                   href={url}
-                  download={att.filename ?? undefined}
+                  download={att.filename ?? "attachment"}
                   className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                 >
                   <Download className="size-4" />
                   Download
-                </a>
+                </ApiDownloadLink>
               </div>
             )}
           </div>

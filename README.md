@@ -91,6 +91,26 @@ STATIC_DIR=../frontend/out IMAP_HOST=mail.example.com SMTP_HOST=mail.example.com
   ./target/release/oxi-email-server
 ```
 
+### Separate frontend and backend origins
+
+For local hot reload, start the backend with `ENVIRONMENT=development`,
+`SERVE_STATIC=false`, and `CORS_ORIGIN=http://localhost:3000`. Start the frontend
+with `NEXT_PUBLIC_API_URL=http://localhost:3001/api bun run dev`.
+`NEXT_PUBLIC_API_URL` is the complete API root, including `/api` and any backend
+path prefix. It is a build-time value for static exports. API calls, attachment
+previews/downloads, inline draft images, contact exports, and WebSockets all use
+this root. Cross-origin fetches include session cookies.
+
+Use the same hostname and scheme on both origins (different localhost ports are
+fine). Development cookies are SameSite=Lax, so unrelated cross-site hosts are
+not supported; production uses SameSite=Strict and should serve the frontend and
+API from the same origin. Cookie/browser third-party policies still apply.
+
+For a same-origin subpath deployment, build the frontend with
+`NEXT_PUBLIC_BASE_PATH=/oxi` and run the backend with `BASE_PATH=/oxi`.
+An unset or empty `BASE_PATH` means the root path `/`. See [Nix deployment](nix/README.md)
+for packages that build the matching prefix automatically.
+
 ## Configuration
 
 All configuration is via environment variables:

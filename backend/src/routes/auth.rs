@@ -44,7 +44,7 @@ fn same_site_policy(config: &AppConfig) -> &'static str {
 }
 
 fn cookie_path(config: &AppConfig) -> &str {
-    config.base_path.as_deref().unwrap_or("/")
+    config.normalized_base_path()
 }
 
 fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
@@ -643,6 +643,34 @@ mod tests {
             serve_static: true,
             cors_origin: cors_origin.map(str::to_string),
             trusted_proxies: None,
+        }
+    }
+
+    #[test]
+    fn issued_and_clearing_cookies_use_the_normalized_base_path() {
+        for (base_path, expected_path) in [
+            (None, "/"),
+            (Some(""), "/"),
+            (Some("/"), "/"),
+            (Some("/oxi"), "/oxi"),
+        ] {
+            let mut config = test_config("development", None);
+            config.base_path = base_path.map(str::to_string);
+            let path = cookie_path(&config);
+            let cookies = [
+                browser_cookie("browser", 3600, false, "Strict", path),
+                account_session_cookie("account", "token", 3600, false, "Strict", path),
+                clearing_browser_cookie(false, "Strict", path),
+                clearing_account_cookie("account", false, "Strict", path),
+            ];
+
+            for cookie in cookies {
+                let path_attribute = cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find_map(|attribute| attribute.strip_prefix("Path="));
+                assert_eq!(path_attribute, Some(expected_path), "{base_path:?}: {cookie}");
+            }
         }
     }
 

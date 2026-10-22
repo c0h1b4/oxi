@@ -690,6 +690,75 @@
     }
 
     #[tokio::test]
+    async fn base_path_mounts_protected_data_routes_and_scopes_logout_cookies() {
+        for (base_path, prefix, cookie_path) in [
+            (None, "", "/"),
+            (Some(""), "", "/"),
+            (Some("/"), "", "/"),
+            (Some("/oxi"), "/oxi", "/oxi"),
+        ] {
+            let static_dir = setup_static_dir();
+            let data_dir = TempDir::new().unwrap();
+            let mut config = (*test_config_with_imap(
+                static_dir.path().to_str().unwrap(),
+                data_dir.path().to_str().unwrap(),
+            ))
+            .clone();
+            config.base_path = base_path.map(str::to_string);
+            let store = test_store();
+            let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+            provision_user_db(
+                data_dir.path().to_str().unwrap(),
+                &crate::auth::user_data::hash_email("alice@example.com"),
+            );
+            let app = create_router(
+                Arc::new(config),
+                store,
+                test_imap_client(),
+                test_smtp_client(),
+                test_search_engine(data_dir.path().to_str().unwrap()),
+                test_event_bus(),
+                test_idle_manager(),
+            );
+
+            // This route is outside /api/auth, where browsers default empty cookie paths.
+            let mut request = Request::builder().uri(format!("{prefix}/api/folders"));
+            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+                request = request.header(name, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert!(json["folders"].is_array(), "{base_path:?}: {json}");
+
+            let mut request = Request::builder()
+                .method("POST")
+                .uri(format!("{prefix}/api/auth/logout"))
+                .header("x-requested-with", "XMLHttpRequest");
+            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+                request = request.header(name, value);
+            }
+            let response = app
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
+            let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
+            assert_eq!(cookies.len(), 2);
+            for cookie in cookies {
+                let attributes: Vec<_> = cookie.to_str().unwrap().split(';').map(str::trim).collect();
+                assert!(attributes.contains(&format!("Path={cookie_path}").as_str()));
+                assert!(attributes.contains(&"Max-Age=0"));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn logout_clears_cookie() {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());

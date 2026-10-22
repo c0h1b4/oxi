@@ -1,5 +1,8 @@
 "use client";
 
+import { apiAccountUrl } from "@/lib/api-url";
+import { useAuthStore } from "@/stores/useAuthStore";
+
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { AnimatePresence, motion } from "framer-motion";
@@ -42,6 +45,7 @@ import {
   formatFileSize,
   stripHtml,
   generateId,
+  inlineImagesToCid,
   DiscardAlertDialog,
   AttachmentPreviewDialog,
 } from "./ComposeDialog/index";
@@ -54,6 +58,7 @@ const RichTextEditor = dynamic(
 );
 
 export function ComposeDialog() {
+  const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const {
     isOpen,
     to,
@@ -229,10 +234,7 @@ export function ComposeDialog() {
     if (isHtml) {
       plainText = stripHtml(body);
       // Convert preview URLs back to cid: references for the email MIME body
-      sendHtml = body.replace(
-        /\/api\/drafts\/[^/]+\/attachments\/([^/]+)\/content/g,
-        (_match, attId) => `cid:${attId}`
-      );
+      sendHtml = inlineImagesToCid(body, draftId);
     } else {
       plainText = body;
       sendHtml = null;
@@ -404,7 +406,7 @@ export function ComposeDialog() {
                 // Return a preview URL that the browser can render.
                 // The send flow converts these back to cid: references.
                 resolve(
-                  `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/drafts/${currentDraftId}/attachments/${att.id}/content`
+                  apiAccountUrl(`/drafts/${currentDraftId}/attachments/${att.id}/content`, activeAccountId)
                 );
               } else {
                 resolve(null);
@@ -418,7 +420,7 @@ export function ComposeDialog() {
         );
       });
     },
-    [draftId, setDraftId, uploadMutation, addAttachments]
+    [draftId, setDraftId, uploadMutation, addAttachments, activeAccountId]
   );
 
   const handleRemoveAttachment = useCallback(
@@ -923,7 +925,7 @@ export function ComposeDialog() {
             contentType: previewAttachment.contentType,
             size: previewAttachment.size,
           }}
-          previewUrl={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/drafts/${draftId}/attachments/${previewAttachment.id}/content`}
+          previewUrl={apiAccountUrl(`/drafts/${draftId}/attachments/${previewAttachment.id}/content`, activeAccountId)}
           onClose={() => setPreviewAttId(null)}
         />
       )}
