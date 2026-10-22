@@ -1,4 +1,4 @@
-import fuzzysort from "fuzzysort"
+import fuzzysort, { type Prepared, type Result } from "fuzzysort"
 
 export interface SearchableItem {
   email: string
@@ -15,8 +15,8 @@ export interface SearchResult {
 
 interface PreparedItem {
   original: SearchableItem
-  namePrepared: Fuzzysort.Prepared | null
-  emailPrepared: Fuzzysort.Prepared
+  namePrepared: Prepared | null
+  emailPrepared: Prepared
 }
 
 /** Names over this length or with spam patterns are excluded from fuzzy matching. */
@@ -79,7 +79,7 @@ export class FuzzySearcher {
     return results.slice(0, limit)
   }
 
-  private highlightMatch(result: Fuzzysort.Result): string {
+  private highlightMatch(result: Result): string {
     return result.highlight("<mark>", "</mark>") ?? ""
   }
 }

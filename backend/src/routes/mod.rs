@@ -411,9 +411,32 @@ pub fn create_router(
         let spa_router = Router::new()
             .fallback(spa_fallback)
             .layer(Extension(config.clone()));
+        let static_router = Router::new()
+            .fallback_service(static_service.fallback(spa_router))
+            .layer(middleware::map_response({
+                let config = config.clone();
+                move |mut response: axum::response::Response| {
+                    let config = config.clone();
+                    async move {
+                        let base_path = config.normalized_base_path();
+                        // ServeDir sees the nested URI, so directory redirects lose the prefix.
+                        if base_path != "/"
+                            && response.status().is_redirection()
+                            && let Some(location) = response.headers().get(header::LOCATION)
+                            && let Ok(location) = location.to_str()
+                            && location.starts_with('/')
+                            && !location.starts_with("//")
+                            && let Ok(location) = format!("{base_path}{location}").parse::<HeaderValue>()
+                        {
+                            response.headers_mut().insert(header::LOCATION, location);
+                        }
+                        response
+                    }
+                }
+            }));
         Router::new()
             .nest("/api", api_router)
-            .fallback_service(static_service.fallback(spa_router))
+            .fallback_service(static_router)
     } else {
         Router::new().nest("/api", api_router)
     };

@@ -395,6 +395,35 @@
     }
 
     #[tokio::test]
+    async fn directory_redirect_keeps_base_path_and_serves_login_index() {
+        for (base_path, prefix) in [(None, ""), (Some("/oxi"), "/oxi")] {
+            let dir = setup_static_dir();
+            fs::create_dir(dir.path().join("login")).unwrap();
+            fs::write(dir.path().join("login/index.html"), "LOGIN PAGE").unwrap();
+            let mut config = (*test_config(dir.path().to_str().unwrap())).clone();
+            config.base_path = base_path.map(str::to_string);
+            let app = create_router(
+                Arc::new(config), test_store(), test_imap_client(), test_smtp_client(),
+                test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager(),
+            );
+
+            let response = app.clone().oneshot(
+                Request::builder().uri(format!("{prefix}/login?next=mail")).body(Body::empty()).unwrap(),
+            ).await.unwrap();
+            assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+            assert_eq!(response.headers()["location"], format!("{prefix}/login/?next=mail"));
+
+            let response = app.oneshot(
+                Request::builder().uri(format!("{prefix}/login/")).body(Body::empty()).unwrap(),
+            ).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.headers().get("location").is_none());
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert_eq!(body.as_ref(), b"LOGIN PAGE");
+        }
+    }
+
+    #[tokio::test]
     async fn nested_spa_path_falls_back_to_index() {
         let dir = setup_static_dir();
         let config = test_config(dir.path().to_str().unwrap());
