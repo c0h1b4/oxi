@@ -19,6 +19,13 @@ use tokio::{
     time::Instant,
 };
 
+/// Mark IMAP operations in this future as background work.
+pub(crate) async fn background<T>(work: impl std::future::Future<Output = T>) -> T {
+    BACKGROUND.scope((), work).await
+}
+
+tokio::task_local! { static BACKGROUND: (); }
+
 type Session = async_imap::Session<ImapStream>;
 const MAX_SESSIONS: usize = 3;
 const IDLE_TTL: Duration = Duration::from_secs(120);
@@ -36,6 +43,7 @@ struct PoolInner {
 struct UserPool {
     identity_prefix: u32,
     slots: Arc<Semaphore>,
+    background_slots: Arc<Semaphore>,
     idle: Mutex<Vec<(Instant, Session)>>,
 }
 
@@ -119,10 +127,23 @@ impl ConnectionPool {
                 Arc::new(UserPool {
                     identity_prefix: u32::from_be_bytes(key[..4].try_into().unwrap()),
                     slots: Arc::new(Semaphore::new(MAX_SESSIONS)),
+                    background_slots: Arc::new(Semaphore::new(MAX_SESSIONS - 1)),
                     idle: Mutex::new(Vec::new()),
                 })
             })
             .clone();
+        // Wait outside the shared budget so queued sync work cannot starve reads.
+        let background_permit = if BACKGROUND.try_with(|_| ()).is_ok() {
+            Some(
+                user.background_slots
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| ImapError::ConnectionFailed("pool closed".into()))?,
+            )
+        } else {
+            None
+        };
         let permit = tokio::time::timeout(CHECK_TIMEOUT, user.slots.clone().acquire_owned())
             .await
             .map_err(|_| ImapError::ConnectionFailed("pool checkout timed out".into()))?
@@ -147,6 +168,7 @@ impl ConnectionPool {
                     session: Some(session),
                     user,
                     _permit: permit,
+                    _background_permit: background_permit,
                 });
             }
             tracing::debug!(
@@ -168,6 +190,7 @@ impl ConnectionPool {
             session: Some(session),
             user,
             _permit: permit,
+            _background_permit: background_permit,
         })
     }
 }
@@ -178,6 +201,7 @@ pub(crate) struct Lease {
     session: Option<Session>,
     user: Arc<UserPool>,
     _permit: OwnedSemaphorePermit,
+    _background_permit: Option<OwnedSemaphorePermit>,
 }
 impl Lease {
     pub(crate) fn recycle(mut self) {
@@ -329,6 +353,30 @@ mod tests {
         assert!(client.folder_status(&creds, "missing").await.is_err());
         client.list_folders(&creds).await.unwrap();
         assert_eq!(logins.load(Ordering::SeqCst), 2);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn background_work_leaves_an_interactive_slot() {
+        let (creds, _, _, task) = server().await;
+        let pool = ConnectionPool::default();
+        let first = background(pool.checkout(&creds)).await.unwrap();
+        let second = background(pool.checkout(&creds)).await.unwrap();
+        let third = background(pool.checkout(&creds));
+        tokio::pin!(third);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut third)
+                .await
+                .is_err()
+        );
+        let interactive = tokio::time::timeout(Duration::from_millis(200), pool.checkout(&creds))
+            .await
+            .expect("background work starved interactive checkout")
+            .unwrap();
+        drop(interactive);
+        drop(first);
+        let third = third.await.unwrap();
+        drop((second, third));
         task.abort();
     }
 

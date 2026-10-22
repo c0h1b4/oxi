@@ -278,7 +278,7 @@ impl ImapClient for RealImapClient {
             _ => map_imap_error(e),
         })?;
 
-        let headers = {
+        let fetches = {
             // Fetch ENVELOPE, FLAGS, BODYSTRUCTURE, RFC822.SIZE, and threading headers.
             // We only fetch Message-ID, In-Reply-To, and References (a few bytes per message)
             // rather than full raw headers, to keep bulk syncs lightweight.
@@ -295,6 +295,11 @@ impl ImapClient for RealImapClient {
                 fetches.push(result.map_err(map_imap_error)?);
             }
 
+            fetches
+        };
+        session.recycle();
+        let folder = folder.to_owned();
+        tokio::task::spawn_blocking(move || {
             let mut headers = Vec::with_capacity(fetches.len());
             for fetch in &fetches {
                 let uid = match fetch.uid {
@@ -419,10 +424,7 @@ impl ImapClient for RealImapClient {
                 });
             }
             headers
-        };
-
-        session.recycle();
-        Ok(headers)
+        }).await.map_err(|e| ImapError::ProtocolError(format!("Header parsing task failed: {e}")))
     }
 
     async fn fetch_body(

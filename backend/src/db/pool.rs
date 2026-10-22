@@ -3,6 +3,35 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+/// Owned database context for short blocking jobs. Never hold SQLite on a Tokio worker.
+#[derive(Clone)]
+pub(crate) struct UserDb {
+    data_dir: String,
+    user_hash: String,
+}
+
+impl UserDb {
+    pub(crate) fn new(data_dir: &str, user_hash: &str) -> Self {
+        Self {
+            data_dir: data_dir.into(),
+            user_hash: user_hash.into(),
+        }
+    }
+
+    pub(crate) async fn run<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let context = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = open_user_db(&context.data_dir, &context.user_hash)?;
+            work(&conn)
+        })
+        .await
+        .map_err(|e| format!("Database task failed: {e}"))?
+    }
+}
+
 /// All migration scripts in order. Each entry is (version, sql).
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../../migrations/V001__initial_schema.sql")),
@@ -151,5 +180,30 @@ mod tests {
         assert_eq!(fk, 1);
 
         drop(conn);
+    }
+}
+
+#[cfg(test)]
+mod async_tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn database_jobs_leave_runtime_free() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = UserDb::new(directory.path().to_str().unwrap(), "test");
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let job = tokio::spawn(async move {
+            database.run(move |_| {
+                started.send(()).unwrap();
+                wait.recv_timeout(std::time::Duration::from_secs(2))
+                    .map_err(|e| format!("runtime could not release database job: {e}"))?;
+                Ok(())
+            }).await
+        });
+        ready.await.unwrap();
+        // On a current-thread runtime, an inline DB job prevents this send.
+        release.send(()).unwrap();
+        job.await.unwrap().unwrap();
     }
 }
