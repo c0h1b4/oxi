@@ -933,11 +933,11 @@ pub async fn download_attachment(
         format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""))
     };
 
-    Ok(Response::builder()
+    Response::builder()
         .header("content-type", &content_type)
         .header("content-disposition", &disposition)
         .body(axum::body::Body::from(attachment.data))
-        .map_err(|e| AppError::InternalError(format!("Failed to build response: {e}")))?)
+        .map_err(|e| AppError::InternalError(format!("Failed to build response: {e}")))
 }
 
 fn preview_content_type(content_type: &str, filename: Option<&str>, data: &[u8]) -> String {
