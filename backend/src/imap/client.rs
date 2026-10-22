@@ -967,8 +967,8 @@ impl ImapClient for RealImapClient {
             .run_command("GETQUOTAROOT INBOX")
             .await
             .map_err(map_imap_error)?;
-        // Only a matching tagged OK makes this session reusable. Unsupported
-        // QUOTA still returns None, but NO/BAD, EOF, IO errors and timeouts discard it.
+        // Matching tagged OK/NO/BAD completes the command. Transport failures
+        // and incomplete replies still discard the session.
         let (quota, reusable) = tokio::time::timeout(std::time::Duration::from_secs(15), async {
             let mut quota = None;
             while let Some(response) = session.read_response().await {
@@ -990,7 +990,7 @@ impl ImapClient for RealImapClient {
                     Response::Done { tag, status, .. } if *tag == req_id => {
                         return match status {
                             Status::Ok => Ok((quota, true)),
-                            Status::No | Status::Bad => Ok((None, false)),
+                            Status::No | Status::Bad => Ok((None, true)),
                             _ => Err(ImapError::ProtocolError(
                                 "unexpected GETQUOTAROOT status".into(),
                             )),

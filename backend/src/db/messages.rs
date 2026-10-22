@@ -699,6 +699,19 @@ mod tests {
     }
 
     #[test]
+    fn cached_storage_tracks_all_folders_and_deletions() {
+        let conn = open_test_db();
+        assert_eq!(cached_storage_bytes(&conn).unwrap(), None);
+        ensure_folder(&conn, "INBOX");
+        ensure_folder(&conn, "Archive");
+        insert_sample(&conn, "INBOX", 1, "2024-01-01");
+        insert_sample(&conn, "Archive", 1, "2024-01-01");
+        assert_eq!(cached_storage_bytes(&conn).unwrap(), Some(2048));
+        delete_message(&conn, "INBOX", 1).unwrap();
+        assert_eq!(cached_storage_bytes(&conn).unwrap(), Some(1024));
+    }
+
+    #[test]
     fn test_parse_date_to_epoch() {
         let e1 = parse_date_to_epoch("2024-01-01T10:00:00Z");
         let e2 = parse_date_to_epoch("2024-01-02T10:00:00Z");
@@ -974,4 +987,11 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].uid, 1);
     }
+}
+
+/// Cached storage is an estimate while folders are still being synchronized.
+/// None distinguishes an empty cache from cached zero-byte messages.
+pub fn cached_storage_bytes(conn: &Connection) -> Result<Option<u64>, String> {
+    conn.query_row("SELECT SUM(size) FROM messages", [], |row| row.get(0))
+        .map_err(|e| e.to_string())
 }

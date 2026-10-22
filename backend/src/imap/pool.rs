@@ -498,7 +498,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejected_or_interrupted_quota_discards_session() {
+    async fn rejected_quota_reuses_but_interrupted_quota_discards_session() {
         for reply in [
             "{tag} NO unsupported\r\n",
             "{tag} BAD unsupported\r\n",
@@ -514,7 +514,10 @@ mod tests {
                 assert!(result.is_err());
             }
             client.list_folders(&creds).await.unwrap();
-            assert_eq!(logins.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                logins.load(Ordering::SeqCst),
+                if reply.contains("unsupported") { 1 } else { 2 }
+            );
             task.abort();
         }
     }
