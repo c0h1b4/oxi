@@ -250,6 +250,14 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_folder_name_control_chars() {
+        for control in ['\0', '\t', '\r', '\n', '\u{7f}', '\u{85}'] {
+            assert!(validate_folder_name(&format!("test{control}folder")).is_err());
+        }
+        assert!(validate_folder_name("Projetos/日本語").is_ok());
+    }
+
+    #[test]
     fn test_validate_folder_name_invalid_chars() {
         assert!(validate_folder_name("test{folder").is_err());
         assert!(validate_folder_name("test}folder").is_err());
