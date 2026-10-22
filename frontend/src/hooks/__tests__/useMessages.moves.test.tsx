@@ -1,11 +1,12 @@
 import { it, expect, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery, focusManager, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { hideMovedMessages, useMessages, useMoveMessage, useUpdateFlags } from "../useMessages";
 import { apiGet, apiPost, apiPatch } from "@/lib/api";
 import type { MessageHeader } from "@/types/message";
 import { useUiStore } from "@/stores/useUiStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 
 vi.mock("@/lib/api", () => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDelete: vi.fn() }));
 vi.mock("@/lib/ws-context", () => ({ useWsStatus: () => ({ status: "connected" }) }));
@@ -226,4 +227,125 @@ it("queues rapid Junk clicks locally, deduplicates, and continues FIFO after a f
       { from_folder: "INBOX", to_folder: "Junk", uid: 8 },
     ]);
   } finally { unmount(); client.clear(); useUiStore.setState({ selectedMessageUid: null }); }
+});
+
+it("does not remove a new account's same UID when an old move finishes reconciliation", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const refresh = deferred<unknown>();
+  const page = (subject: string) => ({ pages: [{ messages: [{ uid: 7, folder: "INBOX", subject }], page: 0, per_page: 50, total_count: 1 }], pageParams: [0] });
+  const previousAccount = useAuthStore.getState().activeAccountId;
+  useAuthStore.setState({ activeAccountId: "account-a" });
+  useUiStore.setState({ activeFolder: "INBOX", selectedMessageUid: null });
+  client.setQueryData(["messages", "INBOX"], page("Account A"));
+  client.setQueryData(["folders"], {});
+  vi.mocked(apiPost).mockReset().mockResolvedValue({});
+  vi.mocked(apiGet).mockReset().mockImplementation(() => refresh.promise);
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => ({
+    move: useMoveMessage(),
+    folders: useQuery({ queryKey: ["folders"], queryFn: () => apiGet("/folders") }),
+  }), { wrapper });
+  try {
+    act(() => result.current.move.mutate({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 }));
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(1));
+    act(() => {
+      useAuthStore.setState({ activeAccountId: "account-b" });
+      client.clear();
+      client.setQueryData(["messages", "INBOX"], page("Account B"));
+    });
+    await waitFor(() => expect(result.current.move.isSuccess).toBe(true));
+    expect(client.getQueryData(["messages", "INBOX"])).toEqual(page("Account B"));
+  } finally {
+    unmount(); client.clear(); refresh.resolve({});
+    useAuthStore.setState({ activeAccountId: previousAccount });
+  }
+});
+
+it.each([false, true])("rejects cleared queued promises even offline/unfocused (%s)", async (offline) => {
+  const client = new QueryClient();
+  const first = deferred<unknown>();
+  const previousAccount = useAuthStore.getState().activeAccountId;
+  useAuthStore.setState({ activeAccountId: "account-a" });
+  useUiStore.setState({ selectedMessageUid: null });
+  vi.mocked(apiPost).mockReset().mockImplementationOnce(() => first.promise).mockResolvedValue({});
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => useMoveMessage({ queued: true }), { wrapper });
+  let firstResult!: Promise<unknown>;
+  let queuedResult!: Promise<unknown>;
+  try {
+    act(() => {
+      firstResult = result.current.mutateAsync({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 });
+      queuedResult = result.current.mutateAsync({ fromFolder: "INBOX", toFolder: "Junk", uid: 8 });
+    });
+    const queuedSettled = queuedResult.then(() => "unexpected success", error => error.message);
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    const queuedMutation = client.getMutationCache().getAll().find(move => (move.state.variables as { uid: number }).uid === 8)!;
+    if (offline) { focusManager.setFocused(false); onlineManager.setOnline(false); }
+    act(() => { useAuthStore.setState({ activeAccountId: "account-b" }); client.clear(); });
+    expect(await queuedSettled).toBe("Move cancelled because the account changed");
+    expect(queuedMutation.state.status).toBe("error");
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    // A new account can use the queue immediately, without the old requests.
+    await act(async () => { await result.current.mutateAsync({ fromFolder: "INBOX", toFolder: "Junk", uid: 9 }); });
+    expect(apiPost).toHaveBeenCalledTimes(2);
+    await act(async () => { first.resolve({}); await firstResult; });
+    expect(apiPost).toHaveBeenCalledTimes(2);
+  } finally {
+    focusManager.setFocused(true); onlineManager.setOnline(true);
+    first.resolve({}); unmount(); client.clear();
+    useAuthStore.setState({ activeAccountId: previousAccount });
+  }
+});
+
+it.each([false, true])("does not roll back old rows after switching accounts (return to original: %s)", async (switchBack) => {
+  const client = new QueryClient();
+  const move = deferred<unknown>();
+  const previousAccount = useAuthStore.getState().activeAccountId;
+  const source = { pages: [{ messages: [{ uid: 7, folder: "INBOX" }, { uid: 8, folder: "INBOX" }], page: 0, per_page: 50, total_count: 2 }], pageParams: [0] };
+  useAuthStore.setState({ activeAccountId: "account-a" });
+  useUiStore.setState({ activeFolder: "INBOX", selectedMessageUid: 7 });
+  client.setQueryData(["messages", "INBOX"], source);
+  vi.mocked(apiPost).mockReset().mockImplementation(() => move.promise);
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => useMoveMessage(), { wrapper });
+  try {
+    act(() => result.current.mutate({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    act(() => {
+      useAuthStore.setState({ activeAccountId: "account-b" }); client.clear();
+      if (switchBack) { useAuthStore.setState({ activeAccountId: "account-a" }); client.clear(); }
+      client.setQueryData(["messages", "INBOX"], { ...source, pages: [{ ...source.pages[0], messages: [{ uid: 8, folder: "INBOX" }], total_count: 1 }] });
+      useUiStore.setState({ selectedMessageUid: 8 });
+    });
+    const newCache = client.getQueryData(["messages", "INBOX"]);
+    act(() => move.reject(new Error("Old account move failed")));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(client.getQueryData(["messages", "INBOX"])).toBe(newCache);
+    expect(useUiStore.getState().selectedMessageUid).toBe(8);
+  } finally {
+    unmount(); client.clear(); useAuthStore.setState({ activeAccountId: previousAccount });
+    useUiStore.setState({ selectedMessageUid: null });
+  }
+});
+
+it("does not run a cleared move's delayed search refresh after returning to the same account", async () => {
+  const client = new QueryClient();
+  const previousAccount = useAuthStore.getState().activeAccountId;
+  useAuthStore.setState({ activeAccountId: "account-a" });
+  useUiStore.setState({ selectedMessageUid: null });
+  vi.mocked(apiPost).mockReset().mockResolvedValue({});
+  const invalidations = vi.spyOn(client, "invalidateQueries");
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => useMoveMessage(), { wrapper });
+  try {
+    await act(async () => {
+      await result.current.mutateAsync({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 });
+      useAuthStore.setState({ activeAccountId: "account-b" }); client.clear();
+      useAuthStore.setState({ activeAccountId: "account-a" }); client.clear();
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(invalidations).not.toHaveBeenCalledWith({ queryKey: ["search"] });
+  } finally {
+    unmount(); client.clear(); useAuthStore.setState({ activeAccountId: previousAccount });
+  }
 });

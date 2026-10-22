@@ -261,7 +261,9 @@ vi.mock("@/components/ui/input", () => ({
 }));
 
 vi.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  Label: ({ children, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) => (
+    <label {...props}>{children}</label>
+  ),
 }));
 
 import { ComposeDialog } from "../ComposeDialog";
@@ -349,6 +351,30 @@ describe("Modal and action motion transitions", () => {
     mockUiState.effectiveAnimationMode = "off";
     rerender(<AddAccountModal open onClose={vi.fn()} />);
     expect(screen.queryByTestId("add-account-overlay-transition")).toBeNull();
+  });
+
+  it("resets account credentials and server settings when reopened", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    const onClose = vi.fn();
+    const { rerender } = render(<AddAccountModal open onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByLabelText("Keep me logged in"));
+    fireEvent.click(screen.getByRole("button", { name: /Server configuration/ }));
+    fireEvent.change(screen.getAllByLabelText("Host")[0], { target: { value: "imap.example.com" } });
+
+    rerender(<AddAccountModal open={false} onClose={onClose} />);
+    rerender(<AddAccountModal open onClose={onClose} />);
+
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Keep me logged in") as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByText("IMAP Settings")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Server configuration/ }));
+    expect((screen.getAllByLabelText("Host")[0] as HTMLInputElement).value).toBe("");
+    expect((screen.getAllByLabelText("Port")[0] as HTMLInputElement).value).toBe("993");
+    expect((screen.getAllByLabelText("Port")[1] as HTMLInputElement).value).toBe("587");
   });
 
   it("applies CreateFolderDialog transitions and keeps static off-mode path", () => {
