@@ -968,7 +968,7 @@ mod preview_tests {
 
     #[test]
     fn rejects_unsafe_flags_and_enforces_length_limit() {
-        for flag in ["", "\\", "two flags", "tag\r\nSTORE", "tag\0", "tag\t", "(tag)", "tag{1}", "tag\\Seen", "日本語"] {
+        for flag in ["", "\\", "two flags", "tag\r\nSTORE", "tag\0", "tag\t", "(tag)", "tag{1}", "tag\\Seen", "étiquette"] {
             assert!(!is_valid_flag(flag), "accepted {flag:?}");
         }
         assert!(!is_valid_flag(&"a".repeat(65)));

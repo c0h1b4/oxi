@@ -254,7 +254,7 @@ mod tests {
         for control in ['\0', '\t', '\r', '\n', '\u{7f}', '\u{85}'] {
             assert!(validate_folder_name(&format!("test{control}folder")).is_err());
         }
-        assert!(validate_folder_name("Projetos/日本語").is_ok());
+        assert!(validate_folder_name("Projects/café").is_ok());
     }
 
     #[test]
