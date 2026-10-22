@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { URL } from "node:url";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "@/stores/useAuthStore";
 import {
@@ -16,7 +16,7 @@ import { toast } from "sonner";
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 const expiredAccountResponse = JSON.parse(readFileSync(
-  new URL("../../../../backend/tests/fixtures/account-session-expired.json", import.meta.url),
+  resolve(process.cwd(), "../backend/tests/fixtures/account-session-expired.json"),
   "utf8",
 ));
 
