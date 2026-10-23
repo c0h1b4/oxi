@@ -127,6 +127,7 @@ fn extract_session_cookies(headers: &axum::http::HeaderMap) -> Vec<(String, Stri
 pub async fn login(
     Extension(store): Extension<Arc<SessionStore>>,
     Extension(config): Extension<Arc<AppConfig>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Response {
     if body.email.trim().is_empty() || body.password.trim().is_empty() {
@@ -181,7 +182,7 @@ pub async fn login(
 
     match result {
         AuthResult::Success => {
-            let provided_browser_id = body.browser_id.clone();
+            let provided_browser_id = body.browser_id.clone().or_else(|| extract_browser_id(&headers));
             
             if let Some(ref browser_id) = provided_browser_id {
                 let existing_accounts = store.get_browser_accounts(browser_id);
@@ -257,8 +258,7 @@ pub async fn login(
                 config.session_timeout_hours
             };
 
-            let provided_browser_id = body.browser_id.clone();
-            let browser_id = body.browser_id.unwrap_or_else(|| store.create_browser());
+            let browser_id = provided_browser_id.clone().unwrap_or_else(|| store.create_browser());
             tracing::debug!(
                 email = %body.email,
                 provided_browser_id = ?provided_browser_id,
@@ -644,6 +644,85 @@ mod tests {
             cors_origin: cors_origin.map(str::to_string),
             trusted_proxies: None,
         }
+    }
+
+    #[tokio::test]
+    async fn login_reuses_scoped_browser_cookie_when_body_omits_browser_id() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let imap = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = BufReader::new(stream);
+                stream.get_mut().write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+                let mut command = String::new();
+                stream.read_line(&mut command).await.unwrap();
+                let tag = command.split_whitespace().next().unwrap();
+                let response = format!("{tag} OK LOGIN completed\r\n");
+                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+                command.clear();
+                stream.read_line(&mut command).await.unwrap();
+                let tag = command.split_whitespace().next().unwrap();
+                let response = format!("* BYE logging out\r\n{tag} OK LOGOUT completed\r\n");
+                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut config = test_config("development", Some("http://localhost:3000"));
+        config.base_path = Some("/oxi".to_string());
+        config.data_dir = data_dir.path().to_str().unwrap().to_string();
+        let config = Arc::new(config);
+        let store = Arc::new(SessionStore::new(std::time::Duration::from_secs(3600)));
+        let request = |email: &str| LoginRequest {
+            email: email.to_string(),
+            password: "password".to_string(),
+            remember: false,
+            imap_host: Some("127.0.0.1".to_string()),
+            imap_port: Some(port),
+            imap_tls: false,
+            smtp_host: Some("127.0.0.1".to_string()),
+            smtp_port: None,
+            smtp_tls: false,
+            browser_id: None,
+        };
+
+        let first = login(
+            Extension(store.clone()), Extension(config.clone()),
+            axum::http::HeaderMap::new(), Json(request("first@example.com")),
+        ).await;
+        assert_eq!(first.status(), StatusCode::CREATED);
+        let cookie = first.headers().get_all("set-cookie").iter()
+            .map(|value| value.to_str().unwrap())
+            .find(|value| value.starts_with("oxi_browser="))
+            .unwrap();
+        assert!(cookie.contains("Path=/oxi;"));
+        let cookie_pair = cookie.split(';').next().unwrap();
+        let browser_id = cookie_pair.strip_prefix("oxi_browser=").unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("cookie", cookie_pair.parse().unwrap());
+
+        let second = login(
+            Extension(store.clone()), Extension(config.clone()),
+            headers.clone(), Json(request("second@example.com")),
+        ).await;
+        assert_eq!(second.status(), StatusCode::CREATED);
+        assert!(second.headers().get_all("set-cookie").iter()
+            .any(|value| value.to_str().unwrap().starts_with(&format!("{cookie_pair};"))));
+        let accounts = store.get_browser_accounts(browser_id);
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().any(|account| account.email == "first@example.com"));
+        assert!(accounts.iter().any(|account| account.email == "second@example.com"));
+
+        let duplicate = login(
+            Extension(store.clone()), Extension(config),
+            headers, Json(request("second@example.com")),
+        ).await;
+        assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+        assert_eq!(store.get_browser_accounts(browser_id).len(), 2);
+        imap.await.unwrap();
     }
 
     #[test]

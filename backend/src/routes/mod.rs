@@ -85,17 +85,17 @@ impl ProxyAwareIpExtractor {
             .any(|trusted| trusted.contains(ip))
     }
 
-    fn forwarded_client_ip(&self, forwarded: &str, peer_ip: IpAddr) -> Option<IpAddr> {
+    fn forwarded_client_ip(&self, headers: &axum::http::HeaderMap, peer_ip: IpAddr) -> Option<IpAddr> {
         let mut current_hop = peer_ip;
 
-        for entry in forwarded.split(',').rev() {
-            let forwarded_ip = entry.trim().parse::<IpAddr>().ok()?;
+        for value in headers.get_all("x-forwarded-for").iter().rev() {
+            for entry in value.to_str().ok()?.split(',').rev() {
+                if !self.is_trusted(&current_hop) {
+                    return Some(current_hop);
+                }
 
-            if !self.is_trusted(&current_hop) {
-                return Some(current_hop);
+                current_hop = entry.trim().parse::<IpAddr>().ok()?;
             }
-
-            current_hop = forwarded_ip;
         }
 
         Some(current_hop)
@@ -113,8 +113,7 @@ impl KeyExtractor for ProxyAwareIpExtractor {
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
         if self.is_trusted(&peer_ip)
-            && let Some(forwarded) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
-            && let Some(client_ip) = self.forwarded_client_ip(forwarded, peer_ip)
+            && let Some(client_ip) = self.forwarded_client_ip(req.headers(), peer_ip)
         {
             return Ok(client_ip);
         }

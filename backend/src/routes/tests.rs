@@ -206,6 +206,19 @@
     }
 
     #[test]
+    fn repeated_forwarded_headers_use_the_full_proxy_chain() {
+        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+        let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+        request.extensions_mut().insert(ConnectInfo::<SocketAddr>(
+            "10.0.0.10:443".parse().unwrap(),
+        ));
+        request.headers_mut().append("x-forwarded-for", HeaderValue::from_static("203.0.113.99"));
+        request.headers_mut().append("x-forwarded-for", HeaderValue::from_static("198.51.100.20, 10.1.1.1"));
+
+        assert_eq!(extractor.extract(&request).unwrap(), "198.51.100.20".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
     fn untrusted_peer_ignores_spoofed_forwarded_header() {
         let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
 
