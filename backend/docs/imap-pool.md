@@ -17,6 +17,10 @@ Idle sessions expire after two minutes, checked on checkout and by a sweep every
 IMAP CLOSE, which would expunge deleted messages. Selected-mailbox operations
 always SELECT their own folder; STATUS and LIST do not rely on prior selection.
 
+Background header sync discovers existing UIDs with one UID/flag fetch, filters
+them to the requested range, and fetches headers in sets of at most 250 UIDs.
+Large gaps left by deleted messages do not create empty FETCH batches.
+
 Pooled paths: LIST, SELECT status, extended STATUS, headers, body, UID/flag
 reconciliation, CONDSTORE changed flags, quota and folder-size reads. The public
 trait and HTTP API remain unchanged. Dedicated realtime IDLE sessions still use `connect` directly.

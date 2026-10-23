@@ -14,6 +14,7 @@ pub struct MockImapClient {
     folder_status_ext: Mutex<Option<FolderStatusExtended>>,
     should_fail: Mutex<Option<ImapError>>,
     pub appended: Mutex<Vec<(String, Vec<u8>)>>,
+    pub header_requests: Mutex<Vec<(String, String)>>,
 }
 
 impl MockImapClient {
@@ -27,6 +28,7 @@ impl MockImapClient {
             folder_status_ext: Mutex::new(None),
             should_fail: Mutex::new(None),
             appended: Mutex::new(Vec::new()),
+            header_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -124,9 +126,13 @@ impl ImapClient for MockImapClient {
     async fn fetch_headers(
         &self,
         _creds: &ImapCredentials,
-        _folder: &str,
-        _uid_range: &str,
+        folder: &str,
+        uid_range: &str,
     ) -> Result<Vec<ImapMessageHeader>, ImapError> {
+        self.header_requests
+            .lock()
+            .unwrap()
+            .push((folder.to_owned(), uid_range.to_owned()));
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }

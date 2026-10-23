@@ -411,11 +411,15 @@ fn upsert_and_index_headers(
     Ok(())
 }
 
-/// Bounded UID intervals, including sparse mailboxes and the u32 boundary.
-fn header_chunks(start: u32, end: u32) -> impl Iterator<Item = (u32, u32)> {
-    (u64::from(start)..=u64::from(end))
-        .step_by(250)
-        .map(move |start| (start as u32, (start + 249).min(u64::from(end)) as u32))
+/// Bound each FETCH by existing messages, not by the size of gaps between UIDs.
+fn header_chunks(uids: &[u32]) -> impl Iterator<Item = String> + '_ {
+    uids.chunks(250).map(|chunk| {
+        chunk
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    })
 }
 
 /// Parameters for a background sync task, bundled to avoid too-many-arguments.
@@ -449,9 +453,23 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
     } = params;
     let result: Result<(), String> = crate::imap::pool::background(async {
         let database = db::pool::UserDb::new(&config.data_dir, &user_hash);
-        for (start, end) in header_chunks(uid_range.0, uid_range.1) {
+        let mut uids = if uid_range.0 <= uid_range.1 {
+            imap_client
+                .fetch_uids_and_flags(&creds, &folder)
+                .await
+                .map_err(|e| format!("IMAP error: {e}"))?
+                .into_iter()
+                .map(|(uid, _)| uid)
+                .filter(|uid| (uid_range.0..=uid_range.1).contains(uid))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        uids.sort_unstable();
+        uids.dedup();
+        for uid_set in header_chunks(&uids) {
             let headers = imap_client
-                .fetch_headers(&creds, &folder, &format!("{start}:{end}"))
+                .fetch_headers(&creds, &folder, &uid_set)
                 .await
                 .map_err(|e| format!("IMAP error: {e}"))?;
             let name = folder.clone();
@@ -1048,18 +1066,99 @@ pub async fn delete_message_handler(
 #[cfg(test)]
 mod sync_tests {
     use super::*;
+    use crate::imap::client::mock::MockImapClient;
 
     #[test]
-    fn chunks_bound_bulk_fetch_without_gaps_or_overflow() {
-        let chunks: Vec<_> = header_chunks(1, 2396).collect();
-        assert_eq!(chunks.len(), 10);
-        assert_eq!(chunks[0], (1, 250));
-        assert_eq!(chunks[9], (2251, 2396));
-        for pair in chunks.windows(2) {
-            assert_eq!(pair[0].1 + 1, pair[1].0);
-        }
-        assert_eq!(header_chunks(4, 3).count(), 0);
-        assert_eq!(header_chunks(u32::MAX - 1, u32::MAX).collect::<Vec<_>>(),
-            vec![(u32::MAX - 1, u32::MAX)]);
+    fn chunks_bound_existing_messages_even_with_sparse_uids() {
+        assert_eq!(header_chunks(&[]).count(), 0);
+        let sparse = [1, 10_000_000, u32::MAX];
+        assert_eq!(
+            header_chunks(&sparse).collect::<Vec<_>>(),
+            vec!["1,10000000,4294967295"]
+        );
+
+        let uids: Vec<_> = (1..=501).map(|uid| uid * 1_000_000).collect();
+        let chunks: Vec<_> = header_chunks(&uids).collect();
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].split(',').count(), 250);
+        assert_eq!(chunks[1].split(',').count(), 250);
+        assert_eq!(chunks[2].split(',').count(), 1);
+        let fetched: Vec<u32> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.split(',').map(|uid| uid.parse().unwrap()))
+            .collect();
+        assert_eq!(fetched, uids);
+    }
+
+    #[tokio::test]
+    async fn sparse_background_sync_fetches_existing_uids_in_one_batch() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = data_dir.path().to_str().unwrap();
+        let user_hash = "sparse-sync";
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 1, 0).unwrap();
+        drop(conn);
+        let headers = [1, 9_999_899, 10_000_000].map(|uid| crate::imap::types::ImapMessageHeader {
+            uid,
+            subject: Some(format!("Message {uid}")),
+            from: Vec::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            date: None,
+            flags: Vec::new(),
+            has_attachments: false,
+            size: 42,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            reaction: None,
+        });
+        let client = Arc::new(MockImapClient::new().with_headers(headers.to_vec()));
+        let config = Arc::new(AppConfig {
+            data_dir: path.to_owned(),
+            ..serde_json::from_str::<AppConfig>("{}").unwrap()
+        });
+        let event_bus = Arc::new(EventBus::new());
+        let mut events = event_bus.subscribe(user_hash).await;
+
+        sync_remaining_headers(BackgroundSyncParams {
+            creds: ImapCredentials {
+                host: "localhost".into(),
+                port: 143,
+                tls: false,
+                email: "test@example.com".into(),
+                password: "test".into(),
+            },
+            folder: "INBOX".into(),
+            imap_client: client.clone(),
+            config,
+            user_hash: user_hash.into(),
+            search_engine: Arc::new(SearchEngine::new(data_dir.path().to_path_buf())),
+            event_bus,
+            uid_range: (1, 9_999_900),
+            uid_validity: 1,
+            exists: 3,
+        })
+        .await;
+
+        assert_eq!(
+            *client.header_requests.lock().unwrap(),
+            vec![("INBOX".into(), "1,9999899".into())]
+        );
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            MailEvent::FolderUpdated
+        ));
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 1)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 9_999_899)
+                .unwrap()
+                .is_some()
+        );
     }
 }
