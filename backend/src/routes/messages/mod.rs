@@ -1091,6 +1091,64 @@ mod sync_tests {
     }
 
     #[tokio::test]
+    async fn empty_background_sync_records_completion() {
+        // Both an exhausted range and an empty server listing are successful syncs.
+        for uid_range in [(1, 0), (1, 100)] {
+            let data_dir = tempfile::tempdir().unwrap();
+            let path = data_dir.path().to_str().unwrap();
+            let user_hash = "empty-sync";
+            let conn = db::pool::open_user_db(path, user_hash).unwrap();
+            db::folders::upsert_folder(&conn, "Sent", None, None, "", true, 99, 7, 1, 0)
+                .unwrap();
+            db::folders::invalidate_folder_freshness(&conn, "Sent").unwrap();
+            assert!(!db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
+            drop(conn);
+
+            let client = Arc::new(MockImapClient::new());
+            let config = Arc::new(AppConfig {
+                data_dir: path.to_owned(),
+                ..serde_json::from_str::<AppConfig>("{}").unwrap()
+            });
+            let event_bus = Arc::new(EventBus::new());
+            let mut events = event_bus.subscribe(user_hash).await;
+
+            sync_remaining_headers(BackgroundSyncParams {
+                creds: ImapCredentials {
+                    host: "localhost".into(),
+                    port: 143,
+                    tls: false,
+                    email: "test@example.com".into(),
+                    password: "test".into(),
+                },
+                folder: "Sent".into(),
+                imap_client: client.clone(),
+                config,
+                user_hash: user_hash.into(),
+                search_engine: Arc::new(SearchEngine::new(data_dir.path().to_path_buf())),
+                event_bus,
+                uid_range,
+                uid_validity: 42,
+                exists: 0,
+            })
+            .await;
+
+            let conn = db::pool::open_user_db(path, user_hash).unwrap();
+            let folder = db::folders::get_folder(&conn, "Sent").unwrap().unwrap();
+            assert_eq!(folder.uid_validity, 42);
+            assert_eq!(folder.total_count, 0);
+            assert_eq!(folder.unread_count, 0);
+            assert!(db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
+            assert!(!db::folders::is_folder_messages_invalidated(&conn, "Sent").unwrap());
+            assert!(client.header_requests.lock().unwrap().is_empty());
+            assert!(matches!(
+                events.try_recv().unwrap(),
+                MailEvent::FolderUpdated
+            ));
+            assert!(events.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn sparse_background_sync_fetches_existing_uids_in_one_batch() {
         let data_dir = tempfile::tempdir().unwrap();
         let path = data_dir.path().to_str().unwrap();

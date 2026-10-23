@@ -1583,11 +1583,18 @@
         let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
         let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+        let conn = crate::db::pool::open_user_db(
+            data_dir.path().to_str().unwrap(), &user_hash,
+        ).unwrap();
+        for folder in ["Sent", "INBOX"] {
+            crate::db::folders::insert_folder_if_new(&conn, folder, None, "").unwrap();
+            crate::db::folders::update_folder_status(&conn, folder, 1, 0).unwrap();
+            assert!(crate::db::folders::is_folder_fresh(&conn, folder, 30).unwrap());
+        }
 
         let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
-        let mock_imap: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
-        let app = create_router(config, store, mock_imap, mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+        let mock_imap = Arc::new(MockImapClient::new());
+        let app = create_router(config, store, mock_imap.clone(), mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
 
         let mut req = Request::builder()
             .method("POST")
@@ -1610,6 +1617,62 @@
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "sent");
         assert!(json["message_id"].as_str().is_some());
+        let appended = mock_imap.appended.lock().unwrap();
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].0, "Sent");
+        assert!(!appended[0].1.is_empty());
+        assert!(crate::db::folders::is_folder_messages_invalidated(&conn, "Sent").unwrap());
+        assert!(!crate::db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
+        assert!(crate::db::folders::is_folder_fresh(&conn, "INBOX", 30).unwrap());
+    }
+
+    #[tokio::test]
+    async fn send_succeeds_when_sent_append_fails() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_smtp(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        let conn = crate::db::pool::open_user_db(
+            data_dir.path().to_str().unwrap(), &user_hash,
+        ).unwrap();
+        crate::db::folders::insert_folder_if_new(&conn, "Sent", None, "").unwrap();
+        crate::db::folders::update_folder_status(&conn, "Sent", 1, 0).unwrap();
+
+        let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
+        let mock_imap = Arc::new(MockImapClient::new().with_error(
+            ImapError::ProtocolError("APPEND rejected".to_string()),
+        ));
+        let app = create_router(config, store, mock_imap.clone(), mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/messages/send")
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app
+            .oneshot(req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
+            )).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "sent");
+        assert!(json["message_id"].as_str().is_some());
+        assert!(mock_imap.appended.lock().unwrap().is_empty());
+        assert!(crate::db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
     }
 
     #[tokio::test]

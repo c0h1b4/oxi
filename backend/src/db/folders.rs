@@ -169,8 +169,9 @@ pub fn update_folder_status(
     Ok(())
 }
 
-/// Update folder sync metadata after a CONDSTORE or STATUS-based sync.
-/// Sets highest_modseq, total_count, uid_validity, and touches messages_updated_at.
+/// Update server-side folder metadata after a CONDSTORE or STATUS check.
+/// Does not touch `messages_updated_at`: metadata alone does not mean the
+/// local message cache has been synchronized.
 pub fn update_folder_sync_status(
     conn: &Connection,
     name: &str,
@@ -179,8 +180,7 @@ pub fn update_folder_sync_status(
     highest_modseq: u64,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE folders SET uid_validity = ?1, total_count = ?2, highest_modseq = ?3,
-                messages_updated_at = datetime('now')
+        "UPDATE folders SET uid_validity = ?1, total_count = ?2, highest_modseq = ?3
          WHERE name = ?4",
         params![uid_validity, total_count, highest_modseq as i64, name],
     )
@@ -387,6 +387,45 @@ mod tests {
         assert_eq!(folders[0].total_count, 99);
         assert_eq!(folders[0].unread_count, 33);
         assert_eq!(folders[0].highest_modseq, 75);
+    }
+
+    #[test]
+    fn sync_metadata_does_not_revalidate_invalidated_messages() {
+        let conn = open_test_db();
+        insert_folder_if_new(&conn, "Sent", None, "\\Sent").unwrap();
+        update_folder_status(&conn, "Sent", 1, 0).unwrap();
+        assert!(is_folder_fresh(&conn, "Sent", 30).unwrap());
+
+        invalidate_folder_freshness(&conn, "Sent").unwrap();
+        update_folder_sync_status(&conn, "Sent", 2, 1, 42).unwrap();
+
+        assert!(is_folder_messages_invalidated(&conn, "Sent").unwrap());
+        assert!(!is_folder_fresh(&conn, "Sent", 30).unwrap());
+        assert_eq!(crate::db::messages::count_messages(&conn, "Sent").unwrap(), 0);
+        let folder = get_folder(&conn, "Sent").unwrap().unwrap();
+        assert_eq!(folder.uid_validity, 2);
+        assert_eq!(folder.total_count, 1);
+        assert_eq!(folder.highest_modseq, 42);
+    }
+
+    #[test]
+    fn sync_metadata_preserves_message_sync_timestamp() {
+        let conn = open_test_db();
+        insert_folder_if_new(&conn, "Sent", None, "\\Sent").unwrap();
+        conn.execute(
+            "UPDATE folders SET messages_updated_at = '2000-01-01 00:00:00' WHERE name = 'Sent'",
+            [],
+        ).unwrap();
+
+        update_folder_sync_status(&conn, "Sent", 1, 5, 42).unwrap();
+
+        let timestamp: String = conn.query_row(
+            "SELECT messages_updated_at FROM folders WHERE name = 'Sent'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(timestamp, "2000-01-01 00:00:00");
+        assert!(!is_folder_fresh(&conn, "Sent", 30).unwrap());
     }
 
     #[test]
