@@ -137,12 +137,25 @@ pub async fn send_message_handler(
         };
 
         // Build RFC822 bytes for IMAP APPEND using lettre's Message builder.
-        if let Ok(rfc822_bytes) = build_rfc822_bytes(&message, &message_id)
-            && let Err(e) = imap_client
+        if let Ok(rfc822_bytes) = build_rfc822_bytes(&message, &message_id) {
+            match imap_client
                 .append_message(&imap_creds, "Sent", &rfc822_bytes, &["\\Seen"])
                 .await
-        {
-            tracing::warn!(error = %e, "Failed to append sent message to IMAP Sent folder");
+            {
+                Ok(()) => {
+                    // APPEND changed the server, not the local message cache.
+                    let database = db::pool::UserDb::new(&config.data_dir, &session.user_hash);
+                    if let Err(e) = database
+                        .run(|conn| db::folders::invalidate_folder_freshness(conn, "Sent"))
+                        .await
+                    {
+                        tracing::warn!(error = %e, "Failed to invalidate Sent folder cache after IMAP append");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to append sent message to IMAP Sent folder");
+                }
+            }
         }
     }
 
