@@ -74,6 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -85,6 +90,9 @@ jobs:
 
       - name: Test (unit)
         run: bun run test
+
+      - name: Typecheck
+        run: bun run typecheck
 
       - name: Build (static export)
         run: bun run build

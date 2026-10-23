@@ -20,6 +20,34 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Dependency updates and validation
+
+Use Bun for dependency changes and Node.js 22.22.2+, 24.15.0+, or 26+ for
+Node-based tools (matching the supported engine ranges in `package.json`).
+From this directory, run:
+
+```bash
+bun update --latest
+bun run lint
+bun run test
+bun run typecheck
+bun run build
+```
+
+`@typescript/native` aliases the latest stable TypeScript 7 compiler and provides
+`tsc`. The `typescript` dependency aliases Microsoft's `@typescript/typescript6`
+API package because typescript-eslint still requires the TypeScript 6
+JavaScript API. Keep both aliases until the lint tooling supports TypeScript 7.
+This follows [Microsoft's side-by-side setup](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0).
+
+Commit `package.json`, `bun.lock`, and `.bun.nix` together. From the repository
+root, regenerate the Nix snapshot with the pinned bun2nix input:
+
+```bash
+nix run github:baileyluTCD/bun2nix/c843f477b15f51151f8c6bcc886954699440a6e1 -- \
+  --lock-file frontend/bun.lock --output-file frontend/.bun.nix
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
