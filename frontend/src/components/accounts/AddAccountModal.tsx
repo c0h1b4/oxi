@@ -58,12 +58,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   });
 
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const [wasOpen, setWasOpen] = useState(open);
 
-  // Reset only form fields on reopen, before stale values reach the dialog.
-  // Keep the component mounted so its close animation can finish.
-  const [previousOpen, setPreviousOpen] = useState(open);
-  if (open !== previousOpen) {
-    setPreviousOpen(open);
+  // Reset form fields on reopen while keeping the close animation mounted.
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setEmail("");
       setPassword("");

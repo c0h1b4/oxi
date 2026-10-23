@@ -42,7 +42,6 @@ export function ReadingPane() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
-  const [bodyMode, setBodyMode] = useState<BodyMode>("html");
   const [showHeaders, setShowHeaders] = useState(false);
   const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
@@ -56,6 +55,9 @@ export function ReadingPane() {
   const { data, isLoading, isError, error, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0
+  );
+  const [bodyMode, setBodyMode] = useState<BodyMode>(
+    data && !data.html && data.text ? "plain" : "html"
   );
 
   const updateFlags = useUpdateFlags();
