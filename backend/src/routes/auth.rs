@@ -35,35 +35,47 @@ fn default_tls() -> bool {
     true
 }
 
-fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool) -> String {
+fn same_site_policy(config: &AppConfig) -> &'static str {
+    if config.environment == "development" && config.cors_origin.is_some() {
+        "Lax"
+    } else {
+        "Strict"
+    }
+}
+
+fn cookie_path(config: &AppConfig) -> &str {
+    config.normalized_base_path()
+}
+
+fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}={};{} SameSite=Strict; Path=/; Max-Age={}",
-        BROWSER_COOKIE, browser_id, secure_flag, max_age_secs
+        "{}={};{} SameSite={}; Path={}; Max-Age={}",
+        BROWSER_COOKIE, browser_id, secure_flag, same_site, path, max_age_secs
     )
 }
 
-fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool) -> String {
+fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "oxi_session_{}={};{} HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-        account_id, token, secure_flag, max_age_secs
+        "oxi_session_{}={};{} HttpOnly; SameSite={}; Path={}; Max-Age={}",
+        account_id, token, secure_flag, same_site, path, max_age_secs
     )
 }
 
-fn clearing_browser_cookie(secure: bool) -> String {
+fn clearing_browser_cookie(secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        BROWSER_COOKIE, secure_flag
+        "{}=;{} HttpOnly; SameSite={}; Path={}; Max-Age=0",
+        BROWSER_COOKIE, secure_flag, same_site, path
     )
 }
 
-fn clearing_account_cookie(account_id: &str, secure: bool) -> String {
+fn clearing_account_cookie(account_id: &str, secure: bool, same_site: &str, path: &str) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
-        "oxi_session_{}=;{} HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        account_id, secure_flag
+        "oxi_session_{}=;{} HttpOnly; SameSite={}; Path={}; Max-Age=0",
+        account_id, secure_flag, same_site, path
     )
 }
 
@@ -115,6 +127,7 @@ fn extract_session_cookies(headers: &axum::http::HeaderMap) -> Vec<(String, Stri
 pub async fn login(
     Extension(store): Extension<Arc<SessionStore>>,
     Extension(config): Extension<Arc<AppConfig>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Response {
     if body.email.trim().is_empty() || body.password.trim().is_empty() {
@@ -169,7 +182,7 @@ pub async fn login(
 
     match result {
         AuthResult::Success => {
-            let provided_browser_id = body.browser_id.clone();
+            let provided_browser_id = body.browser_id.clone().or_else(|| extract_browser_id(&headers));
             
             if let Some(ref browser_id) = provided_browser_id {
                 let existing_accounts = store.get_browser_accounts(browser_id);
@@ -245,8 +258,7 @@ pub async fn login(
                 config.session_timeout_hours
             };
 
-            let provided_browser_id = body.browser_id.clone();
-            let browser_id = body.browser_id.unwrap_or_else(|| store.create_browser());
+            let browser_id = provided_browser_id.clone().unwrap_or_else(|| store.create_browser());
             tracing::debug!(
                 email = %body.email,
                 provided_browser_id = ?provided_browser_id,
@@ -269,8 +281,10 @@ pub async fn login(
 
             let max_age = session_hours * 3600;
             let secure = config.environment != "development";
-            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure);
-            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure);
+            let same_site = same_site_policy(&config);
+            let path = cookie_path(&config);
+            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure, same_site, path);
+            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure, same_site, path);
 
             let response = (
                 StatusCode::CREATED,
@@ -346,7 +360,8 @@ pub async fn list_accounts(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let secure = config.environment != "development";
-    
+    let same_site = same_site_policy(&config);
+
     let browser_id = extract_browser_id(&headers);
 
     let Some(browser_id) = browser_id else {
@@ -362,7 +377,7 @@ pub async fn list_accounts(
     let browser_exists = store.browser_exists(&browser_id);
     if !browser_exists {
         tracing::debug!(browser_id = %browser_id, "list_accounts: browser_id not found on server");
-        let clear_browser = clearing_browser_cookie(secure);
+        let clear_browser = clearing_browser_cookie(secure, same_site, cookie_path(&config));
         return (
             StatusCode::OK,
             [
@@ -397,16 +412,16 @@ pub async fn list_accounts(
                 }));
             } else {
                 store.remove_account(&session.account_id);
-                clear_cookies.push(clearing_account_cookie(&session.account_id, secure));
+                clear_cookies.push(clearing_account_cookie(&session.account_id, secure, same_site, cookie_path(&config)));
             }
         } else {
             store.remove_account(&session.account_id);
         }
     }
-    
+
     for account_id in session_map.keys() {
         if !browser_account_ids.contains(account_id) {
-            clear_cookies.push(clearing_account_cookie(account_id, secure));
+            clear_cookies.push(clearing_account_cookie(account_id, secure, same_site, cookie_path(&config)));
         }
     }
 
@@ -415,7 +430,7 @@ pub async fn list_accounts(
             browser_id = %browser_id,
             "list_accounts: no valid accounts found"
         );
-        let clear_browser = clearing_browser_cookie(secure);
+        let clear_browser = clearing_browser_cookie(secure, same_site, cookie_path(&config));
         let body = serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string();
         
         let mut response = axum::response::Response::new(axum::body::Body::from(body));
@@ -508,7 +523,8 @@ pub async fn remove_account(
     store.remove_account(&account_id);
 
     let secure = config.environment != "development";
-    let cookie = clearing_account_cookie(&account_id, secure);
+    let same_site = same_site_policy(&config);
+    let cookie = clearing_account_cookie(&account_id, secure, same_site, cookie_path(&config));
 
     (
         StatusCode::OK,
@@ -534,19 +550,23 @@ pub async fn logout(
 
     let mut cookies_to_clear: Vec<String> = Vec::new();
 
+    let secure = config.environment != "development";
+    let same_site = same_site_policy(&config);
+
     if let Some(ref browser_id) = browser_id {
         let accounts = store.get_browser_accounts(browser_id);
         for account in accounts {
             cookies_to_clear.push(clearing_account_cookie(
                 &account.account_id,
-                config.environment != "development",
+                secure,
+                same_site,
+                cookie_path(&config),
             ));
         }
         store.remove_browser(browser_id);
     }
 
-    let secure = config.environment != "development";
-    cookies_to_clear.push(clearing_browser_cookie(secure));
+    cookies_to_clear.push(clearing_browser_cookie(secure, same_site, cookie_path(&config)));
 
     let response = (
         StatusCode::OK,
@@ -568,6 +588,7 @@ pub async fn logout(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde::Serialize;
 
     #[derive(Serialize)]
@@ -603,5 +624,150 @@ mod tests {
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["status"], "logged_out");
+    }
+
+    fn test_config(environment: &str, cors_origin: Option<&str>) -> AppConfig {
+        AppConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3001,
+            imap_host: None,
+            imap_port: 993,
+            smtp_host: None,
+            smtp_port: 587,
+            tls_enabled: true,
+            data_dir: "/data".to_string(),
+            session_timeout_hours: 24,
+            static_dir: "./static".to_string(),
+            environment: environment.to_string(),
+            base_path: None,
+            serve_static: true,
+            cors_origin: cors_origin.map(str::to_string),
+            trusted_proxies: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn login_reuses_scoped_browser_cookie_when_body_omits_browser_id() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let imap = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = BufReader::new(stream);
+                stream.get_mut().write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+                let mut command = String::new();
+                stream.read_line(&mut command).await.unwrap();
+                let tag = command.split_whitespace().next().unwrap();
+                let response = format!("{tag} OK LOGIN completed\r\n");
+                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+                command.clear();
+                stream.read_line(&mut command).await.unwrap();
+                let tag = command.split_whitespace().next().unwrap();
+                let response = format!("* BYE logging out\r\n{tag} OK LOGOUT completed\r\n");
+                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut config = test_config("development", Some("http://localhost:3000"));
+        config.base_path = Some("/oxi".to_string());
+        config.data_dir = data_dir.path().to_str().unwrap().to_string();
+        let config = Arc::new(config);
+        let store = Arc::new(SessionStore::new(std::time::Duration::from_secs(3600)));
+        let request = |email: &str| LoginRequest {
+            email: email.to_string(),
+            password: "password".to_string(),
+            remember: false,
+            imap_host: Some("127.0.0.1".to_string()),
+            imap_port: Some(port),
+            imap_tls: false,
+            smtp_host: Some("127.0.0.1".to_string()),
+            smtp_port: None,
+            smtp_tls: false,
+            browser_id: None,
+        };
+
+        let first = login(
+            Extension(store.clone()), Extension(config.clone()),
+            axum::http::HeaderMap::new(), Json(request("first@example.com")),
+        ).await;
+        assert_eq!(first.status(), StatusCode::CREATED);
+        let cookie = first.headers().get_all("set-cookie").iter()
+            .map(|value| value.to_str().unwrap())
+            .find(|value| value.starts_with("oxi_browser="))
+            .unwrap();
+        assert!(cookie.contains("Path=/oxi;"));
+        let cookie_pair = cookie.split(';').next().unwrap();
+        let browser_id = cookie_pair.strip_prefix("oxi_browser=").unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("cookie", cookie_pair.parse().unwrap());
+
+        let second = login(
+            Extension(store.clone()), Extension(config.clone()),
+            headers.clone(), Json(request("second@example.com")),
+        ).await;
+        assert_eq!(second.status(), StatusCode::CREATED);
+        assert!(second.headers().get_all("set-cookie").iter()
+            .any(|value| value.to_str().unwrap().starts_with(&format!("{cookie_pair};"))));
+        let accounts = store.get_browser_accounts(browser_id);
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().any(|account| account.email == "first@example.com"));
+        assert!(accounts.iter().any(|account| account.email == "second@example.com"));
+
+        let duplicate = login(
+            Extension(store.clone()), Extension(config),
+            headers, Json(request("second@example.com")),
+        ).await;
+        assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+        assert_eq!(store.get_browser_accounts(browser_id).len(), 2);
+        imap.await.unwrap();
+    }
+
+    #[test]
+    fn issued_and_clearing_cookies_use_the_normalized_base_path() {
+        for (base_path, expected_path) in [
+            (None, "/"),
+            (Some(""), "/"),
+            (Some("/"), "/"),
+            (Some("/oxi"), "/oxi"),
+        ] {
+            let mut config = test_config("development", None);
+            config.base_path = base_path.map(str::to_string);
+            let path = cookie_path(&config);
+            let cookies = [
+                browser_cookie("browser", 3600, false, "Strict", path),
+                account_session_cookie("account", "token", 3600, false, "Strict", path),
+                clearing_browser_cookie(false, "Strict", path),
+                clearing_account_cookie("account", false, "Strict", path),
+            ];
+
+            for cookie in cookies {
+                let path_attribute = cookie
+                    .split(';')
+                    .map(str::trim)
+                    .find_map(|attribute| attribute.strip_prefix("Path="));
+                assert_eq!(path_attribute, Some(expected_path), "{base_path:?}: {cookie}");
+            }
+        }
+    }
+
+    #[test]
+    fn same_site_is_lax_for_development_cross_origin() {
+        let config = test_config("development", Some("http://localhost:3000"));
+        assert_eq!(same_site_policy(&config), "Lax");
+
+        let cookie = browser_cookie("browser", 3600, false, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Lax"));
+    }
+
+    #[test]
+    fn same_site_stays_strict_outside_development() {
+        let config = test_config("production", Some("https://app.example.com"));
+        assert_eq!(same_site_policy(&config), "Strict");
+
+        let cookie = browser_cookie("browser", 3600, true, same_site_policy(&config), cookie_path(&config));
+        assert!(cookie.contains("SameSite=Strict"));
     }
 }

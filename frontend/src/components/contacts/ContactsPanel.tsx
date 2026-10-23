@@ -1,5 +1,8 @@
 "use client";
 
+import { apiAccountUrl } from "@/lib/api-url";
+import { useAuthStore } from "@/stores/useAuthStore";
+
 import { useState, useCallback, useMemo, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
@@ -146,7 +149,7 @@ export function ContactsPanel() {
   );
 
   const handleExport = useCallback(() => {
-    window.open((process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/contacts/export", "_blank");
+    window.open(apiAccountUrl("/contacts/export", useAuthStore.getState().activeAccountId), "_blank");
   }, []);
 
   return (

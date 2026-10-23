@@ -1,5 +1,7 @@
 "use client";
 
+import { ApiDownloadLink } from "@/components/shared/ApiDownloadLink";
+
 import { useState, useEffect } from "react";
 import {
   CalendarDays,
@@ -14,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { parseIcs, type IcsEvent } from "@/lib/ics-parser";
+import { apiCredentials } from "@/lib/api-url";
 import { useCreateEvent } from "@/hooks/useCalendar";
 import type { CreateEventRequest } from "@/types/calendar";
 
@@ -142,7 +145,7 @@ export function IcsPreview({ url, filename }: IcsPreviewProps) {
 
     async function load() {
       try {
-        const res = await fetch(url, { credentials: "same-origin" });
+        const res = await fetch(url, { credentials: apiCredentials });
         if (!res.ok) throw new Error(`Failed to fetch (${res.status})`);
         const text = await res.text();
         const parsed = parseIcs(text);
@@ -191,14 +194,14 @@ export function IcsPreview({ url, filename }: IcsPreviewProps) {
         <p className="text-sm text-muted-foreground">
           {error ?? "No events found in this file"}
         </p>
-        <a
+        <ApiDownloadLink
           href={url}
-          download={filename ?? undefined}
+          download={filename ?? "event.ics"}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           <Download className="size-4" />
           Download
-        </a>
+        </ApiDownloadLink>
       </div>
     );
   }

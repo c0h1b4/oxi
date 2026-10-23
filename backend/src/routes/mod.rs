@@ -29,38 +29,141 @@ use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use tower_http::cors::CorsLayer;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
+
+const DEFAULT_DEV_CORS_ORIGIN: &str = "http://localhost:3000";
+
+fn development_cors(origin: Option<&str>) -> CorsLayer {
+    let origin = origin.unwrap_or(DEFAULT_DEV_CORS_ORIGIN);
+
+    CorsLayer::new()
+        .allow_origin(origin.parse::<HeaderValue>().expect("default dev CORS origin must be valid"))
+        .allow_credentials(true)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-requested-with"),
+            HeaderName::from_static("x-active-account"),
+        ])
+}
 
 use crate::auth::csrf::csrf_protection;
 use crate::auth::middleware::auth_guard;
 use crate::auth::session::SessionStore;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, TrustedProxy};
 use crate::imap::client::ImapClient;
 use crate::realtime::events::EventBus;
 use crate::realtime::idle::IdleManager;
 use crate::smtp::client::SmtpClient;
 
-/// Per-IP key extractor that falls back to the loopback address when
-/// `ConnectInfo<SocketAddr>` is unavailable (e.g. in unit tests using
-/// `oneshot`).  In production the server is started with
-/// `into_make_service_with_connect_info::<SocketAddr>()` so the real
-/// peer IP is always present.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PeerIpKeyExtractorFallback;
+/// Per-IP key extractor that supports trusted reverse proxies.
+///
+/// When the direct peer IP is in the configured `trusted_proxies` list,
+/// `X-Forwarded-For` is walked from right to left. Trusted proxy hops on the
+/// right are skipped and the nearest untrusted address becomes the client IP.
+/// If the header is missing or malformed, the direct peer IP is used. Falls
+/// back to loopback when `ConnectInfo<SocketAddr>` is unavailable (e.g. in
+/// unit tests).
+#[derive(Debug, Clone)]
+struct ProxyAwareIpExtractor {
+    trusted_proxies: Vec<TrustedProxy>,
+}
 
-impl KeyExtractor for PeerIpKeyExtractorFallback {
+impl ProxyAwareIpExtractor {
+    fn is_trusted(&self, ip: &IpAddr) -> bool {
+        self.trusted_proxies
+            .iter()
+            .any(|trusted| trusted.contains(ip))
+    }
+
+    fn forwarded_client_ip(&self, headers: &axum::http::HeaderMap, peer_ip: IpAddr) -> Option<IpAddr> {
+        let mut current_hop = peer_ip;
+
+        for value in headers.get_all("x-forwarded-for").iter().rev() {
+            for entry in value.to_str().ok()?.split(',').rev() {
+                if !self.is_trusted(&current_hop) {
+                    return Some(current_hop);
+                }
+
+                current_hop = entry.trim().parse::<IpAddr>().ok()?;
+            }
+        }
+
+        Some(current_hop)
+    }
+}
+
+impl KeyExtractor for ProxyAwareIpExtractor {
     type Key = IpAddr;
 
     fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
-        // Try ConnectInfo<SocketAddr> first (production path).
-        let ip = req
+        let peer_ip = req
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
-            .map(|ci: &ConnectInfo<SocketAddr>| ci.0.ip());
+            .map(|ci| ci.0.ip())
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-        Ok(ip.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+        if self.is_trusted(&peer_ip)
+            && let Some(client_ip) = self.forwarded_client_ip(req.headers(), peer_ip)
+        {
+            return Ok(client_ip);
+        }
+
+        Ok(peer_ip)
+    }
+}
+
+/// SPA fallback handler that tries `{path}.html` before serving `index.html`.
+///
+/// Next.js static export produces files like `login.html` for `/login` routes,
+/// but `ServeDir` doesn't try the `.html` extension automatically. This handler
+/// runs for any request that doesn't match a static file, mapping clean URLs
+/// (e.g. `/login` → `login.html`) with `index.html` as the final catch-all for
+/// client-side routing.
+async fn spa_fallback(
+    uri: axum::http::Uri,
+    Extension(config): Extension<Arc<AppConfig>>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let static_dir = Path::new(&config.static_dir);
+    let path = uri.path().trim_start_matches('/');
+
+    // Try {path}.html (e.g. /login -> login.html)
+    if !path.is_empty() && !path.contains('.') {
+        let html_path = static_dir.join(format!("{path}.html"));
+        if html_path.is_file()
+            && let Ok(contents) = tokio::fs::read(&html_path).await
+        {
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
+    // Fall back to index.html (SPA catch-all)
+    let index_path = static_dir.join("index.html");
+    match tokio::fs::read(&index_path).await {
+        Ok(contents) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            contents,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -98,7 +201,9 @@ pub fn create_router(
 ) -> Router {
     // Rate-limit login: replenish 1 token every 12 s, burst of 5.
     let governor_conf = GovernorConfigBuilder::default()
-        .key_extractor(PeerIpKeyExtractorFallback)
+        .key_extractor(ProxyAwareIpExtractor {
+            trusted_proxies: config.parsed_trusted_proxies(),
+        })
         .period(Duration::from_secs(12))
         .burst_size(5)
         .finish()
@@ -300,17 +405,45 @@ pub fn create_router(
         .merge(ws_route)
         .merge(protected_data);
 
-    let index_path = Path::new(&config.static_dir).join("index.html");
-    let static_service = ServeDir::new(&config.static_dir).fallback(ServeFile::new(index_path));
+    let inner = if config.serve_static {
+        let static_service = ServeDir::new(&config.static_dir);
+        let spa_router = Router::new()
+            .fallback(spa_fallback)
+            .layer(Extension(config.clone()));
+        let static_router = Router::new()
+            .fallback_service(static_service.fallback(spa_router))
+            .layer(middleware::map_response({
+                let config = config.clone();
+                move |mut response: axum::response::Response| {
+                    let config = config.clone();
+                    async move {
+                        let base_path = config.normalized_base_path();
+                        // ServeDir sees the nested URI, so directory redirects lose the prefix.
+                        if base_path != "/"
+                            && response.status().is_redirection()
+                            && let Some(location) = response.headers().get(header::LOCATION)
+                            && let Ok(location) = location.to_str()
+                            && location.starts_with('/')
+                            && !location.starts_with("//")
+                            && let Ok(location) = format!("{base_path}{location}").parse::<HeaderValue>()
+                        {
+                            response.headers_mut().insert(header::LOCATION, location);
+                        }
+                        response
+                    }
+                }
+            }));
+        Router::new()
+            .nest("/api", api_router)
+            .fallback_service(static_router)
+    } else {
+        Router::new().nest("/api", api_router)
+    };
 
-    let inner = Router::new()
-        .nest("/api", api_router)
-        .fallback_service(static_service);
-
-    // If BASE_PATH is set (e.g. "/oxi"), nest the entire app under that prefix.
-    let router = match config.base_path.as_deref() {
-        Some(bp) if !bp.is_empty() => Router::new().nest(bp, inner),
-        _ => inner,
+    // Use the same base path for routing and authentication cookies.
+    let router = match config.normalized_base_path() {
+        "/" => inner,
+        base_path => Router::new().nest(base_path, inner),
     };
 
     let router = router
@@ -324,8 +457,30 @@ pub fn create_router(
         .layer(TraceLayer::new_for_http());
 
     if config.environment == "development" {
-        router.layer(CorsLayer::permissive())
+        if let Some(ref origin) = config.cors_origin {
+            match origin.parse::<HeaderValue>() {
+                Ok(_) => router.layer(development_cors(Some(origin))),
+                Err(error) => {
+                    tracing::warn!(
+                        cors_origin = %origin,
+                        fallback_origin = DEFAULT_DEV_CORS_ORIGIN,
+                        %error,
+                        "invalid CORS_ORIGIN; falling back to default development CORS"
+                    );
+                    router.layer(development_cors(None))
+                }
+            }
+        } else {
+            router.layer(development_cors(None))
+        }
     } else {
+        if config.cors_origin.is_some() {
+            tracing::warn!(
+                environment = %config.environment,
+                cors_origin = ?config.cors_origin,
+                "cors_origin is set outside development; auth cookies stay SameSite=Strict"
+            );
+        }
         router
     }
 }

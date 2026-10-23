@@ -1,5 +1,4 @@
-/* eslint-disable react/display-name */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";
 
@@ -19,18 +18,14 @@ vi.mock("framer-motion", async () => {
     const keyedChildren = getKeyedChildren(children);
     const currentKeys = new Set(keyedChildren.map((child) => child.key as Key));
 
-
     const exitingChildren = Array.from(prevKeysRef.current)
       .filter((key) => !currentKeys.has(key))
-
       .map((key) => prevChildrenByKeyRef.current.get(key))
       .filter((child): child is React.ReactElement => child != null);
 
     for (const child of keyedChildren) {
-
       prevChildrenByKeyRef.current.set(child.key as Key, child);
     }
-
     prevKeysRef.current = currentKeys;
 
     return <>{[...keyedChildren, ...exitingChildren]}</>;
@@ -126,21 +121,31 @@ vi.mock("cmdk", () => {
   function CommandRoot({ children }: { children: ReactNode }) {
     return <div>{children}</div>;
   }
-  CommandRoot.Input = ({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} />
-  );
-  CommandRoot.List = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
-  );
-  CommandRoot.Empty = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
-  );
-  CommandRoot.Group = ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
-  );
-  CommandRoot.Item = ({ children, onSelect, ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onSelect"> & { onSelect?: () => void }) => (
-    <button type="button" onClick={onSelect} {...props}>{children}</button>
-  );
+  CommandRoot.Input = function CommandInput({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+    return (
+      <input {...props} />
+    );
+  };
+  CommandRoot.List = function CommandList({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+    return (
+      <div {...props}>{children}</div>
+    );
+  };
+  CommandRoot.Empty = function CommandEmpty({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+    return (
+      <div {...props}>{children}</div>
+    );
+  };
+  CommandRoot.Group = function CommandGroup({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+    return (
+      <div {...props}>{children}</div>
+    );
+  };
+  CommandRoot.Item = function CommandItem({ children, onSelect, ...props }: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onSelect"> & { onSelect?: () => void }) {
+    return (
+      <button type="button" onClick={onSelect} {...props}>{children}</button>
+    );
+  };
 
   return { Command: CommandRoot };
 });
@@ -242,6 +247,7 @@ vi.mock("../ComposeDialog/index", () => ({
   formatFileSize: () => "1 KB",
   stripHtml: (value: string) => value,
   generateId: () => "draft-1",
+  inlineImagesToCid: (body: string) => body,
   DiscardAlertDialog: () => null,
   AttachmentPreviewDialog: () => null,
 }));
@@ -268,6 +274,7 @@ vi.mock("@/components/ui/label", () => ({
 
 import { ComposeDialog } from "../ComposeDialog";
 import { AddAccountModal } from "../../accounts/AddAccountModal";
+import { apiPost } from "@/lib/api";
 import { CreateFolderDialog } from "../CreateFolderDialog";
 import { CommandPalette } from "../../shared/CommandPalette";
 import { MoveToFolderMenu } from "../MoveToFolderMenu";
@@ -353,28 +360,42 @@ describe("Modal and action motion transitions", () => {
     expect(screen.queryByTestId("add-account-overlay-transition")).toBeNull();
   });
 
-  it("resets account credentials and server settings when reopened", () => {
+  it("resets account credentials, errors, and server settings when reopened", async () => {
     mockUiState.effectiveAnimationMode = "off";
+    vi.mocked(apiPost).mockRejectedValueOnce(new Error("Invalid credentials"));
     const onClose = vi.fn();
     const { rerender } = render(<AddAccountModal open onClose={onClose} />);
 
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
-    fireEvent.click(screen.getByLabelText("Keep me logged in"));
-    fireEvent.click(screen.getByRole("button", { name: /Server configuration/ }));
-    fireEvent.change(screen.getAllByLabelText("Host")[0], { target: { value: "imap.example.com" } });
+    fireEvent.change(screen.getByPlaceholderText("you@example.com"), { target: { value: "old@example.com" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Keep me logged in" }));
+    fireEvent.click(screen.getByText(/Server configuration/));
+    fireEvent.change(screen.getByPlaceholderText("imap.example.com"), { target: { value: "old-imap.example.com" } });
+    fireEvent.change(screen.getByPlaceholderText("993"), { target: { value: "143" } });
+    fireEvent.change(screen.getByPlaceholderText("smtp.example.com"), { target: { value: "old-smtp.example.com" } });
+    fireEvent.change(screen.getByPlaceholderText("587"), { target: { value: "25" } });
+    for (const checkbox of screen.getAllByRole("checkbox", { name: "Use TLS" })) {
+      fireEvent.click(checkbox);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByText("Invalid credentials")).toBeTruthy());
 
     rerender(<AddAccountModal open={false} onClose={onClose} />);
     rerender(<AddAccountModal open onClose={onClose} />);
 
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("Keep me logged in") as HTMLInputElement).checked).toBe(false);
-    expect(screen.queryByText("IMAP Settings")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Server configuration/ }));
-    expect((screen.getAllByLabelText("Host")[0] as HTMLInputElement).value).toBe("");
-    expect((screen.getAllByLabelText("Port")[0] as HTMLInputElement).value).toBe("993");
-    expect((screen.getAllByLabelText("Port")[1] as HTMLInputElement).value).toBe("587");
+    expect((screen.getByPlaceholderText("you@example.com") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("Enter your password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("checkbox", { name: "Keep me logged in" }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByText("Invalid credentials")).toBeNull();
+    expect(screen.queryByPlaceholderText("imap.example.com")).toBeNull();
+    fireEvent.click(screen.getByText(/Server configuration/));
+    expect((screen.getByPlaceholderText("imap.example.com") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("smtp.example.com") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("993") as HTMLInputElement).value).toBe("993");
+    expect((screen.getByPlaceholderText("587") as HTMLInputElement).value).toBe("587");
+    for (const checkbox of screen.getAllByRole("checkbox", { name: "Use TLS" })) {
+      expect((checkbox as HTMLInputElement).checked).toBe(true);
+    }
   });
 
   it("applies CreateFolderDialog transitions and keeps static off-mode path", () => {

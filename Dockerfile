@@ -77,6 +77,6 @@ ENV BASE_PATH=
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-    CMD curl -f http://localhost:3001${BASE_PATH}/api/health || exit 1
+    CMD curl -f http://localhost:${PORT:-3001}${BASE_PATH:-}/api/health || exit 1
 
 CMD ["./oxi-email-server"]

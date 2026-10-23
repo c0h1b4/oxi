@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api-url";
+
 import { useState, useEffect, useRef, useMemo } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
@@ -42,8 +44,17 @@ export function ReadingPane() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
+  const selectedMessageKey = `${activeAccountId}:${activeFolder}:${selectedMessageUid}`;
+  const [messageView, setMessageView] = useState<{
+    key: string;
+    bodyMode: BodyMode | null;
+    emailTheme: "auto" | "light" | "dark";
+  }>({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+  if (messageView.key !== selectedMessageKey) {
+    setMessageView({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+  }
   const [showHeaders, setShowHeaders] = useState(false);
-  const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
+  const emailTheme = messageView.emailTheme;
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
     new Set()
   );
@@ -55,9 +66,6 @@ export function ReadingPane() {
   const { data, isLoading, isError, error, refetch } = useMessage(
     activeFolder,
     selectedMessageUid ?? 0
-  );
-  const [bodyMode, setBodyMode] = useState<BodyMode>(
-    data && !data.html && data.text ? "plain" : "html"
   );
 
   const updateFlags = useUpdateFlags();
@@ -77,16 +85,9 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
-  // Reset message-specific choices before rendering a different message.
-  // Include account/folder because IMAP UIDs are not globally unique. The
-  // loaded key also handles the transition from loading to available data.
-  const displayKey = JSON.stringify([activeAccountId, activeFolder, selectedMessageUid, data?.folder, data?.uid]);
-  const [previousDisplayKey, setPreviousDisplayKey] = useState<string | null>(null);
-  if (displayKey !== previousDisplayKey) {
-    setPreviousDisplayKey(displayKey);
-    setBodyMode(data && !data.html && data.text ? "plain" : "html");
-    setEmailTheme("auto");
-  }
+  const bodyMode = messageView.bodyMode ?? (
+    data && !data.html && data.text ? "plain" : "html"
+  );
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
@@ -135,7 +136,7 @@ export function ReadingPane() {
     );
   }
 
-  const attachmentBaseUrl = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`;
+  const attachmentBaseUrl = apiUrl(`/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`);
   const messageKey = `${data.folder}:${data.uid}`;
   const remoteAllowed = allowedRemoteUids.has(messageKey);
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
@@ -208,7 +209,10 @@ export function ReadingPane() {
           <button
             type="button"
             onClick={() => {
-              setBodyMode(bodyMode === "html" ? "plain" : "html");
+              setMessageView({
+                ...messageView,
+                bodyMode: bodyMode === "html" ? "plain" : "html",
+              });
               setShowHeaders(false);
             }}
             className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -239,9 +243,11 @@ export function ReadingPane() {
           <button
             type="button"
             onClick={() => {
-              if (emailTheme === "auto") setEmailTheme("light");
-              else if (emailTheme === "light") setEmailTheme("dark");
-              else setEmailTheme("auto");
+              setMessageView({
+                ...messageView,
+                emailTheme:
+                  emailTheme === "auto" ? "light" : emailTheme === "light" ? "dark" : "auto",
+              });
             }}
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
               emailTheme !== "auto"

@@ -36,6 +36,47 @@ interface AddAccountModalProps {
 }
 
 export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
+  const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
+  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
+  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <AnimatePresence>
+          {open ? (
+            <>
+              <Dialog.Overlay asChild>
+                <AnimatedDiv
+                  key="add-account-overlay"
+                  data-testid="add-account-overlay-transition"
+                  variants={overlayMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+                />
+              </Dialog.Overlay>
+              <Dialog.Content asChild>
+                <AnimatedDiv
+                  data-testid="add-account-content-transition"
+                  variants={contentMotionProps}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+                >
+                  <AddAccountForm onClose={onClose} />
+                </AnimatedDiv>
+              </Dialog.Content>
+            </>
+          ) : null}
+        </AnimatePresence>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function AddAccountForm({ onClose }: Pick<AddAccountModalProps, "onClose">) {
   const setAccounts = useAuthStore((s) => s.setAccounts);
   const setActiveAccount = useAuthStore((s) => s.setActiveAccount);
   const queryClient = useQueryClient();
@@ -45,9 +86,6 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
-  const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
-  const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
-  const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
   const [serverConfig, setServerConfig] = useState<ServerConfig>({
     imapHost: "",
     imapPort: "993",
@@ -58,34 +96,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   });
 
   const emailInputRef = useRef<HTMLInputElement>(null);
-  const [wasOpen, setWasOpen] = useState(open);
-
-  // Reset form fields on reopen while keeping the close animation mounted.
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) {
-      setEmail("");
-      setPassword("");
-      setError(null);
-      setRemember(false);
-      setShowServerConfig(false);
-      setServerConfig({
-        imapHost: "",
-        imapPort: "993",
-        imapTls: true,
-        smtpHost: "",
-        smtpPort: "587",
-        smtpTls: true,
-      });
-    }
-  }
 
   useEffect(() => {
-    if (open) {
-      const timer = setTimeout(() => emailInputRef.current?.focus(), 50);
-      return () => clearTimeout(timer);
-    }
-  }, [open]);
+    const timer = setTimeout(() => emailInputRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -141,211 +156,181 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <AnimatePresence>
-          {open ? (
-            <>
-              <Dialog.Overlay asChild>
-                <AnimatedDiv
-                  key="add-account-overlay"
-                  data-testid="add-account-overlay-transition"
-                  variants={overlayMotionProps}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+    <>
+      <Dialog.Title className="text-lg font-semibold mb-1">
+        Add account
+      </Dialog.Title>
+      <Dialog.Description className="text-sm text-muted-foreground mb-4">
+        Sign in to another email account
+      </Dialog.Description>
+      <Dialog.Close asChild>
+        <button
+          type="button"
+          className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Close"
+        >
+          <X className="size-4" />
+        </button>
+      </Dialog.Close>
+
+      {error && (
+        <div className="mb-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="add-email">Email</Label>
+          <Input
+            ref={emailInputRef}
+            id="add-email"
+            type="email"
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+            disabled={loading}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="add-password">Password</Label>
+          <Input
+            id="add-password"
+            type="password"
+            placeholder="Enter your password"
+            autoComplete="current-password"
+            required
+            disabled={loading}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <label htmlFor="add-remember" className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            id="add-remember"
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            disabled={loading}
+            className="size-4 rounded border-muted-foreground/40 accent-primary"
+          />
+          <span className="text-sm text-muted-foreground">Keep me logged in</span>
+        </label>
+
+        <button
+          type="button"
+          onClick={() => setShowServerConfig(!showServerConfig)}
+          className="text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {showServerConfig ? "▼" : "▶"} Server configuration (optional)
+        </button>
+
+        {showServerConfig && (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              IMAP Settings
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-imapHost" className="text-xs">Host</Label>
+                <Input
+                  id="add-imapHost"
+                  type="text"
+                  placeholder="imap.example.com"
+                  disabled={loading}
+                  value={serverConfig.imapHost}
+                  onChange={(e) => setServerConfig({ ...serverConfig, imapHost: e.target.value })}
+                  className="h-8 text-sm"
                 />
-              </Dialog.Overlay>
-              <Dialog.Content asChild>
-                <AnimatedDiv
-                  data-testid="add-account-content-transition"
-                  variants={contentMotionProps}
-                  initial="initial"
-                  animate="animate"
-                  exit="exit"
-                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
-                >
-          <Dialog.Title className="text-lg font-semibold mb-1">
-            Add account
-          </Dialog.Title>
-          <Dialog.Description className="text-sm text-muted-foreground mb-4">
-            Sign in to another email account
-          </Dialog.Description>
-          <Dialog.Close asChild>
-            <button
-              type="button"
-              className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              <X className="size-4" />
-            </button>
-          </Dialog.Close>
-
-          {error && (
-            <div className="mb-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {error}
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-imapPort" className="text-xs">Port</Label>
+                <Input
+                  id="add-imapPort"
+                  type="number"
+                  placeholder="993"
+                  disabled={loading}
+                  value={serverConfig.imapPort}
+                  onChange={(e) => setServerConfig({ ...serverConfig, imapPort: e.target.value })}
+                  className="h-8 text-sm"
+                />
+              </div>
             </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="add-email">Email</Label>
-              <Input
-                ref={emailInputRef}
-                id="add-email"
-                type="email"
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-                disabled={loading}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="add-password">Password</Label>
-              <Input
-                id="add-password"
-                type="password"
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                required
-                disabled={loading}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <label htmlFor="add-remember" className="flex items-center gap-2 cursor-pointer select-none">
+            <label htmlFor="add-imapTls" className="flex items-center gap-2 cursor-pointer select-none">
               <input
-                id="add-remember"
+                id="add-imapTls"
                 type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
+                checked={serverConfig.imapTls}
+                onChange={(e) => setServerConfig({ ...serverConfig, imapTls: e.target.checked })}
                 disabled={loading}
-                className="size-4 rounded border-muted-foreground/40 accent-primary"
+                className="size-3 rounded border-muted-foreground/40 accent-primary"
               />
-              <span className="text-sm text-muted-foreground">Keep me logged in</span>
+              <span className="text-xs text-muted-foreground">Use TLS</span>
             </label>
 
-            <button
-              type="button"
-              onClick={() => setShowServerConfig(!showServerConfig)}
-              className="text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {showServerConfig ? "▼" : "▶"} Server configuration (optional)
-            </button>
-
-            {showServerConfig && (
-              <div className="flex flex-col gap-3 rounded-md border border-border p-3">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  IMAP Settings
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="add-imapHost" className="text-xs">Host</Label>
-                    <Input
-                      id="add-imapHost"
-                      type="text"
-                      placeholder="imap.example.com"
-                      disabled={loading}
-                      value={serverConfig.imapHost}
-                      onChange={(e) => setServerConfig({ ...serverConfig, imapHost: e.target.value })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="add-imapPort" className="text-xs">Port</Label>
-                    <Input
-                      id="add-imapPort"
-                      type="number"
-                      placeholder="993"
-                      disabled={loading}
-                      value={serverConfig.imapPort}
-                      onChange={(e) => setServerConfig({ ...serverConfig, imapPort: e.target.value })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-                <label htmlFor="add-imapTls" className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    id="add-imapTls"
-                    type="checkbox"
-                    checked={serverConfig.imapTls}
-                    onChange={(e) => setServerConfig({ ...serverConfig, imapTls: e.target.checked })}
-                    disabled={loading}
-                    className="size-3 rounded border-muted-foreground/40 accent-primary"
-                  />
-                  <span className="text-xs text-muted-foreground">Use TLS</span>
-                </label>
-
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">
-                  SMTP Settings
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="add-smtpHost" className="text-xs">Host</Label>
-                    <Input
-                      id="add-smtpHost"
-                      type="text"
-                      placeholder="smtp.example.com"
-                      disabled={loading}
-                      value={serverConfig.smtpHost}
-                      onChange={(e) => setServerConfig({ ...serverConfig, smtpHost: e.target.value })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="add-smtpPort" className="text-xs">Port</Label>
-                    <Input
-                      id="add-smtpPort"
-                      type="number"
-                      placeholder="587"
-                      disabled={loading}
-                      value={serverConfig.smtpPort}
-                      onChange={(e) => setServerConfig({ ...serverConfig, smtpPort: e.target.value })}
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-                <label htmlFor="add-smtpTls" className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    id="add-smtpTls"
-                    type="checkbox"
-                    checked={serverConfig.smtpTls}
-                    onChange={(e) => setServerConfig({ ...serverConfig, smtpTls: e.target.checked })}
-                    disabled={loading}
-                    className="size-3 rounded border-muted-foreground/40 accent-primary"
-                  />
-                  <span className="text-xs text-muted-foreground">Use TLS</span>
-                </label>
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 mt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onClose}
-                disabled={loading}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading}
-              >
-                {loading && <Loader2 className="size-4 animate-spin" />}
-                {loading ? "Signing in..." : "Sign in"}
-              </Button>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">
+              SMTP Settings
             </div>
-          </form>
-                </AnimatedDiv>
-              </Dialog.Content>
-            </>
-          ) : null}
-        </AnimatePresence>
-      </Dialog.Portal>
-    </Dialog.Root>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-smtpHost" className="text-xs">Host</Label>
+                <Input
+                  id="add-smtpHost"
+                  type="text"
+                  placeholder="smtp.example.com"
+                  disabled={loading}
+                  value={serverConfig.smtpHost}
+                  onChange={(e) => setServerConfig({ ...serverConfig, smtpHost: e.target.value })}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-smtpPort" className="text-xs">Port</Label>
+                <Input
+                  id="add-smtpPort"
+                  type="number"
+                  placeholder="587"
+                  disabled={loading}
+                  value={serverConfig.smtpPort}
+                  onChange={(e) => setServerConfig({ ...serverConfig, smtpPort: e.target.value })}
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+            <label htmlFor="add-smtpTls" className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                id="add-smtpTls"
+                type="checkbox"
+                checked={serverConfig.smtpTls}
+                onChange={(e) => setServerConfig({ ...serverConfig, smtpTls: e.target.checked })}
+                disabled={loading}
+                className="size-3 rounded border-muted-foreground/40 accent-primary"
+              />
+              <span className="text-xs text-muted-foreground">Use TLS</span>
+            </label>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={loading}
+          >
+            {loading && <Loader2 className="size-4 animate-spin" />}
+            {loading ? "Signing in..." : "Sign in"}
+          </Button>
+        </div>
+      </form>
+    </>
   );
 }

@@ -18,13 +18,14 @@ async-imap = { version = "0.10", default-features = false, features = ["runtime-
 async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
 tower_governor = "0.8"
 governor = "0.10"
+ipnet = "2.11"
 rand = "0.9"
 base64 = "0.22"
 sha2 = "0.10"
 rusqlite = { version = "0.34", features = ["bundled"] }
 refinery = { version = "0.9", features = ["rusqlite"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
-async-trait = "0.1.89"
+async-trait = "0.1.92"
 mail-parser = "0.11.2"
 futures = "0.3.32"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-native-tls", "smtp-transport", "builder"] }

@@ -2,7 +2,7 @@ import { toast } from "sonner";
 
 import { useAuthStore } from "@/stores/useAuthStore";
 
-const API_BASE = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api";
+import { apiCredentials, apiUrl } from "@/lib/api-url";
 
 interface ApiError {
   code?: string;
@@ -29,10 +29,10 @@ function handleAccountSessionExpired(error: ApiError): void {
   if (error.code === "ACCOUNT_SESSION_EXPIRED" && error.accountId) {
     useAuthStore.getState().removeAccount(error.accountId);
     toast.error(error.message ?? "Account session expired");
-    fetch(`${API_BASE}/auth/accounts/${error.accountId}`, {
+    fetch(apiUrl(`/auth/accounts/${error.accountId}`), {
       method: "DELETE",
       headers: { "X-Requested-With": "XMLHttpRequest" },
-      credentials: "same-origin",
+      credentials: apiCredentials,
     }).catch(() => {});
   }
 }
@@ -50,8 +50,8 @@ function getActiveAccountHeader(): Record<string, string> {
 }
 
 export async function fetchAccounts(): Promise<AccountsResponse> {
-  const res = await fetch(`${API_BASE}/auth/accounts`, {
-    credentials: "same-origin",
+  const res = await fetch(apiUrl("/auth/accounts"), {
+    credentials: apiCredentials,
   });
 
   if (!res.ok) {
@@ -71,14 +71,14 @@ export async function apiPost<T>(
   path: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
     body: JSON.stringify(body),
   });
 
@@ -90,11 +90,11 @@ export async function apiPost<T>(
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     headers: {
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
   });
 
   if (!res.ok) {
@@ -108,14 +108,14 @@ export async function apiPatch<T>(
   path: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
     body: JSON.stringify(body),
   });
 
@@ -130,13 +130,13 @@ export async function apiPostFormData<T>(
   path: string,
   formData: FormData,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: {
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
     body: formData,
   });
 
@@ -151,14 +151,14 @@ export async function apiPut<T>(
   path: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
     body: JSON.stringify(body),
   });
 
@@ -170,13 +170,13 @@ export async function apiPut<T>(
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "DELETE",
     headers: {
       "X-Requested-With": "XMLHttpRequest",
       ...getActiveAccountHeader(),
     },
-    credentials: "same-origin",
+    credentials: apiCredentials,
   });
 
   if (!res.ok) {
