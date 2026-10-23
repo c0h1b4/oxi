@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "ACCOUNT_SESSION_EXPIRED",
+    "message": "Account session has expired",
+    "status": 401,
+    "accountId": "expired-account"
+  }
+}

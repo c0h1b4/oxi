@@ -58,8 +58,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   });
 
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const [wasOpen, setWasOpen] = useState(open);
 
-  useEffect(() => {
+  // Reset before rendering a reopened form, rather than in a post-render effect.
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEmail("");
@@ -75,6 +78,11 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
         smtpPort: "587",
         smtpTls: true,
       });
+    }
+  }
+
+  useEffect(() => {
+    if (open) {
       const timer = setTimeout(() => emailInputRef.current?.focus(), 50);
       return () => clearTimeout(timer);
     }
