@@ -77,14 +77,13 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
-  const displayedMessageKey = data
-    ? JSON.stringify([activeAccountId, data.folder, data.uid])
-    : null;
-  const [previousMessageKey, setPreviousMessageKey] = useState(displayedMessageKey);
-
-  // Adjust message-specific state before rendering the newly selected message.
-  if (displayedMessageKey !== previousMessageKey) {
-    setPreviousMessageKey(displayedMessageKey);
+  // Reset message-specific choices before rendering a different message.
+  // Include account/folder because IMAP UIDs are not globally unique. The
+  // loaded key also handles the transition from loading to available data.
+  const displayKey = JSON.stringify([activeAccountId, activeFolder, selectedMessageUid, data?.folder, data?.uid]);
+  const [previousDisplayKey, setPreviousDisplayKey] = useState<string | null>(null);
+  if (displayKey !== previousDisplayKey) {
+    setPreviousDisplayKey(displayKey);
     setBodyMode(data && !data.html && data.text ? "plain" : "html");
     setEmailTheme("auto");
   }

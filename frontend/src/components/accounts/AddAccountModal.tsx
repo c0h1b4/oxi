@@ -60,11 +60,10 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const emailInputRef = useRef<HTMLInputElement>(null);
   const [wasOpen, setWasOpen] = useState(open);
 
-  // Reset before rendering a reopened form, rather than in a post-render effect.
+  // Reset form fields on reopen while keeping the close animation mounted.
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEmail("");
       setPassword("");
       setError(null);
