@@ -99,7 +99,9 @@ build/
 # =============================================================================
 _bmad/
 _bmad-output/
-docs/
+docs/*
+!docs/RELEASING.md
+!docs/releases/
 
 # Debugging files
 debugging/

@@ -43,6 +43,16 @@ Not a mail platform — just a clean, modern webmail UI.
 | **Editor** | Tiptap (rich text compose) |
 | **Deploy** | Docker (GHCR), single binary serves frontend + API |
 
+## Releases
+
+**Current release: [v0.1.0 (Beta)](https://github.com/c0h1b4/oxi/releases/tag/v0.1.0).**
+oxi now uses versioned releases. The 0.x series is beta software; breaking changes
+may occur before 1.0. Back up persistent data before upgrading.
+
+Use a versioned Docker tag for reproducible deployments. The `latest` image tracks
+`main` and can include unreleased changes. See the [changelog](CHANGELOG.md) and
+[release process](docs/RELEASING.md).
+
 ## Quick Start
 
 ### Docker (recommended)
@@ -54,7 +64,7 @@ docker run -d \
   -e IMAP_HOST=mail.example.com \
   -e SMTP_HOST=mail.example.com \
   -v oxi-data:/data \
-  ghcr.io/c0h1b4/oxi:latest
+  ghcr.io/c0h1b4/oxi:v0.1.0
 ```
 
 Or with `docker-compose.yml`:
@@ -62,7 +72,7 @@ Or with `docker-compose.yml`:
 ```yaml
 services:
   app:
-    image: ghcr.io/c0h1b4/oxi:latest
+    image: ghcr.io/c0h1b4/oxi:v0.1.0
     ports:
       - "3001:3001"
     environment:
