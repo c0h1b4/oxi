@@ -24,10 +24,10 @@ fn unauthorized() -> Response {
 fn account_expired(account_id: &str) -> Response {
     let body = serde_json::json!({
         "error": {
-            "code": "ACCOUNT_EXPIRED",
+            "code": "ACCOUNT_SESSION_EXPIRED",
             "message": "Account session has expired",
             "status": 401,
-            "account_id": account_id,
+            "accountId": account_id,
         }
     })
     .to_string();
@@ -209,6 +209,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn account_expired_matches_frontend_contract() {
+        let response = account_expired("expired-account");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["content-type"], "application/json");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let actual: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/account-session-expired.json"
+        ))
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
     async fn no_cookies_returns_401() {
         let store = Arc::new(SessionStore::new(Duration::from_secs(3600)));
         let router = guarded_router(store);
@@ -277,8 +291,8 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
-        assert_eq!(json["error"]["account_id"], session.account_id);
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
+        assert_eq!(json["error"]["accountId"], session.account_id);
     }
 
     #[tokio::test]
@@ -300,7 +314,8 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
+        assert_eq!(json["error"]["accountId"], session.account_id);
     }
 
     #[tokio::test]
@@ -342,7 +357,8 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
+        assert_eq!(json["error"]["accountId"], session.account_id);
     }
 
     #[tokio::test]
@@ -364,7 +380,8 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
+        assert_eq!(json["error"]["accountId"], session.account_id);
     }
 
     #[tokio::test]
@@ -429,7 +446,8 @@ mod tests {
         let (status, json) = send(router, req).await;
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(json["error"]["code"], "ACCOUNT_EXPIRED");
+        assert_eq!(json["error"]["code"], "ACCOUNT_SESSION_EXPIRED");
+        assert_eq!(json["error"]["accountId"], session2.account_id);
     }
 
     #[tokio::test]

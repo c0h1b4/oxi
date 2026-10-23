@@ -1,14 +1,14 @@
+mod auth;
 mod calendar;
 mod config;
-mod error;
 mod db;
 mod email_theme;
+mod error;
 mod imap;
-mod smtp;
-mod auth;
 mod realtime;
 mod routes;
 mod search;
+mod smtp;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,13 +51,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create the IMAP and SMTP clients for production use.
-    let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient);
+    let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient::default());
     let smtp_client: Arc<dyn smtp::client::SmtpClient> = Arc::new(RealSmtpClient);
 
     // Create the Tantivy search engine for full-text indexing.
-    let search_engine = Arc::new(search::engine::SearchEngine::new(
-        std::path::PathBuf::from(&config.data_dir),
-    ));
+    let search_engine = Arc::new(search::engine::SearchEngine::new(std::path::PathBuf::from(
+        &config.data_dir,
+    )));
 
     // Create the real-time event bus and IDLE manager.
     let event_bus = Arc::new(realtime::events::EventBus::new());

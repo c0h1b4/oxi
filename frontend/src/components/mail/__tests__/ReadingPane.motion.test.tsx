@@ -243,3 +243,67 @@ describe("ReadingPane motion transitions", () => {
     expect(wrapper.className).toContain("min-w-0");
   });
 });
+
+describe("ReadingPane message view state", () => {
+  beforeEach(() => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.selectedMessageUid = 1;
+    mockUiState.activeFolder = "INBOX";
+    mockAuthState.activeAccountId = "acc-1";
+  });
+
+  it("starts plaintext-only messages in plain text mode", () => {
+    setMessage(1, { html: "" });
+    render(<ReadingPane />);
+
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+    expect(screen.queryByTestId("email-renderer")).toBeNull();
+  });
+
+  it("selects plain text mode when message data finishes loading", () => {
+    mockUseMessage.mockReturnValue({ isLoading: true });
+    const { rerender } = render(<ReadingPane />);
+
+    setMessage(1, { html: "" });
+    rerender(<ReadingPane />);
+
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+    expect(screen.queryByTestId("email-renderer")).toBeNull();
+  });
+
+  it("preserves manual mode and theme choices when the same message refreshes", () => {
+    setMessage(1);
+    const { rerender } = render(<ReadingPane />);
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto theme" }));
+
+    setMessage(1);
+    rerender(<ReadingPane />);
+
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Light mode" })).toBeTruthy();
+  });
+
+  it.each(["uid", "folder", "account"])("resets mode and theme when the message %s changes", (identity) => {
+    setMessage(1);
+    const { rerender } = render(<ReadingPane />);
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto theme" }));
+
+    if (identity === "uid") {
+      mockUiState.selectedMessageUid = 2;
+      setMessage(2);
+    } else if (identity === "folder") {
+      mockUiState.activeFolder = "Archive";
+      setMessage(1, { folder: "Archive" });
+    } else {
+      mockAuthState.activeAccountId = "acc-2";
+      setMessage(1);
+    }
+    rerender(<ReadingPane />);
+
+    expect(screen.getByRole("button", { name: "Plain text" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Auto theme" })).toBeTruthy();
+    expect(screen.getByTestId("email-renderer")).toBeTruthy();
+  });
+});

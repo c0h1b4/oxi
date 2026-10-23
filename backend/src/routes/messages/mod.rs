@@ -37,6 +37,42 @@ fn build_creds(session: &SessionState, config: &AppConfig) -> Result<ImapCredent
 }
 
 // ---------------------------------------------------------------------------
+// Helper: validate IMAP flags from client input
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if `flag` is a syntactically valid IMAP flag.
+///
+/// Accepts RFC 3501 system flags (`\Seen`, `\Answered`, `\Flagged`,
+/// `\Deleted`, `\Draft`, `\Recent`) and keyword atoms (`Junk`,
+/// `$Forwarded`, `$MDNSent`, etc.).
+///
+/// This is a restricted safe subset of the RFC 3501 §9 atom grammar:
+/// an optional leading `\` followed by `[A-Za-z0-9$_\-.+]`, capped at
+/// 64 characters. The cap is well above any flag seen in practice and
+/// keeps the set narrow enough to exclude whitespace, parentheses, and
+/// control characters without needing to enumerate every RFC exclusion.
+fn is_valid_flag(flag: &str) -> bool {
+    if flag.is_empty() || flag.len() > 64 {
+        return false;
+    }
+    // Strip optional leading backslash (system flags like \Seen).
+    let atom = flag.strip_prefix('\\').unwrap_or(flag);
+    !atom.is_empty()
+        && atom
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'$' | b'_' | b'-' | b'+' | b'.'))
+}
+
+fn validate_flags(flags: &[String]) -> Result<(), AppError> {
+    for flag in flags {
+        if !is_valid_flag(flag) {
+            return Err(AppError::BadRequest("invalid flag".to_string()));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -60,30 +96,40 @@ pub async fn list_messages(
 ) -> Result<Response, AppError> {
     let mut syncing = false;
 
-    // Open the per-user database.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-
-    // If this folder was synced recently, skip the IMAP round-trip.
-    let folder_fresh = db::folders::is_folder_fresh(&conn, &folder, FOLDER_MESSAGES_TTL_SECS)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    let database = db::pool::UserDb::new(&config.data_dir, &session.user_hash);
+    let cached_folder_name = folder.clone();
+    let (folder_fresh, cached_uid_validity, cached_count, folder_invalidated) = database
+        .run(move |conn| {
+            let fresh =
+                db::folders::is_folder_fresh(conn, &cached_folder_name, FOLDER_MESSAGES_TTL_SECS)?;
+            let cached = db::folders::get_folder(conn, &cached_folder_name)?;
+            let validity = cached.as_ref().map(|f| f.uid_validity).unwrap_or(0);
+            if cached.is_none() {
+                db::folders::upsert_folder(
+                    conn,
+                    &cached_folder_name,
+                    None,
+                    None,
+                    "",
+                    true,
+                    0,
+                    0,
+                    0,
+                    0,
+                )?;
+            }
+            Ok((
+                fresh,
+                validity,
+                db::messages::count_messages(conn, &cached_folder_name)?,
+                db::folders::is_folder_messages_invalidated(conn, &cached_folder_name)?,
+            ))
+        })
+        .await
+        .map_err(AppError::InternalError)?;
 
     if !folder_fresh {
         let creds = build_creds(&session, &config)?;
-
-        // Check what we have in cache.
-        let cached_folder = db::folders::get_folder(&conn, &folder)
-            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-        let cached_uid_validity = cached_folder.as_ref().map(|f| f.uid_validity).unwrap_or(0);
-
-        // Ensure the folder exists in the folders table (for FK constraint).
-        if cached_folder.is_none() {
-            db::folders::upsert_folder(&conn, &folder, None, None, "", true, 0, 0, 0, 0)
-                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-        }
-
-        let cached_count = db::messages::count_messages(&conn, &folder)
-            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         // Do a lightweight IMAP SELECT to get folder status.
         let status = imap_client
@@ -100,20 +146,22 @@ pub async fn list_messages(
             "list_messages: folder status check"
         );
 
-        let needs_full_sync = cached_uid_validity != 0
-            && cached_uid_validity != status.uid_validity;
+        let needs_full_sync =
+            cached_uid_validity != 0 && cached_uid_validity != status.uid_validity;
 
         if needs_full_sync {
             tracing::info!(folder = %folder, "UIDVALIDITY changed, clearing cache");
-            db::messages::delete_folder_messages(&conn, &folder)
-                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+            let name = folder.clone();
+            database
+                .run(move |conn| db::messages::delete_folder_messages(conn, &name))
+                .await
+                .map_err(AppError::InternalError)?;
         }
 
-        // Force sync when the folder was explicitly invalidated (e.g. after a
-        // message move), even if IMAP exists == cached count.
-        let folder_invalidated = db::folders::is_folder_messages_invalidated(&conn, &folder)
-            .unwrap_or(false);
-        let needs_sync = needs_full_sync || cached_count == 0 || status.exists != cached_count || folder_invalidated;
+        let needs_sync = needs_full_sync
+            || cached_count == 0
+            || status.exists != cached_count
+            || folder_invalidated;
 
         if needs_sync {
             // Cold start: no cached messages at all — fetch the ~100 most recent
@@ -131,17 +179,24 @@ pub async fn list_messages(
 
                 tracing::info!(folder = %folder, fetched = headers.len(), "Partial sync: fetched recent headers");
 
-                upsert_and_index_headers(&conn, &folder, &headers, &search_engine, &session.user_hash)?;
-
-                // Update folder metadata with UIDVALIDITY and partial count.
-                db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
-                    .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-                db::folders::refresh_unread_count(&conn, &folder)
-                    .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+                let name = folder.clone();
+                let engine = search_engine.clone();
+                let hash = session.user_hash.clone();
+                let validity = status.uid_validity;
+                let exists = status.exists;
+                database
+                    .run(move |conn| {
+                        upsert_and_index_headers(conn, &name, &headers, &engine, &hash)
+                            .map_err(|e| e.to_string())?;
+                        db::folders::update_folder_status(conn, &name, validity, exists)?;
+                        db::folders::refresh_unread_count(conn, &name)
+                    })
+                    .await
+                    .map_err(AppError::InternalError)?;
 
                 // Spawn background task to fetch the remaining older headers.
                 if recent_start > 1 {
-                    let remaining_range = format!("1:{}", recent_start - 1);
+                    let remaining_range = (1, recent_start - 1);
                     tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
                         creds,
                         folder: folder.clone(),
@@ -158,17 +213,20 @@ pub async fn list_messages(
                 }
             } else {
                 // Stale cache: we have some cached data — determine new UIDs.
-                let max_cached_uid = db::messages::max_uid(&conn, &folder)
-                    .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-                let uid_range = if max_cached_uid > 0 {
-                    format!("{}:*", max_cached_uid + 1)
-                } else {
-                    "1:*".to_string()
-                };
-
-                // Return cached data immediately, sync incrementally in background.
-                db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
-                    .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+                let name = folder.clone();
+                let validity = status.uid_validity;
+                let exists = status.exists;
+                let max_cached_uid = database
+                    .run(move |conn| {
+                        db::folders::update_folder_status(conn, &name, validity, exists)?;
+                        db::messages::max_uid(conn, &name)
+                    })
+                    .await
+                    .map_err(AppError::InternalError)?;
+                let uid_range = (
+                    max_cached_uid.saturating_add(1),
+                    status.uid_next.saturating_sub(1),
+                );
 
                 tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
                     creds,
@@ -185,17 +243,35 @@ pub async fn list_messages(
                 syncing = true;
             }
         } else {
-            // No sync needed but still update the timestamp so TTL resets.
-            db::folders::update_folder_status(&conn, &folder, status.uid_validity, status.exists)
-                .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+            let name = folder.clone();
+            database
+                .run(move |conn| {
+                    db::folders::update_folder_status(
+                        conn,
+                        &name,
+                        status.uid_validity,
+                        status.exists,
+                    )
+                })
+                .await
+                .map_err(AppError::InternalError)?;
         }
     }
 
-    // Query paginated results from cache.
-    let messages = db::messages::get_messages(&conn, &folder, query.page, query.per_page)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
-    let total_count = db::messages::count_messages(&conn, &folder)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    let name = folder.clone();
+    let (messages, total_count, tags_map) = database
+        .run(move |conn| {
+            let messages = db::messages::get_messages(conn, &name, query.page, query.per_page)?;
+            let total = db::messages::count_messages(conn, &name)?;
+            let refs: Vec<_> = messages
+                .iter()
+                .map(|m| (m.uid, m.folder.as_str()))
+                .collect();
+            let tags = db::tags::get_tags_for_messages(conn, &refs)?;
+            Ok((messages, total, tags))
+        })
+        .await
+        .map_err(AppError::InternalError)?;
 
     tracing::info!(
         folder = %folder,
@@ -205,10 +281,6 @@ pub async fn list_messages(
         per_page = query.per_page,
         "list_messages: returning results"
     );
-
-    // Batch-fetch tags for all messages in this page.
-    let message_refs: Vec<(u32, &str)> = messages.iter().map(|m| (m.uid, m.folder.as_str())).collect();
-    let tags_map = db::tags::get_tags_for_messages(&conn, &message_refs).unwrap_or_default();
 
     let summaries: Vec<MessageSummary> = messages
         .into_iter()
@@ -257,9 +329,20 @@ fn upsert_and_index_headers(
     search_engine: &Arc<SearchEngine>,
     user_hash: &str,
 ) -> Result<(), AppError> {
+    let transaction = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     for header in headers {
-        let from_address = header.from.first().map(|a| a.address.as_str()).unwrap_or("");
-        let from_name = header.from.first().and_then(|a| a.name.as_deref()).unwrap_or("");
+        let from_address = header
+            .from
+            .first()
+            .map(|a| a.address.as_str())
+            .unwrap_or("");
+        let from_name = header
+            .from
+            .first()
+            .and_then(|a| a.name.as_deref())
+            .unwrap_or("");
         let to_json = serde_json::to_string(&header.to).unwrap_or_else(|_| "[]".to_string());
         let cc_json = serde_json::to_string(&header.cc).unwrap_or_else(|_| "[]".to_string());
         let subject = header.subject.as_deref().unwrap_or("");
@@ -267,11 +350,23 @@ fn upsert_and_index_headers(
         let flags_csv = header.flags.join(",");
 
         db::messages::upsert_message(
-            conn, folder, header.uid,
-            header.message_id.as_deref(), header.in_reply_to.as_deref(),
-            header.references.as_deref(), subject, from_address, from_name,
-            &to_json, &cc_json, date, &flags_csv, header.size,
-            header.has_attachments, "", header.reaction.as_deref(),
+            conn,
+            folder,
+            header.uid,
+            header.message_id.as_deref(),
+            header.in_reply_to.as_deref(),
+            header.references.as_deref(),
+            subject,
+            from_address,
+            from_name,
+            &to_json,
+            &cc_json,
+            date,
+            &flags_csv,
+            header.size,
+            header.has_attachments,
+            "",
+            header.reaction.as_deref(),
         )
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
@@ -279,6 +374,10 @@ fn upsert_and_index_headers(
         db::contacts::populate_known_addresses(conn, from_address, from_name, &to_json, &cc_json)
             .map_err(|e| AppError::InternalError(format!("Known addresses error: {e}")))?;
     }
+
+    transaction
+        .commit()
+        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Index for search (skip Spam/Junk/Trash).
     if !headers.is_empty()
@@ -312,6 +411,17 @@ fn upsert_and_index_headers(
     Ok(())
 }
 
+/// Bound each FETCH by existing messages, not by the size of gaps between UIDs.
+fn header_chunks(uids: &[u32]) -> impl Iterator<Item = String> + '_ {
+    uids.chunks(250).map(|chunk| {
+        chunk
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    })
+}
+
 /// Parameters for a background sync task, bundled to avoid too-many-arguments.
 struct BackgroundSyncParams {
     creds: ImapCredentials,
@@ -321,7 +431,7 @@ struct BackgroundSyncParams {
     user_hash: String,
     search_engine: Arc<SearchEngine>,
     event_bus: Arc<EventBus>,
-    uid_range: String,
+    uid_range: (u32, u32),
     uid_validity: u32,
     exists: u32,
 }
@@ -330,92 +440,64 @@ struct BackgroundSyncParams {
 /// frontend via EventBus when done. All errors are logged but non-fatal.
 async fn sync_remaining_headers(params: BackgroundSyncParams) {
     let BackgroundSyncParams {
-        creds, folder, imap_client, config, user_hash,
-        search_engine, event_bus, uid_range, uid_validity, exists,
+        creds,
+        folder,
+        imap_client,
+        config,
+        user_hash,
+        search_engine,
+        event_bus,
+        uid_range,
+        uid_validity,
+        exists,
     } = params;
-    let result: Result<(), String> = (async {
-        tracing::info!(folder = %folder, uid_range = %uid_range, "Background sync: fetching remaining headers");
-
-        let headers = imap_client
-            .fetch_headers(&creds, &folder, &uid_range)
-            .await
-            .map_err(|e| format!("IMAP error: {e}"))?;
-
-        tracing::info!(folder = %folder, fetched = headers.len(), "Background sync: fetched headers");
-
-        if headers.is_empty() {
-            return Ok(());
-        }
-
-        // Open a fresh DB connection (can't share across threads).
-        let conn = db::pool::open_user_db(&config.data_dir, &user_hash)
-            .map_err(|e| format!("Database error: {e}"))?;
-
-        for header in &headers {
-            let from_address = header.from.first().map(|a| a.address.as_str()).unwrap_or("");
-            let from_name = header.from.first().and_then(|a| a.name.as_deref()).unwrap_or("");
-            let to_json = serde_json::to_string(&header.to).unwrap_or_else(|_| "[]".to_string());
-            let cc_json = serde_json::to_string(&header.cc).unwrap_or_else(|_| "[]".to_string());
-            let subject = header.subject.as_deref().unwrap_or("");
-            let date = header.date.as_deref().unwrap_or("");
-            let flags_csv = header.flags.join(",");
-
-            db::messages::upsert_message(
-                &conn, &folder, header.uid,
-                header.message_id.as_deref(), header.in_reply_to.as_deref(),
-                header.references.as_deref(), subject, from_address, from_name,
-                &to_json, &cc_json, date, &flags_csv, header.size,
-                header.has_attachments, "", header.reaction.as_deref(),
-            )
-            .map_err(|e| format!("Database error: {e}"))?;
-
-            // Populate denormalized known_addresses table.
-            db::contacts::populate_known_addresses(&conn, from_address, from_name, &to_json, &cc_json)
-                .map_err(|e| format!("Known addresses error: {e}"))?;
-        }
-
-        // Index for search.
-        if !UserIndex::is_excluded_folder(&folder)
-            && let Ok(user_index) = search_engine.open_user_index(&user_hash)
-        {
-            let indexable: Vec<IndexableMessage> = headers
-                .iter()
-                .map(|h| {
-                    let from_address = h.from.first().map(|a| a.address.as_str()).unwrap_or("");
-                    let from_name = h.from.first().and_then(|a| a.name.as_deref()).unwrap_or("");
-                    let subject = h.subject.as_deref().unwrap_or("");
-                    let date = h.date.as_deref().unwrap_or("");
-                    let to_json = serde_json::to_string(&h.to).unwrap_or_else(|_| "[]".to_string());
-                    IndexableMessage {
-                        uid: h.uid,
-                        folder: folder.clone(),
-                        subject: subject.to_string(),
-                        from_address: from_address.to_string(),
-                        from_name: from_name.to_string(),
-                        to_addresses: to_json,
-                        body_text: String::new(),
-                        date_epoch: crate::db::messages::parse_date_to_epoch_public(date),
-                        has_attachments: h.has_attachments,
-                    }
+    let result: Result<(), String> = crate::imap::pool::background(async {
+        let database = db::pool::UserDb::new(&config.data_dir, &user_hash);
+        let mut uids = if uid_range.0 <= uid_range.1 {
+            imap_client
+                .fetch_uids_and_flags(&creds, &folder)
+                .await
+                .map_err(|e| format!("IMAP error: {e}"))?
+                .into_iter()
+                .map(|(uid, _)| uid)
+                .filter(|uid| (uid_range.0..=uid_range.1).contains(uid))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        uids.sort_unstable();
+        uids.dedup();
+        for uid_set in header_chunks(&uids) {
+            let headers = imap_client
+                .fetch_headers(&creds, &folder, &uid_set)
+                .await
+                .map_err(|e| format!("IMAP error: {e}"))?;
+            let name = folder.clone();
+            let engine = search_engine.clone();
+            let hash = user_hash.clone();
+            database
+                .run(move |conn| {
+                    upsert_and_index_headers(conn, &name, &headers, &engine, &hash)
+                        .map_err(|e| e.to_string())
                 })
-                .collect();
-            let _ = user_index.index_messages_batch(&indexable);
+                .await?;
         }
-
-        // Update folder status and unread count.
-        db::folders::update_folder_status(&conn, &folder, uid_validity, exists)
-            .map_err(|e| format!("Database error: {e}"))?;
-        db::folders::refresh_unread_count(&conn, &folder)
-            .map_err(|e| format!("Database error: {e}"))?;
-
-        Ok(())
+        let name = folder.clone();
+        database
+            .run(move |conn| {
+                db::folders::update_folder_status(conn, &name, uid_validity, exists)?;
+                db::folders::refresh_unread_count(conn, &name)
+            })
+            .await
     })
     .await;
 
     match result {
         Ok(()) => {
             tracing::info!(folder = %folder, "Background sync: complete");
-            event_bus.publish(&user_hash, MailEvent::FolderUpdated).await;
+            event_bus
+                .publish(&user_hash, MailEvent::FolderUpdated)
+                .await;
         }
         Err(e) => {
             tracing::warn!(folder = %folder, error = %e, "Background sync: failed (will retry on next request)");
@@ -701,6 +783,8 @@ pub async fn update_flags(
     Path((folder, uid)): Path<(String, u32)>,
     Json(body): Json<UpdateFlagsRequest>,
 ) -> Result<Response, AppError> {
+    validate_flags(&body.flags)?;
+
     let creds = build_creds(&session, &config)?;
 
     // Convert flags to &str slices for the IMAP client.
@@ -863,9 +947,25 @@ pub async fn download_attachment(
         })?;
 
     // Build the response with appropriate headers.
-    let filename = attachment
+    let raw_filename = attachment
         .filename
         .unwrap_or_else(|| format!("attachment_{index}"));
+    // Strip ASCII control characters (U+0000-U+001F and U+007F). MIME
+    // decoders can surface them via quoted-pair escapes in malformed emails,
+    // and HeaderValue rejects those bytes. HeaderValue::from_str routes
+    // through is_valid (accepts 0x09, 0x20-0x7E, 0x80-0xFF; rejects
+    // 0x00-0x08, 0x0A-0x1F, 0x7F), so non-ASCII UTF-8 bytes are fine.
+    let filename: String = raw_filename
+        .chars()
+        .filter(|c| !c.is_ascii_control())
+        .collect();
+    // Fall back to a safe default if stripping left nothing (e.g. the
+    // original filename was composed entirely of control characters).
+    let filename = if filename.is_empty() {
+        format!("attachment_{index}")
+    } else {
+        filename
+    };
     let content_type = preview_content_type(&attachment.content_type, Some(&filename), &attachment.data);
 
     // Use inline disposition for types the browser can display natively
@@ -879,11 +979,11 @@ pub async fn download_attachment(
         format!("attachment; filename=\"{}\"", filename.replace('"', "\\\""))
     };
 
-    Ok(Response::builder()
+    Response::builder()
         .header("content-type", &content_type)
         .header("content-disposition", &disposition)
         .body(axum::body::Body::from(attachment.data))
-        .unwrap())
+        .map_err(|e| AppError::InternalError(format!("Failed to build response: {e}")))
 }
 
 fn preview_content_type(content_type: &str, filename: Option<&str>, data: &[u8]) -> String {
@@ -901,7 +1001,25 @@ fn preview_content_type(content_type: &str, filename: Option<&str>, data: &[u8])
 
 #[cfg(test)]
 mod preview_tests {
-    use super::preview_content_type;
+    use super::{is_valid_flag, preview_content_type, validate_flags};
+
+    #[test]
+    fn accepts_common_system_flags_and_keywords() {
+        for flag in ["\\Seen", "\\Answered", "\\Flagged", "\\Deleted", "\\Draft", "Junk", "$Forwarded", "$MDNSent", "custom_tag-1.0+"] {
+            assert!(is_valid_flag(flag), "rejected {flag:?}");
+        }
+        assert!(validate_flags(&[]).is_ok());
+        assert!(is_valid_flag(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn rejects_unsafe_flags_and_enforces_length_limit() {
+        for flag in ["", "\\", "two flags", "tag\r\nSTORE", "tag\0", "tag\t", "(tag)", "tag{1}", "tag\\Seen", "étiquette"] {
+            assert!(!is_valid_flag(flag), "accepted {flag:?}");
+        }
+        assert!(!is_valid_flag(&"a".repeat(65)));
+        assert!(validate_flags(&["\\Seen".to_string(), "two flags".to_string()]).is_err());
+    }
 
     #[test]
     fn normalizes_pdf_media_types() {
@@ -943,4 +1061,104 @@ pub async fn delete_message_handler(
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+    use crate::imap::client::mock::MockImapClient;
+
+    #[test]
+    fn chunks_bound_existing_messages_even_with_sparse_uids() {
+        assert_eq!(header_chunks(&[]).count(), 0);
+        let sparse = [1, 10_000_000, u32::MAX];
+        assert_eq!(
+            header_chunks(&sparse).collect::<Vec<_>>(),
+            vec!["1,10000000,4294967295"]
+        );
+
+        let uids: Vec<_> = (1..=501).map(|uid| uid * 1_000_000).collect();
+        let chunks: Vec<_> = header_chunks(&uids).collect();
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].split(',').count(), 250);
+        assert_eq!(chunks[1].split(',').count(), 250);
+        assert_eq!(chunks[2].split(',').count(), 1);
+        let fetched: Vec<u32> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.split(',').map(|uid| uid.parse().unwrap()))
+            .collect();
+        assert_eq!(fetched, uids);
+    }
+
+    #[tokio::test]
+    async fn sparse_background_sync_fetches_existing_uids_in_one_batch() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = data_dir.path().to_str().unwrap();
+        let user_hash = "sparse-sync";
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 1, 0).unwrap();
+        drop(conn);
+        let headers = [1, 9_999_899, 10_000_000].map(|uid| crate::imap::types::ImapMessageHeader {
+            uid,
+            subject: Some(format!("Message {uid}")),
+            from: Vec::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            date: None,
+            flags: Vec::new(),
+            has_attachments: false,
+            size: 42,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            reaction: None,
+        });
+        let client = Arc::new(MockImapClient::new().with_headers(headers.to_vec()));
+        let config = Arc::new(AppConfig {
+            data_dir: path.to_owned(),
+            ..serde_json::from_str::<AppConfig>("{}").unwrap()
+        });
+        let event_bus = Arc::new(EventBus::new());
+        let mut events = event_bus.subscribe(user_hash).await;
+
+        sync_remaining_headers(BackgroundSyncParams {
+            creds: ImapCredentials {
+                host: "localhost".into(),
+                port: 143,
+                tls: false,
+                email: "test@example.com".into(),
+                password: "test".into(),
+            },
+            folder: "INBOX".into(),
+            imap_client: client.clone(),
+            config,
+            user_hash: user_hash.into(),
+            search_engine: Arc::new(SearchEngine::new(data_dir.path().to_path_buf())),
+            event_bus,
+            uid_range: (1, 9_999_900),
+            uid_validity: 1,
+            exists: 3,
+        })
+        .await;
+
+        assert_eq!(
+            *client.header_requests.lock().unwrap(),
+            vec![("INBOX".into(), "1,9999899".into())]
+        );
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            MailEvent::FolderUpdated
+        ));
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 1)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 9_999_899)
+                .unwrap()
+                .is_some()
+        );
+    }
 }

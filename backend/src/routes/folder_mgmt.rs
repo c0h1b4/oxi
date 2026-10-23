@@ -64,6 +64,11 @@ fn validate_folder_name(name: &str) -> Result<(), AppError> {
             "Folder name contains invalid characters".to_string(),
         ));
     }
+    if name.chars().any(|c| c.is_control()) {
+        return Err(AppError::BadRequest(
+            "Folder name contains invalid characters".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -242,6 +247,14 @@ mod tests {
     fn test_validate_folder_name_too_long() {
         let long = "a".repeat(256);
         assert!(validate_folder_name(&long).is_err());
+    }
+
+    #[test]
+    fn test_validate_folder_name_control_chars() {
+        for control in ['\0', '\t', '\r', '\n', '\u{7f}', '\u{85}'] {
+            assert!(validate_folder_name(&format!("test{control}folder")).is_err());
+        }
+        assert!(validate_folder_name("Projects/café").is_ok());
     }
 
     #[test]

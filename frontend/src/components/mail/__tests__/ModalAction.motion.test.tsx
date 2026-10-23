@@ -267,7 +267,9 @@ vi.mock("@/components/ui/input", () => ({
 }));
 
 vi.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  Label: ({ children, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) => (
+    <label {...props}>{children}</label>
+  ),
 }));
 
 import { ComposeDialog } from "../ComposeDialog";
