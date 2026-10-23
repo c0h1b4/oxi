@@ -6,13 +6,12 @@ use crate::db;
 use crate::email_theme;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::{EventBus, MailEvent};
-use crate::search::engine::{IndexableMessage, SearchEngine};
 use crate::search::engine::UserIndex;
+use crate::search::engine::{IndexableMessage, SearchEngine};
 
 /// How often to run a sync check (seconds).
-/// STATUS checks are cheap (no SELECT), so 30s is a tight safety net
-/// for non-INBOX folders that don't have IDLE.
-const SYNC_INTERVAL_SECS: u64 = 30;
+/// Reconcile every three minutes, including an INBOX safety net if IDLE drops.
+const SYNC_INTERVAL_SECS: u64 = 180;
 
 /// Run a periodic reconciliation loop for a user.
 ///
@@ -35,7 +34,16 @@ pub async fn sync_loop(
     loop {
         interval.tick().await;
 
-        if let Err(e) = run_sync(&user_hash, &creds, &config, imap_client.as_ref(), &event_bus, &search_engine).await {
+        if let Err(e) = crate::imap::pool::background(run_sync(
+            &user_hash,
+            &creds,
+            &config,
+            imap_client.as_ref(),
+            &event_bus,
+            search_engine.clone(),
+        ))
+        .await
+        {
             tracing::warn!(
                 user = %creds.email,
                 error = %e,
@@ -51,23 +59,21 @@ async fn run_sync(
     config: &AppConfig,
     imap_client: &dyn ImapClient,
     event_bus: &EventBus,
-    search_engine: &SearchEngine,
+    search_engine: Arc<SearchEngine>,
 ) -> Result<(), String> {
-    // Collect folder metadata in a non-async block so `conn` is dropped before awaits.
-    let folder_snapshots = {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        let cached_folders = db::folders::get_all_folders(&conn)
-            .map_err(|e| format!("DB error: {e}"))?;
-        cached_folders
-            .into_iter()
-            .map(|f| FolderSnapshot {
-                name: f.name,
-                uid_validity: f.uid_validity,
-                highest_modseq: f.highest_modseq,
-            })
-            .collect::<Vec<_>>()
-    };
+    let database = db::pool::UserDb::new(&config.data_dir, user_hash);
+    let folder_snapshots = database
+        .run(|conn| {
+            Ok(db::folders::get_all_folders(conn)?
+                .into_iter()
+                .map(|f| FolderSnapshot {
+                    name: f.name,
+                    uid_validity: f.uid_validity,
+                    highest_modseq: f.highest_modseq,
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
 
     let mut any_changes = false;
 
@@ -95,22 +101,23 @@ async fn run_sync(
                 new_validity = status.uid_validity,
                 "UIDVALIDITY changed, invalidating folder"
             );
-            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-                .map_err(|e| format!("DB error: {e}"))?;
-            let _ = db::folders::invalidate_folder_freshness(&conn, folder_name);
+            let name = folder_name.clone();
+            database
+                .run(move |conn| db::folders::invalidate_folder_freshness(conn, &name))
+                .await?;
             any_changes = true;
-            event_bus
-                .publish(user_hash, MailEvent::FolderUpdated)
-                .await;
+            event_bus.publish(user_hash, MailEvent::FolderUpdated).await;
             continue;
         }
 
         // If CONDSTORE is supported (highest_modseq > 0) and matches cached → skip.
         let cached_modseq = folder.highest_modseq;
-        if status.highest_modseq > 0 && cached_modseq > 0 && status.highest_modseq == cached_modseq {
-            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-                .map_err(|e| format!("DB error: {e}"))?;
-            let cached_count = db::messages::count_messages(&conn, folder_name).unwrap_or(0);
+        if status.highest_modseq > 0 && cached_modseq > 0 && status.highest_modseq == cached_modseq
+        {
+            let name = folder_name.clone();
+            let cached_count = database
+                .run(move |conn| db::messages::count_messages(conn, &name))
+                .await?;
             if status.exists == cached_count {
                 tracing::debug!(
                     folder = %folder_name,
@@ -124,8 +131,16 @@ async fn run_sync(
         // ── Tier 2: CONDSTORE incremental fetch ──────────────────────
         if status.highest_modseq > 0 && cached_modseq > 0 {
             let folder_changed = sync_condstore(
-                config, user_hash, creds, imap_client, folder_name, cached_modseq, &status, event_bus,
-            ).await?;
+                config,
+                user_hash,
+                creds,
+                imap_client,
+                folder_name,
+                cached_modseq,
+                &status,
+                event_bus,
+            )
+            .await?;
             if folder_changed {
                 any_changes = true;
             }
@@ -134,8 +149,15 @@ async fn run_sync(
 
         // ── Tier 3: Full fetch fallback ──────────────────────────────
         let folder_changed = sync_full(
-            config, user_hash, creds, imap_client, folder_name, &status, event_bus,
-        ).await?;
+            config,
+            user_hash,
+            creds,
+            imap_client,
+            folder_name,
+            &status,
+            event_bus,
+        )
+        .await?;
         if folder_changed {
             any_changes = true;
         }
@@ -146,7 +168,8 @@ async fn run_sync(
     }
 
     // ── Deep index phase: fetch & index bodies if enabled ────────────
-    if let Err(e) = index_message_bodies(user_hash, creds, config, imap_client, search_engine).await {
+    if let Err(e) = index_message_bodies(user_hash, creds, config, imap_client, search_engine).await
+    {
         tracing::debug!(error = %e, "Deep index phase skipped or failed");
     }
 
@@ -163,30 +186,23 @@ async fn index_message_bodies(
     creds: &ImapCredentials,
     config: &AppConfig,
     imap_client: &dyn ImapClient,
-    search_engine: &SearchEngine,
+    search_engine: Arc<SearchEngine>,
 ) -> Result<(), String> {
-    let unindexed = {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-
-        // Check if deep_index is enabled.
-        let prefs = db::display_preferences::get_preferences(&conn)?;
-        if !prefs.deep_index {
-            return Ok(());
-        }
-
-        db::messages::get_unindexed_messages(&conn, DEEP_INDEX_BATCH)?
-    };
+    let database = db::pool::UserDb::new(&config.data_dir, user_hash);
+    let unindexed = database
+        .run(|conn| {
+            if !db::display_preferences::get_preferences(conn)?.deep_index {
+                return Ok(Vec::new());
+            }
+            db::messages::get_unindexed_messages(conn, DEEP_INDEX_BATCH)
+        })
+        .await?;
 
     if unindexed.is_empty() {
         return Ok(());
     }
 
     tracing::debug!(count = unindexed.len(), "Deep indexing message bodies");
-
-    let user_index = search_engine
-        .open_user_index(user_hash)
-        .map_err(|e| format!("Search index error: {e}"))?;
 
     for (folder, uid) in &unindexed {
         if UserIndex::is_excluded_folder(folder) {
@@ -201,48 +217,48 @@ async fn index_message_bodies(
             }
         };
 
-        // Cache the body in the DB.
-        {
-            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-                .map_err(|e| format!("DB error: {e}"))?;
-
-            let att_json = serde_json::to_string(&body.attachments).ok();
-            let detected_theme = body.text_html
-                .as_ref()
-                .and_then(|h| email_theme::detect_email_theme(h))
-                .map(|t| t.as_i32());
-
-            db::messages::cache_message_body(
-                &conn,
-                folder,
-                *uid,
-                body.text_html.as_deref(),
-                body.text_plain.as_deref(),
-                att_json.as_deref(),
-                Some(&body.raw_headers),
-                detected_theme,
-            )?;
-        }
-
-        // Re-index with body text.
-        if let Some(ref text) = body.text_plain {
-            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-                .map_err(|e| format!("DB error: {e}"))?;
-            if let Some(msg) = db::messages::get_single_message(&conn, folder, *uid)? {
-                let indexable = IndexableMessage {
-                    uid: msg.uid,
-                    folder: msg.folder,
-                    subject: msg.subject,
-                    from_address: msg.from_address,
-                    from_name: msg.from_name,
-                    to_addresses: msg.to_addresses,
-                    body_text: text.clone(),
-                    date_epoch: db::messages::parse_date_to_epoch_public(&msg.date),
-                    has_attachments: msg.has_attachments,
-                };
-                let _ = user_index.index_message(&indexable);
-            }
-        }
+        let folder = folder.clone();
+        let uid = *uid;
+        let engine = search_engine.clone();
+        let hash = user_hash.to_owned();
+        database
+            .run(move |conn| {
+                let att_json = serde_json::to_string(&body.attachments).ok();
+                let detected_theme = body
+                    .text_html
+                    .as_ref()
+                    .and_then(|h| email_theme::detect_email_theme(h))
+                    .map(|t| t.as_i32());
+                db::messages::cache_message_body(
+                    conn,
+                    &folder,
+                    uid,
+                    body.text_html.as_deref(),
+                    body.text_plain.as_deref(),
+                    att_json.as_deref(),
+                    Some(&body.raw_headers),
+                    detected_theme,
+                )?;
+                if let Some(text) = body.text_plain
+                    && let Some(msg) = db::messages::get_single_message(conn, &folder, uid)?
+                {
+                    engine
+                        .open_user_index(&hash)?
+                        .index_message(&IndexableMessage {
+                            uid: msg.uid,
+                            folder: msg.folder,
+                            subject: msg.subject,
+                            from_address: msg.from_address,
+                            from_name: msg.from_name,
+                            to_addresses: msg.to_addresses,
+                            body_text: text,
+                            date_epoch: db::messages::parse_date_to_epoch_public(&msg.date),
+                            has_attachments: msg.has_attachments,
+                        })?;
+                }
+                Ok(())
+            })
+            .await?;
     }
 
     tracing::debug!(count = unindexed.len(), "Deep index batch complete");
@@ -268,10 +284,11 @@ async fn sync_condstore(
     status: &crate::imap::types::FolderStatusExtended,
     event_bus: &EventBus,
 ) -> Result<bool, String> {
-    let mut folder_changed = false;
-
     // Fetch only messages whose flags changed since our cached modseq.
-    let (changed, new_modseq) = match imap_client.fetch_changed_flags(creds, folder_name, cached_modseq).await {
+    let (changed, new_modseq) = match imap_client
+        .fetch_changed_flags(creds, folder_name, cached_modseq)
+        .await
+    {
         Ok(result) => result,
         Err(e) => {
             tracing::debug!(
@@ -279,87 +296,89 @@ async fn sync_condstore(
                 error = %e,
                 "CONDSTORE fetch failed, falling back to full sync"
             );
-            return sync_full(config, user_hash, creds, imap_client, folder_name, status, event_bus).await;
+            return sync_full(
+                config,
+                user_hash,
+                creds,
+                imap_client,
+                folder_name,
+                status,
+                event_bus,
+            )
+            .await;
         }
     };
 
-    // Apply changed flags (DB operations in a non-async block).
-    {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        for (uid, flags) in &changed {
-            let mut sorted = flags.clone();
-            sorted.sort();
-            let flags_csv = sorted.join(",");
-            let _ = db::messages::update_message_flags(&conn, folder_name, *uid, &flags_csv);
-        }
-        if !changed.is_empty() {
-            folder_changed = true;
-        }
-    }
-
-    // Detect deletions: if server count < cached count, some messages were removed.
-    let cached_count = {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        db::messages::count_messages(&conn, folder_name).unwrap_or(0)
+    let database = db::pool::UserDb::new(&config.data_dir, user_hash);
+    let name = folder_name.to_owned();
+    let cached_count = database
+        .run(move |conn| db::messages::count_messages(conn, &name))
+        .await?;
+    let imap_uids = if status.exists < cached_count {
+        Some(
+            imap_client
+                .fetch_uids_and_flags(creds, folder_name)
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|(uid, _)| uid)
+                .collect::<HashSet<_>>(),
+        )
+    } else {
+        None
     };
-
-    if status.exists < cached_count {
-        // Need to fetch all UIDs to find which ones were deleted.
-        if let Ok(imap_state) = imap_client.fetch_uids_and_flags(creds, folder_name).await {
-            let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-                .map_err(|e| format!("DB error: {e}"))?;
-            let imap_uids: HashSet<u32> = imap_state.iter().map(|(uid, _)| *uid).collect();
-            let cached = db::messages::get_all_uids_and_flags(&conn, folder_name)
-                .unwrap_or_default();
-            for (uid, _) in &cached {
-                if !imap_uids.contains(uid) {
-                    let _ = db::messages::delete_message(&conn, folder_name, *uid);
-                    folder_changed = true;
-                    tracing::debug!(
-                        folder = %folder_name,
-                        uid = uid,
-                        "Removed deleted message from cache (CONDSTORE path)"
-                    );
+    let name = folder_name.to_owned();
+    let status = status.clone();
+    let (folder_changed, new_messages) = database
+        .run(move |conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let mut folder_changed = !changed.is_empty();
+            for (uid, mut flags) in changed {
+                flags.sort();
+                db::messages::update_message_flags(conn, &name, uid, &flags.join(","))?;
+            }
+            if let Some(imap_uids) = imap_uids {
+                for (uid, _) in db::messages::get_all_uids_and_flags(conn, &name)? {
+                    if !imap_uids.contains(&uid) {
+                        db::messages::delete_message(conn, &name, uid)?;
+                        folder_changed = true;
+                    }
                 }
             }
-        }
-    }
-
-    // Detect new messages.
-    let max_cached_uid = {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        db::messages::max_uid(&conn, folder_name).unwrap_or(0)
-    };
-
-    if status.uid_next > max_cached_uid + 1 {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        let _ = db::folders::invalidate_folder_freshness(&conn, folder_name);
-        folder_changed = true;
+            let max_uid = db::messages::max_uid(conn, &name)?;
+            let new_messages = status.uid_next > max_uid.saturating_add(1);
+            let modseq = if new_modseq > 0 {
+                new_modseq
+            } else {
+                status.highest_modseq
+            };
+            db::folders::update_folder_sync_status(
+                conn,
+                &name,
+                status.uid_validity,
+                status.exists,
+                modseq,
+            )?;
+            if new_messages {
+                db::folders::invalidate_folder_freshness(conn, &name)?;
+                folder_changed = true;
+            }
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok((folder_changed, new_messages))
+        })
+        .await?;
+    if new_messages {
         event_bus
             .publish(
                 user_hash,
                 MailEvent::NewMessages {
-                    folder: folder_name.to_string(),
+                    folder: folder_name.to_owned(),
                     count: 0,
                     latest_sender: None,
                     latest_subject: None,
                 },
             )
             .await;
-    }
-
-    // Update stored modseq.
-    let final_modseq = if new_modseq > 0 { new_modseq } else { status.highest_modseq };
-    {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        let _ = db::folders::update_folder_sync_status(
-            &conn, folder_name, status.uid_validity, status.exists, final_modseq,
-        );
     }
 
     if folder_changed {
@@ -386,19 +405,25 @@ async fn sync_full(
     status: &crate::imap::types::FolderStatusExtended,
     event_bus: &EventBus,
 ) -> Result<bool, String> {
-    let cached = {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        db::messages::get_all_uids_and_flags(&conn, folder_name)
-            .map_err(|e| format!("DB error: {e}"))?
-    };
-
+    let database = db::pool::UserDb::new(&config.data_dir, user_hash);
+    let name = folder_name.to_owned();
+    let cached = database
+        .run(move |conn| db::messages::get_all_uids_and_flags(conn, &name))
+        .await?;
     if cached.is_empty() {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-        let _ = db::folders::update_folder_sync_status(
-            &conn, folder_name, status.uid_validity, status.exists, status.highest_modseq,
-        );
+        let name = folder_name.to_owned();
+        let status = status.clone();
+        database
+            .run(move |conn| {
+                db::folders::update_folder_sync_status(
+                    conn,
+                    &name,
+                    status.uid_validity,
+                    status.exists,
+                    status.highest_modseq,
+                )
+            })
+            .await?;
         return Ok(false);
     }
 
@@ -414,54 +439,63 @@ async fn sync_full(
         }
     };
 
-    let imap_map: HashMap<u32, String> = imap_state
-        .into_iter()
-        .map(|(uid, flags)| {
-            let mut sorted = flags;
-            sorted.sort();
-            (uid, sorted.join(","))
-        })
-        .collect();
+    let name = folder_name.to_owned();
+    let status = status.clone();
+    let folder_changed = database
+        .run(move |conn| {
+            let folder_name = &name;
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let imap_map: HashMap<u32, String> = imap_state
+                .into_iter()
+                .map(|(uid, flags)| {
+                    let mut sorted = flags;
+                    sorted.sort();
+                    (uid, sorted.join(","))
+                })
+                .collect();
 
-    let mut folder_changed = false;
+            let mut folder_changed = false;
 
-    {
-        let conn = db::pool::open_user_db(&config.data_dir, user_hash)
-            .map_err(|e| format!("DB error: {e}"))?;
-
-        for (uid, cached_flags_csv) in &cached {
-            match imap_map.get(uid) {
-                None => {
-                    let _ = db::messages::delete_message(&conn, folder_name, *uid);
-                    folder_changed = true;
-                    tracing::debug!(
-                        folder = %folder_name,
-                        uid = uid,
-                        "Removed deleted message from cache"
-                    );
-                }
-                Some(imap_flags_csv) => {
-                    let mut cached_sorted: Vec<&str> = cached_flags_csv.split(',').collect();
-                    cached_sorted.sort();
-                    let cached_normalized = cached_sorted.join(",");
-
-                    if cached_normalized != *imap_flags_csv {
-                        let _ = db::messages::update_message_flags(
-                            &conn,
-                            folder_name,
-                            *uid,
-                            imap_flags_csv,
-                        );
+            for (uid, cached_flags_csv) in &cached {
+                match imap_map.get(uid) {
+                    None => {
+                        db::messages::delete_message(conn, folder_name, *uid)?;
                         folder_changed = true;
+                        tracing::debug!(
+                            folder = %folder_name,
+                            uid = uid,
+                            "Removed deleted message from cache"
+                        );
+                    }
+                    Some(imap_flags_csv) => {
+                        let mut cached_sorted: Vec<&str> = cached_flags_csv.split(',').collect();
+                        cached_sorted.sort();
+                        let cached_normalized = cached_sorted.join(",");
+
+                        if cached_normalized != *imap_flags_csv {
+                            db::messages::update_message_flags(
+                                conn,
+                                folder_name,
+                                *uid,
+                                imap_flags_csv,
+                            )?;
+                            folder_changed = true;
+                        }
                     }
                 }
             }
-        }
 
-        let _ = db::folders::update_folder_sync_status(
-            &conn, folder_name, status.uid_validity, status.exists, status.highest_modseq,
-        );
-    }
+            db::folders::update_folder_sync_status(
+                conn,
+                folder_name,
+                status.uid_validity,
+                status.exists,
+                status.highest_modseq,
+            )?;
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok(folder_changed)
+        })
+        .await?;
 
     if folder_changed {
         event_bus

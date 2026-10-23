@@ -1,6 +1,21 @@
 use super::error::ImapError;
 use super::types::ImapCredentials;
 
+// Counts connection attempts by credential identity for isolated regression tests.
+#[cfg(test)]
+static CONNECTION_COUNTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<[u8; 32], usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+pub(super) fn connection_count(creds: &ImapCredentials) -> usize {
+    *CONNECTION_COUNTS
+        .lock()
+        .unwrap()
+        .get(&super::pool::identity(creds))
+        .unwrap_or(&0)
+}
+
 // ---- Connection helper ----------------------------------------------------
 
 /// Establish an authenticated IMAP session.
@@ -12,6 +27,14 @@ use super::types::ImapCredentials;
 pub(crate) async fn connect(
     creds: &ImapCredentials,
 ) -> Result<async_imap::Session<ImapStream>, ImapError> {
+    #[cfg(test)]
+    {
+        *CONNECTION_COUNTS
+            .lock()
+            .unwrap()
+            .entry(super::pool::identity(creds))
+            .or_default() += 1;
+    }
     let connect_future = tokio::net::TcpStream::connect((creds.host.as_str(), creds.port));
     // 10 second timeout for the initial TCP connection
     let tcp = tokio::time::timeout(std::time::Duration::from_secs(10), connect_future)

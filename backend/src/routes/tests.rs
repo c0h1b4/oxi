@@ -1532,6 +1532,35 @@
     }
 
     #[tokio::test]
+    async fn quota_without_server_limit_uses_cached_sizes() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let path = data_dir.path().to_str().unwrap();
+        let config = test_config_with_imap(static_dir.path().to_str().unwrap(), path);
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+        let hash = crate::auth::user_data::hash_email("alice@example.com");
+        let conn = crate::db::pool::open_user_db(path, &hash).unwrap();
+        crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 1, 1, 1, 0).unwrap();
+        crate::db::messages::upsert_message(&conn, "INBOX", 1, None, None, None,
+            "subject", "alice@example.com", "Alice", "[]", "[]", "", "", 4096, false, "", None).unwrap();
+        drop(conn);
+        // The mock's IMAP size fallback returns zero; only SQLite has 4096.
+        let app = create_router(config, store, test_imap_client(), test_smtp_client(),
+            test_search_engine(path), test_event_bus(), test_idle_manager());
+        let mut req = Request::builder().uri("/api/quota");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["usage_bytes"], 4096);
+        assert!(json["limit_bytes"].is_null());
+    }
+
+    #[tokio::test]
     async fn export_contact_strips_control_chars_from_filename() {
         for (name, expected_filename) in [
             ("Bob\nSmith", "BobSmith.vcf"),

@@ -568,7 +568,6 @@ pub async fn logout(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde::Serialize;
 
     #[derive(Serialize)]
