@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
 
 vi.mock("framer-motion", async () => {
@@ -79,7 +79,7 @@ vi.mock("@/hooks/useMessages", () => ({
 }));
 
 vi.mock("../EmailRenderer", () => ({
-  EmailRenderer: () => <div data-testid="email-renderer" />,
+  EmailRenderer: ({ theme }: { theme: string }) => <div data-testid="email-renderer" data-theme={theme} />,
   hasRemoteResources: () => false,
 }));
 
@@ -101,7 +101,7 @@ vi.mock("../ReadingPane/index", () => ({
 
 import { ReadingPane } from "../ReadingPane";
 
-function setMessage(uid: number) {
+function setMessage(uid: number, overrides: { folder?: string; html?: string; text?: string } = {}) {
   mockUseMessage.mockReturnValue({
     data: {
       uid,
@@ -118,6 +118,7 @@ function setMessage(uid: number) {
       raw_headers: "X-Test: yes",
       attachments: [],
       thread: [],
+      ...overrides,
     },
     isLoading: false,
     isError: false,
@@ -128,6 +129,65 @@ function setMessage(uid: number) {
 }
 
 describe("ReadingPane motion transitions", () => {
+  beforeEach(() => {
+    mockUiState.activeFolder = "INBOX";
+    mockAuthState.activeAccountId = "acc-1";
+  });
+
+  it("derives the plain-text default when message data finishes loading", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.selectedMessageUid = 1;
+    mockUseMessage.mockReturnValue({ isLoading: true });
+    const { rerender } = render(<ReadingPane />);
+
+    setMessage(1, { html: "", text: "Plain message" });
+    rerender(<ReadingPane />);
+
+    expect(screen.getByText("Plain message")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "HTML" })).toBeTruthy();
+    expect(screen.queryByTestId("email-renderer")).toBeNull();
+  });
+
+  it("preserves view choices on refetch and resets them for each selected message", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.selectedMessageUid = 1;
+    setMessage(1);
+    const { rerender } = render(<ReadingPane />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto theme" }));
+    setMessage(1, { text: "Updated text" });
+    rerender(<ReadingPane />);
+    expect(screen.getByText("Updated text")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Light mode" })).toBeTruthy();
+
+    mockUiState.selectedMessageUid = 2;
+    setMessage(2);
+    rerender(<ReadingPane />);
+    expect(screen.getByTestId("email-renderer").getAttribute("data-theme")).toBe("auto");
+    expect(screen.getByRole("button", { name: "Plain text" })).toBeTruthy();
+  });
+
+  it("resets view choices across folders and accounts with the same UID", () => {
+    mockUiState.effectiveAnimationMode = "off";
+    mockUiState.selectedMessageUid = 1;
+    setMessage(1);
+    const { rerender } = render(<ReadingPane />);
+
+    for (const selectNext of [
+      () => { mockUiState.activeFolder = "Archive"; },
+      () => { mockAuthState.activeAccountId = "acc-2"; },
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: "Plain text" }));
+      fireEvent.click(screen.getByRole("button", { name: "Auto theme" }));
+      selectNext();
+      setMessage(1, { folder: mockUiState.activeFolder });
+      rerender(<ReadingPane />);
+      expect(screen.getByTestId("email-renderer").getAttribute("data-theme")).toBe("auto");
+      expect(screen.getByRole("button", { name: "Plain text" })).toBeTruthy();
+    }
+  });
+
   it("animates content transition when selected UID changes", () => {
     mockUiState.effectiveAnimationMode = "medium";
     mockUiState.selectedMessageUid = 1;

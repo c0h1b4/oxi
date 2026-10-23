@@ -44,9 +44,17 @@ export function ReadingPane() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
   const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
-  const [bodyMode, setBodyMode] = useState<BodyMode>("html");
+  const selectedMessageKey = `${activeAccountId}:${activeFolder}:${selectedMessageUid}`;
+  const [messageView, setMessageView] = useState<{
+    key: string;
+    bodyMode: BodyMode | null;
+    emailTheme: "auto" | "light" | "dark";
+  }>({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+  if (messageView.key !== selectedMessageKey) {
+    setMessageView({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+  }
   const [showHeaders, setShowHeaders] = useState(false);
-  const [emailTheme, setEmailTheme] = useState<"auto" | "light" | "dark">("auto");
+  const emailTheme = messageView.emailTheme;
   const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
     new Set()
   );
@@ -77,16 +85,9 @@ export function ReadingPane() {
     queryClient.invalidateQueries({ queryKey: ["search"] });
   }, [isError, error, selectedMessageUid, activeFolder, selectMessage, queryClient]);
 
-  // Auto-switch to plain text mode for plaintext-only emails
-  useEffect(() => {
-    if (data && !data.html && data.text) {
-      setBodyMode("plain");
-    } else {
-      setBodyMode("html");
-    }
-    setEmailTheme("auto");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.uid]);
+  const bodyMode = messageView.bodyMode ?? (
+    data && !data.html && data.text ? "plain" : "html"
+  );
 
   // Auto-mark unread messages as read when opened.
   useEffect(() => {
@@ -208,7 +209,10 @@ export function ReadingPane() {
           <button
             type="button"
             onClick={() => {
-              setBodyMode(bodyMode === "html" ? "plain" : "html");
+              setMessageView({
+                ...messageView,
+                bodyMode: bodyMode === "html" ? "plain" : "html",
+              });
               setShowHeaders(false);
             }}
             className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -239,9 +243,11 @@ export function ReadingPane() {
           <button
             type="button"
             onClick={() => {
-              if (emailTheme === "auto") setEmailTheme("light");
-              else if (emailTheme === "light") setEmailTheme("dark");
-              else setEmailTheme("auto");
+              setMessageView({
+                ...messageView,
+                emailTheme:
+                  emailTheme === "auto" ? "light" : emailTheme === "light" ? "dark" : "auto",
+              });
             }}
             className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
               emailTheme !== "auto"
