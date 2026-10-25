@@ -20,11 +20,13 @@
           version = "0.1.0";
           src = ../frontend;
           inherit bunDeps;
-          patches = [ ./local-fonts.patch ];
           # next/font/google fetches during compilation, which cannot work in
           # the Nix sandbox. Keep development builds unchanged and use fonts
           # supplied by nixpkgs for the packaged frontend.
           postPatch = ''
+            # The locked bun2nix bunPatchPhase does not consume `patches`.
+            # Apply explicitly in its postPatch hook, which it does execute.
+            ${pkgs.patch}/bin/patch -p1 < ${./local-fonts.patch}
             mkdir -p src/app/fonts
             cp ${pkgs.inter}/share/fonts/truetype/InterVariable.ttf src/app/fonts/
             cp ${pkgs.jetbrains-mono}/share/fonts/truetype/JetBrainsMono-*.ttf src/app/fonts/
