@@ -20,6 +20,7 @@
           version = "0.1.0";
           src = ../frontend;
           inherit bunDeps;
+          nativeBuildInputs = [ pkgs.nodejs_24 ];
           # next/font/google fetches during compilation, which cannot work in
           # the Nix sandbox. Keep development builds unchanged and use fonts
           # supplied by nixpkgs for the packaged frontend.
@@ -40,7 +41,9 @@
 
           buildPhase = ''
             export NEXT_TELEMETRY_DISABLED=1
-            bun run build
+            # Bun remains the dependency installer, but Next.js and its workers
+            # must use Node: the pinned Bun fails loading Next server modules.
+            ${pkgs.nodejs_24}/bin/node node_modules/next/dist/bin/next build
           '';
 
           installPhase = ''

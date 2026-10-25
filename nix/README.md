@@ -66,6 +66,11 @@ even for root deployments. Packages with a mismatched prefix also fail NixOS
 configuration evaluation. Do not add metadata to
 an incompatible prebuilt frontend just to bypass the assertion.
 
+The Nix frontend build uses Bun for offline dependency installation and Node.js
+24 to run Next.js and its page-data workers. This avoids a CommonJS loader
+failure in the pinned Bun runtime during static export. Node is a build-time
+dependency only; the deployed server still serves static assets from Rust.
+
 ## Checks
 
 ```console
