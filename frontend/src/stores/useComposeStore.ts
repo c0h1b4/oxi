@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { useUiStore } from "@/stores/useUiStore";
+import type { Identity } from "@/types/identity";
 
 export interface ReplyParams {
   to: string;
@@ -57,6 +58,8 @@ interface ComposeState {
   isHtml: boolean;
   signatureHtml: string;
   signatureEnabled: boolean;
+  signatureInitialized: boolean;
+  initializeSignature: (identities: Identity[]) => void;
 
   openCompose: () => void;
   openReply: (params: ReplyParams) => void;
@@ -82,42 +85,53 @@ export function wrapSignatureHtml(signatureHtml: string): string {
   return `<div class="email-signature" data-signature="true"><p>-- </p>${signatureHtml}</div>`;
 }
 
-/** Injects a signature block into body HTML, before any quoted content or at the end. */
-export function injectSignature(body: string, signatureHtml: string): string {
-  const sigBlock = wrapSignatureHtml(signatureHtml);
-  if (!sigBlock) return body;
-
-  // Try to insert before blockquote (quoted reply/forward content)
-  const bqIndex = body.indexOf("<blockquote");
-  if (bqIndex !== -1) {
-    return body.slice(0, bqIndex) + sigBlock + body.slice(bqIndex);
-  }
-  return body + sigBlock;
+function signatureText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("br").forEach((el) => el.replaceWith("\n"));
+  doc.querySelectorAll("p, div, li").forEach((el) => el.append("\n"));
+  return doc.body.textContent?.trim() ?? "";
 }
 
-/** Replaces or removes the signature block in the body HTML. */
-export function replaceSignatureInBody(body: string, newSignatureHtml: string): string {
-  const sigRegex = /<div class="email-signature"[^>]*>[\s\S]*?<\/div>/;
-  const newSigBlock = wrapSignatureHtml(newSignatureHtml);
-
-  if (sigRegex.test(body)) {
-    if (newSigBlock) {
-      return body.replace(sigRegex, newSigBlock);
-    }
-    // Remove the signature block
-    return body.replace(sigRegex, "");
+/** Inject before the quote, keeping plain-text messages free of HTML. */
+export function injectSignature(body: string, signatureHtml: string, isHtml = true): string {
+  if (!signatureHtml) return body;
+  if (!isHtml) {
+    const signature = `-- \n${signatureText(signatureHtml)}\n\n`;
+    const quoteIndex = body.search(/^On .+ wrote:$/m);
+    return quoteIndex === -1
+      ? `${body}\n\n${signature}`
+      : body.slice(0, quoteIndex) + signature + body.slice(quoteIndex);
   }
 
-  // No existing signature — inject if we have one
-  if (newSigBlock) {
-    return injectSignature(body, newSignatureHtml);
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  // A signature inside quoted mail belongs to the original sender.
+  if (Array.from(doc.querySelectorAll('[data-signature="true"]')).some((el) => !el.closest("blockquote"))) {
+    return body;
   }
-  return body;
+  const quote = doc.querySelector("blockquote");
+  if (quote) {
+    quote.insertAdjacentHTML("beforebegin", wrapSignatureHtml(signatureHtml));
+  } else {
+    doc.body.insertAdjacentHTML("beforeend", wrapSignatureHtml(signatureHtml));
+  }
+  return doc.body.innerHTML;
 }
 
-/** Removes the signature block from the body HTML. */
-export function removeSignatureFromBody(body: string): string {
-  return body.replace(/<div class="email-signature"[^>]*>[\s\S]*?<\/div>/, "");
+/** Remove only our own signature, preserving quoted signatures and nested HTML. */
+export function removeSignatureFromBody(body: string, isHtml = true, previousSignatureHtml = ""): string {
+  if (!isHtml) {
+    if (!previousSignatureHtml) return body;
+    return body.replace(`-- \n${signatureText(previousSignatureHtml)}\n\n`, "");
+  }
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  doc.querySelectorAll('[data-signature="true"]').forEach((el) => {
+    if (!el.closest("blockquote")) el.remove();
+  });
+  return doc.body.innerHTML;
+}
+
+export function replaceSignatureInBody(body: string, newSignatureHtml: string, isHtml = true, previousSignatureHtml = ""): string {
+  return injectSignature(removeSignatureFromBody(body, isHtml, previousSignatureHtml), newSignatureHtml, isHtml);
 }
 
 const initialState = {
@@ -137,6 +151,7 @@ const initialState = {
   isHtml: true,
   signatureHtml: "",
   signatureEnabled: true,
+  signatureInitialized: false,
 };
 
 export const useComposeStore = create<ComposeState>((set) => ({
@@ -189,6 +204,22 @@ export const useComposeStore = create<ComposeState>((set) => ({
       attachments: params.attachments,
       isHtml: params.isHtml ?? true,
     }),
+
+  initializeSignature: (identities) => set((state) => {
+    if (!state.isOpen || state.signatureInitialized || identities.length === 0) return state;
+    const identity = identities.find((i) => i.id === state.fromIdentityId)
+      ?? identities.find((i) => i.is_default)
+      ?? identities[0];
+    return {
+      fromIdentityId: identity.id,
+      signatureHtml: identity.signature_html,
+      signatureInitialized: true,
+      // Drafts already contain the user's saved body; don't modify them on resume.
+      body: !state.draftId && state.signatureEnabled
+        ? injectSignature(state.body, identity.signature_html, state.isHtml)
+        : state.body,
+    };
+  }),
 
   closeCompose: () => set({ isOpen: false }),
 

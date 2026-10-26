@@ -35,7 +35,8 @@ function reconcileSearchAfterMoves(queryClient: QueryClient, operation: MoveMess
 }
 
 type MoveMessageVariables = { fromFolder: string; toFolder: string; uid: number };
-type MoveMessageOperation = MoveMessageVariables & {
+type MessageRemovalVariables = { fromFolder: string; toFolder?: string; uid: number };
+type MoveMessageOperation = MessageRemovalVariables & {
   accountId: string | null;
   cancelled: boolean;
   ready: Promise<void>;
@@ -46,7 +47,7 @@ type MoveMessageOperation = MoveMessageVariables & {
 
 const moveQueueTails = new WeakMap<QueryClient, Promise<void>>();
 
-function createMoveOperation(queryClient: QueryClient, queued: boolean, variables: MoveMessageVariables): MoveMessageOperation {
+function createMoveOperation(queryClient: QueryClient, queued: boolean, variables: MessageRemovalVariables): MoveMessageOperation {
   let cancel!: () => void;
   let release!: () => void;
   const cancellation = new Promise<void>(resolve => { cancel = resolve; });
@@ -94,9 +95,9 @@ export function hideMovedMessages(
 
 export function useMessages(folder: string) {
   const { status } = useWsStatus();
-  const pendingMoves = useMutationState<MoveMessageVariables>({
+  const pendingMoves = useMutationState<MoveMessageOperation>({
     filters: { mutationKey: ["move-message"], status: "pending" },
-    select: mutation => mutation.state.variables as MoveMessageVariables,
+    select: mutation => mutation.state.variables as MoveMessageOperation,
   });
   const query = useInfiniteQuery({
     queryKey: ["messages", folder],
@@ -114,7 +115,7 @@ export function useMessages(folder: string) {
   });
   // Read-time overlay survives any subsequent flag/WS/polling refetch, and
   // sees moves started by other components sharing this QueryClient.
-  const hidden = new Set(pendingMoves.filter(move => move.fromFolder === folder).map(move => move.uid));
+  const hidden = new Set(pendingMoves.filter(move => isCurrentMove(move) && move.fromFolder === folder).map(move => move.uid));
   return { ...query, data: query.data ? hideMovedMessages(query.data, folder, hidden) : query.data };
 }
 
@@ -161,7 +162,9 @@ export function useUpdateFlags() {
   });
 }
 
-export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
+// Moves and permanent deletes share removal, rollback and reconciliation. The
+// mutation key covers both so one action cannot resurrect a pending sibling.
+function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationKey: ["move-message"],
@@ -171,6 +174,9 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
     mutationFn: async (operation: MoveMessageOperation) => {
       await Promise.race([operation.ready, operation.cancellation]);
       if (!isCurrentMove(operation)) throw new Error("Move cancelled because the account changed");
+      if (!operation.toFolder) {
+        return apiDelete(`/messages/${encodeURIComponent(operation.fromFolder)}/${operation.uid}`);
+      }
       return apiPost("/messages/move", {
         from_folder: operation.fromFolder,
         to_folder: operation.toFolder,
@@ -215,7 +221,7 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
       // Cancel in-flight fetches so they don't overwrite our optimistic update.
       await Promise.all([
         queryClient.cancelQueries({ queryKey: ["messages", fromFolder] }),
-        queryClient.cancelQueries({ queryKey: ["messages", toFolder] }),
+        ...(toFolder ? [queryClient.cancelQueries({ queryKey: ["messages", toFolder] })] : []),
         queryClient.cancelQueries({ queryKey: ["search"] })
       ]);
 
@@ -263,7 +269,7 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
           return { ...current, results, total_count: current.total_count + 1 };
         });
       }
-      toast.error(err instanceof Error ? err.message : "Failed to move message");
+      toast.error(err instanceof Error ? err.message : "Failed to remove message");
       const ui = useUiStore.getState();
       if (context && ui.activeFolder === fromFolder && ui.selectedMessageUid === context.advancedSelection) {
         ui.selectMessage(context.selectedMessageUid);
@@ -297,7 +303,7 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
         // the replacement fetch, so overlapping settlements stay protected.
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["messages", fromFolder] }),
-          queryClient.invalidateQueries({ queryKey: ["messages", toFolder] }),
+          ...(toFolder ? [queryClient.invalidateQueries({ queryKey: ["messages", toFolder] })] : []),
           queryClient.invalidateQueries({ queryKey: ["folders"] }),
         ]);
         if (!isCurrentMove(operation)) return;
@@ -316,7 +322,7 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
   });
   return {
     ...mutation,
-    mutate: (variables: MoveMessageVariables, options?: Parameters<typeof mutation.mutate>[1]) => {
+    mutate: (variables: MessageRemovalVariables, options?: Parameters<typeof mutation.mutate>[1]) => {
       // Synchronous cache lookup also catches double-clicks before rerender.
       if (queued && queryClient.getMutationCache().findAll({ mutationKey: ["move-message"], status: "pending" })
         .some(move => {
@@ -325,61 +331,32 @@ export function useMoveMessage({ queued = false }: { queued?: boolean } = {}) {
         })) return;
       mutation.mutate(createMoveOperation(queryClient, queued, variables), options);
     },
-    mutateAsync: (variables: MoveMessageVariables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+    mutateAsync: (variables: MessageRemovalVariables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
       mutation.mutateAsync(createMoveOperation(queryClient, queued, variables), options),
   };
 }
 
-export function useDeleteMessage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ folder, uid }: { folder: string; uid: number }) =>
-      apiDelete(`/messages/${encodeURIComponent(folder)}/${uid}`),
-    onMutate: async ({ folder, uid }) => {
-      // Auto-advance: if the deleted message is selected, select the next (or previous) message.
-      const { selectedMessageUid, selectMessage } = useUiStore.getState();
-      if (selectedMessageUid === uid) {
-        const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(["messages", folder]);
-        if (prev) {
-          const allMessages = prev.pages.flatMap((p) => p.messages);
-          const idx = allMessages.findIndex((m) => m.uid === uid);
-          const nextMsg = allMessages[idx + 1] ?? allMessages[idx - 1] ?? null;
-          selectMessage(nextMsg?.uid ?? null);
-        } else {
-          selectMessage(null);
-        }
-      }
+export function useMoveMessage(options: { queued?: boolean } = {}) {
+  const mutation = useRemoveMessage(options);
+  return {
+    ...mutation,
+    mutate: (variables: MoveMessageVariables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(variables, options),
+    mutateAsync: (variables: MoveMessageVariables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(variables, options),
+  };
+}
 
-      // Optimistic removal from cache.
-      await queryClient.cancelQueries({ queryKey: ["messages", folder] });
-      const prev = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
-        ["messages", folder],
-      );
-      if (prev) {
-        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-          ["messages", folder],
-          {
-            ...prev,
-            pages: prev.pages.map((page) => ({
-              ...page,
-              messages: page.messages.filter((m) => m.uid !== uid),
-              total_count: Math.max(0, page.total_count - 1),
-            })),
-          },
-        );
-      }
-      return { prev };
-    },
-    onError: (_err, { folder }, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(["messages", folder], context.prev);
-      }
-    },
-    onSettled: (_, _err, { folder }) => {
-      queryClient.invalidateQueries({ queryKey: ["messages", folder] });
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-    },
-  });
+export function useDeleteMessage() {
+  const mutation = useRemoveMessage();
+  type DeleteMessageVariables = { folder: string; uid: number };
+  return {
+    ...mutation,
+    mutate: ({ folder, uid }: DeleteMessageVariables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate({ fromFolder: folder, uid }, options),
+    mutateAsync: ({ folder, uid }: DeleteMessageVariables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync({ fromFolder: folder, uid }, options),
+  };
 }
 
 /**
