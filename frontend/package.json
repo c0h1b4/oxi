@@ -35,6 +35,11 @@
     "tailwind-merge": "^3.7.0",
     "zustand": "^5.0.16"
   },
+  "overrides": {
+    "prosemirror-model": "1.25.12",
+    "prosemirror-transform": "1.12.4",
+    "prosemirror-view": "1.42.7"
+  },
   "trustedDependencies": [
     "esbuild"
   ],
