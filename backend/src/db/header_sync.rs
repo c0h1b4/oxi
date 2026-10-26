@@ -6,7 +6,7 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HeaderSync {
     generation: u64,
 }
@@ -40,7 +40,7 @@ impl HeaderSync {
 }
 
 /// Must run in the same write transaction as the removal or UIDVALIDITY reset.
-pub(crate) fn invalidate(conn: &Connection) -> Result<(), String> {
+pub(crate) fn invalidate(conn: &Transaction<'_>) -> Result<(), String> {
     conn.execute(
         "INSERT INTO user_meta (key, value) VALUES ('header_sync_generation', '1')
          ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
