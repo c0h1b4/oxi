@@ -159,7 +159,7 @@ pub async fn list_messages(
                 .run(move |conn| {
                     let transaction = header_sync.begin_write(conn)?;
                     db::messages::delete_folder_messages(conn, &name)?;
-                    db::header_sync::invalidate(conn)?;
+                    db::header_sync::invalidate(&transaction)?;
                     db::folders::update_folder_sync_status(
                         conn, &name, status.uid_validity, status.exists, 0,
                     )?;
@@ -228,24 +228,9 @@ pub async fn list_messages(
                     syncing = true;
                 }
             } else {
-                // Stale cache: we have some cached data — determine new UIDs.
-                let name = folder.clone();
-                let validity = status.uid_validity;
-                let exists = status.exists;
-                let max_cached_uid = database
-                    .run(move |conn| {
-                        let transaction = header_sync.begin_write(conn)?;
-                        db::folders::update_folder_status(conn, &name, validity, exists)?;
-                        let max_uid = db::messages::max_uid(conn, &name)?;
-                        transaction.commit().map_err(|e| e.to_string())?;
-                        Ok(max_uid)
-                    })
-                    .await
-                    .map_err(AppError::InternalError)?;
-                let uid_range = (
-                    max_cached_uid.saturating_add(1),
-                    status.uid_next.saturating_sub(1),
-                );
+                // An interrupted initial sync can leave gaps below the highest
+                // cached UID. Reconcile all server UIDs, fetching only missing ones.
+                let uid_range = (1, status.uid_next.saturating_sub(1));
 
                 tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
                     creds,
@@ -483,6 +468,16 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
         } else {
             Vec::new()
         };
+        let name = folder.clone();
+        let cached_uids = database
+            .run(move |conn| {
+                Ok(db::messages::get_all_uids_and_flags(conn, &name)?
+                    .into_iter()
+                    .map(|(uid, _)| uid)
+                    .collect::<std::collections::HashSet<_>>())
+            })
+            .await?;
+        uids.retain(|uid| !cached_uids.contains(uid));
         uids.sort_unstable();
         uids.dedup();
         for uid_set in header_chunks(&uids) {
@@ -523,6 +518,19 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
         }
         Err(e) => {
             tracing::warn!(folder = %folder, error = %e, "Background sync: failed (will retry on next request)");
+            let database = db::pool::UserDb::new(&config.data_dir, &user_hash);
+            let name = folder.clone();
+            let superseded = database.run(move |conn| {
+                let superseded = HeaderSync::capture(conn)? != header_sync;
+                db::folders::invalidate_folder_freshness(conn, &name)?;
+                Ok(superseded)
+            }).await;
+            // A completed mutation may invalidate a backfill in another folder.
+            // Wake the client to retry missing UIDs with fresh IMAP reads, not
+            // the rejected headers. Network errors wait for the next request.
+            if matches!(superseded, Ok(true)) {
+                event_bus.publish(&user_hash, MailEvent::FolderUpdated).await;
+            }
         }
     }
 }
@@ -1124,14 +1132,19 @@ mod sync_tests {
         let user_hash = "header-race";
         let conn = db::pool::open_user_db(path, user_hash).unwrap();
         for folder in ["INBOX", "Archive"] {
-            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1, 1, 1, 0)
-                .unwrap();
+            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1, 1, 1, 0).unwrap();
         }
         let search_engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
         let header_sync = HeaderSync::capture(&conn).unwrap();
         let transaction = header_sync.begin_write(&conn).unwrap();
-        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(7)], &search_engine, user_hash)
-            .unwrap();
+        upsert_and_index_headers(
+            &transaction,
+            "INBOX",
+            &[sync_header(7)],
+            &search_engine,
+            user_hash,
+        )
+        .unwrap();
         transaction.commit().unwrap();
         drop(conn);
 
@@ -1161,7 +1174,7 @@ mod sync_tests {
             last_accessed: std::time::Instant::now(),
             timeout_override: None,
         };
-        let mut client = MockImapClient::new().with_headers(vec![sync_header(7)]);
+        let mut client = MockImapClient::new().with_headers(vec![sync_header(7), sync_header(8)]);
         client.header_fetch_gate = Some((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
         let client = Arc::new(client);
         let gate = client.header_fetch_gate.as_ref().unwrap();
@@ -1187,45 +1200,259 @@ mod sync_tests {
         let imap_client: Arc<dyn ImapClient> = client.clone();
         let response = if move_message {
             move_message_handler(
-                Extension(session), Extension(config), Extension(imap_client),
+                Extension(session),
+                Extension(config),
+                Extension(imap_client),
                 Extension(search_engine.clone()),
                 Json(MoveMessageRequest {
-                    uid: 7, from_folder: "INBOX".into(), to_folder: "Archive".into(),
+                    uid: 7,
+                    from_folder: "INBOX".into(),
+                    to_folder: "Archive".into(),
                 }),
-            ).await.unwrap()
+            )
+            .await
+            .unwrap()
         } else {
             delete_message_handler(
-                Extension(session), Extension(config), Extension(imap_client),
+                Extension(session),
+                Extension(config),
+                Extension(imap_client),
                 Path(("INBOX".into(), 7)),
-            ).await.unwrap()
+            )
+            .await
+            .unwrap()
         };
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         gate.1.notify_one();
         sync.await.unwrap();
 
         let conn = db::pool::open_user_db(path, user_hash).unwrap();
-        assert!(db::messages::get_single_message(&conn, "INBOX", 7).unwrap().is_none());
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 7)
+                .unwrap()
+                .is_none()
+        );
         assert!(db::folders::is_folder_messages_invalidated(&conn, "INBOX").unwrap());
-        assert!(events.try_recv().is_err(), "stale sync must not announce completion");
+        assert!(matches!(events.try_recv().unwrap(), MailEvent::FolderUpdated),
+            "superseded sync must request fresh missing-UID reconciliation");
+        assert!(events.try_recv().is_err());
         // A move's index deletion also must not be undone by rejected headers.
         if move_message {
             let index = search_engine.open_user_index(user_hash).unwrap();
-            assert!(index.search(&crate::search::engine::SearchQuery {
-                text: "Message".into(),
-                limit: 10,
-                ..Default::default()
-            }).unwrap().0.is_empty());
+            assert!(
+                index
+                    .search(&crate::search::engine::SearchQuery {
+                        text: "Message".into(),
+                        limit: 10,
+                        ..Default::default()
+                    })
+                    .unwrap()
+                    .0
+                    .is_empty()
+            );
         }
 
         // New destination UIDs (even the same numeric UID in another folder)
         // remain valid, as do future arrivals in the source folder.
         let next_sync = HeaderSync::capture(&conn).unwrap();
         let transaction = next_sync.begin_write(&conn).unwrap();
-        upsert_and_index_headers(&transaction, "Archive", &[sync_header(7), sync_header(42)], &search_engine, user_hash).unwrap();
-        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(8)], &search_engine, user_hash).unwrap();
+        upsert_and_index_headers(
+            &transaction,
+            "Archive",
+            &[sync_header(7), sync_header(42)],
+            &search_engine,
+            user_hash,
+        )
+        .unwrap();
+        upsert_and_index_headers(
+            &transaction,
+            "INBOX",
+            &[sync_header(8)],
+            &search_engine,
+            user_hash,
+        )
+        .unwrap();
         transaction.commit().unwrap();
         assert_eq!(db::messages::count_messages(&conn, "Archive").unwrap(), 2);
-        assert!(db::messages::get_single_message(&conn, "INBOX", 8).unwrap().is_some());
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 8)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_initial_backfill_recovers_after_same_folder_delete() {
+        interrupted_backfill_recovers(false).await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_initial_backfill_recovers_after_unrelated_folder_delete() {
+        interrupted_backfill_recovers(true).await;
+    }
+
+    async fn interrupted_backfill_recovers(other_folder: bool) {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = data_dir.path().to_str().unwrap();
+        let user_hash = "backfill-recovery";
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        for folder in ["INBOX", "Archive"] {
+            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1000, 0, 1, 0).unwrap();
+        }
+        let engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
+        let header_sync = HeaderSync::capture(&conn).unwrap();
+        let transaction = header_sync.begin_write(&conn).unwrap();
+        upsert_and_index_headers(
+            &transaction,
+            "INBOX",
+            &(901..=1000).map(sync_header).collect::<Vec<_>>(),
+            &engine,
+            user_hash,
+        )
+        .unwrap();
+        upsert_and_index_headers(
+            &transaction,
+            "Archive",
+            &[sync_header(950)],
+            &engine,
+            user_hash,
+        )
+        .unwrap();
+        db::folders::update_folder_status(&conn, "INBOX", 1, 1000).unwrap();
+        transaction.commit().unwrap();
+        drop(conn);
+        let creds = ImapCredentials {
+            host: "localhost".into(),
+            port: 143,
+            tls: false,
+            email: "test@example.com".into(),
+            password: "test".into(),
+        };
+        let config = Arc::new(AppConfig {
+            imap_host: Some(creds.host.clone()),
+            data_dir: path.to_owned(),
+            ..serde_json::from_str::<AppConfig>("{}").unwrap()
+        });
+        let session = SessionState {
+            account_id: "test".into(),
+            email: creds.email.clone(),
+            password: creds.password.clone(),
+            user_hash: user_hash.into(),
+            imap_host: creds.host.clone(),
+            imap_port: 143,
+            imap_tls: false,
+            smtp_host: "localhost".into(),
+            smtp_port: 587,
+            smtp_tls: false,
+            last_accessed: std::time::Instant::now(),
+            timeout_override: None,
+        };
+        let mut client = MockImapClient::new().with_headers((1..=900).map(sync_header).collect());
+        client.header_fetch_gate = Some((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+        let client = Arc::new(client);
+        let gate = client.header_fetch_gate.as_ref().unwrap();
+        let bus = Arc::new(EventBus::new());
+        let mut events = bus.subscribe(user_hash).await;
+        let sync = tokio::spawn(sync_remaining_headers(BackgroundSyncParams {
+            creds,
+            folder: "INBOX".into(),
+            imap_client: client.clone(),
+            config: config.clone(),
+            user_hash: user_hash.into(),
+            search_engine: engine.clone(),
+            event_bus: bus.clone(),
+            uid_range: (1, 900),
+            header_sync,
+            uid_validity: 1,
+            exists: 1000,
+        }));
+        gate.0.notified().await;
+        let folder = if other_folder { "Archive" } else { "INBOX" };
+        delete_message_handler(
+            Extension(session.clone()),
+            Extension(config.clone()),
+            Extension(client.clone() as Arc<dyn ImapClient>),
+            Path((folder.into(), 950)),
+        )
+        .await
+        .unwrap();
+        gate.1.notify_one();
+        sync.await.unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        assert!(db::folders::is_folder_messages_invalidated(&conn, "INBOX").unwrap());
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 1)
+                .unwrap()
+                .is_none()
+        );
+        drop(conn);
+        assert!(matches!(
+            events.recv().await.unwrap(),
+            MailEvent::FolderUpdated
+        ));
+
+        // The next actual list request must recover UIDs below max_cached_uid.
+        // A fresh server snapshot omits only the UID deleted in this folder.
+        let remaining = (1..=1000)
+            .filter(|uid| other_folder || *uid != 950)
+            .map(sync_header)
+            .collect::<Vec<_>>();
+        let fresh_client = Arc::new(MockImapClient::new().with_headers(remaining));
+        let response = list_messages(
+            Extension(session),
+            Extension(config),
+            Extension(fresh_client.clone() as Arc<dyn ImapClient>),
+            Extension(engine.clone()),
+            Extension(bus),
+            Path("INBOX".into()),
+            Query(ListMessagesQuery {
+                page: 0,
+                per_page: 50,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        events.recv().await.unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        assert_eq!(
+            db::messages::count_messages(&conn, "INBOX").unwrap(),
+            if other_folder { 1000 } else { 999 }
+        );
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 1)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 900)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db::messages::get_single_message(&conn, folder, 950)
+                .unwrap()
+                .is_none()
+        );
+        assert!(db::folders::is_folder_fresh(&conn, "INBOX", 30).unwrap());
+        let requests = fresh_client.header_requests.lock().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests.iter().all(|(_, uids)| {
+            uids.split(',')
+                .all(|uid| uid.parse::<u32>().unwrap() <= 900)
+        }));
+        let results = engine
+            .open_user_index(user_hash)
+            .unwrap()
+            .search(&crate::search::engine::SearchQuery {
+                text: "Message".into(),
+                folder: Some("INBOX".into()),
+                limit: 1100,
+                ..Default::default()
+            })
+            .unwrap()
+            .0;
+        assert!(results.iter().any(|message| message.uid == 1));
     }
 
     #[test]
@@ -1239,17 +1466,28 @@ mod sync_tests {
         let before_reset = HeaderSync::capture(&conn).unwrap();
         let transaction = before_reset.begin_write(&conn).unwrap();
         db::messages::delete_folder_messages(&conn, "INBOX").unwrap();
-        db::header_sync::invalidate(&conn).unwrap();
+        db::header_sync::invalidate(&transaction).unwrap();
         db::folders::update_folder_sync_status(&conn, "INBOX", 2, 1, 0).unwrap();
         let new_namespace = HeaderSync::capture(&conn).unwrap();
         transaction.commit().unwrap();
         assert!(stale.begin_write(&conn).is_err());
         assert!(before_reset.begin_write(&conn).is_err());
         let transaction = new_namespace.begin_write(&conn).unwrap();
-        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(7)], &engine, "test").unwrap();
+        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(7)], &engine, "test")
+            .unwrap();
         transaction.commit().unwrap();
-        assert!(db::messages::get_single_message(&conn, "INBOX", 7).unwrap().is_some());
-        assert_eq!(db::folders::get_folder(&conn, "INBOX").unwrap().unwrap().uid_validity, 2);
+        assert!(
+            db::messages::get_single_message(&conn, "INBOX", 7)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            db::folders::get_folder(&conn, "INBOX")
+                .unwrap()
+                .unwrap()
+                .uid_validity,
+            2
+        );
     }
 
     #[test]
