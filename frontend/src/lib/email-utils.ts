@@ -96,8 +96,7 @@ export function buildReplyBodyHtml(
   const formattedDate = formatQuoteDate(date);
   return [
     '<p><br></p>',
-    `<p>On ${formattedDate}, ${from} wrote:</p>`,
-    `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex">${html}</blockquote>`,
+    `<blockquote style="margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex"><p>On ${formattedDate}, ${from} wrote:</p>${html}</blockquote>`,
   ].join("");
 }
 

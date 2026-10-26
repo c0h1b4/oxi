@@ -76,6 +76,7 @@ export function ComposeDialog() {
     isHtml,
     signatureHtml,
     signatureEnabled,
+    signatureInitialized,
     closeCompose,
     setField,
     setShowCc,
@@ -85,6 +86,7 @@ export function ComposeDialog() {
     setIsHtml,
     setSignatureHtml,
     setSignatureEnabled,
+    initializeSignature,
     addAttachments,
     removeAttachment,
     reset,
@@ -123,19 +125,10 @@ export function ComposeDialog() {
     );
   }, [to, cc, bcc, subject, body, attachments]);
 
-  // Auto-select the default identity when dialog opens and no identity is set,
-  // and inject signature into body
+  // Initialize once for each compose, including replies with a preselected identity.
   useEffect(() => {
-    if (isOpen && fromIdentityId === null && identities && identities.length > 0) {
-      const defaultIdentity = identities.find((i) => i.is_default) ?? identities[0];
-      setFromIdentityId(defaultIdentity.id);
-      // Inject signature from the default identity
-      if (defaultIdentity.signature_html && signatureEnabled) {
-        setSignatureHtml(defaultIdentity.signature_html);
-        setField("body", injectSignature(body, defaultIdentity.signature_html));
-      }
-    }
-  }, [isOpen, fromIdentityId, identities, setFromIdentityId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isOpen && identities) initializeSignature(identities);
+  }, [isOpen, identities, fromIdentityId, signatureInitialized, initializeSignature]);
 
   // Auto-focus the To field when dialog opens
   useEffect(() => {
@@ -618,12 +611,11 @@ export function ComposeDialog() {
                     onChange={(e) => {
                       const newId = e.target.value ? Number(e.target.value) : null;
                       setFromIdentityId(newId);
-                      // Swap signature when identity changes
-                      if (identities && signatureEnabled) {
-                        const newIdentity = identities.find((i) => i.id === newId);
-                        const newSig = newIdentity?.signature_html || "";
-                        setSignatureHtml(newSig);
-                        setField("body", replaceSignatureInBody(body, newSig));
+                      const newIdentity = identities.find((i) => i.id === newId);
+                      const newSig = newIdentity?.signature_html || "";
+                      setSignatureHtml(newSig);
+                      if (signatureEnabled) {
+                        setField("body", replaceSignatureInBody(body, newSig, isHtml, signatureHtml));
                       }
                     }}
                     className="flex-1 bg-transparent py-2 text-sm outline-none"
@@ -865,11 +857,11 @@ export function ComposeDialog() {
                     if (newEnabled) {
                       // Re-inject signature
                       if (signatureHtml) {
-                        setField("body", injectSignature(removeSignatureFromBody(body), signatureHtml));
+                        setField("body", injectSignature(removeSignatureFromBody(body, isHtml, signatureHtml), signatureHtml, isHtml));
                       }
                     } else {
                       // Remove signature from body
-                      setField("body", removeSignatureFromBody(body));
+                      setField("body", removeSignatureFromBody(body, isHtml, signatureHtml));
                     }
                   }}
                   className={cn(

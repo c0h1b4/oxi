@@ -19,6 +19,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
+import {
+  normalizeSenderAddress,
+  remoteResourceAccountScope,
+  useRemoteResourceStore,
+} from "@/stores/useRemoteResourceStore";
 import { useMessage, useUpdateFlags } from "@/hooks/useMessages";
 import { createFadeSlideVariants } from "@/lib/motion/variants";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
@@ -35,7 +40,6 @@ import {
   humanizeDate,
 } from "./ReadingPane/index";
 
-type HeaderMode = "summary" | "details";
 type BodyMode = "html" | "plain";
 
 export function ReadingPane() {
@@ -43,21 +47,27 @@ export function ReadingPane() {
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const activeAccountId = useAuthStore((s) => s.activeAccountId);
-  const [headerMode, setHeaderMode] = useState<HeaderMode>("details");
-  const selectedMessageKey = `${activeAccountId}:${activeFolder}:${selectedMessageUid}`;
+  const activeAccount = useAuthStore((s) => s.accounts.find((a) => a.id === s.activeAccountId));
+  const accountScope = remoteResourceAccountScope(activeAccount);
+  const trustedSenders = useRemoteResourceStore((s) => accountScope ? s.sendersByAccount[accountScope] : undefined);
+  const loadTrustedSenders = useRemoteResourceStore((s) => s.loadAccount);
+  const trustSender = useRemoteResourceStore((s) => s.trustSender);
+  useEffect(() => {
+    if (accountScope) loadTrustedSenders(accountScope);
+  }, [accountScope, loadTrustedSenders]);
+
+  const selectedMessageKey = JSON.stringify([activeAccountId, activeFolder, selectedMessageUid]);
   const [messageView, setMessageView] = useState<{
     key: string;
     bodyMode: BodyMode | null;
     emailTheme: "auto" | "light" | "dark";
-  }>({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+    senderDetailsOpen: boolean;
+  }>({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto", senderDetailsOpen: false });
   if (messageView.key !== selectedMessageKey) {
-    setMessageView({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto" });
+    setMessageView({ key: selectedMessageKey, bodyMode: null, emailTheme: "auto", senderDetailsOpen: false });
   }
   const [showHeaders, setShowHeaders] = useState(false);
   const emailTheme = messageView.emailTheme;
-  const [allowedRemoteUids, setAllowedRemoteUids] = useState<Set<string>>(
-    new Set()
-  );
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const queryClient = useQueryClient();
@@ -137,8 +147,8 @@ export function ReadingPane() {
   }
 
   const attachmentBaseUrl = apiUrl(`/messages/${encodeURIComponent(data.folder)}/${data.uid}/attachments`);
-  const messageKey = `${data.folder}:${data.uid}`;
-  const remoteAllowed = allowedRemoteUids.has(messageKey);
+  const senderAddress = normalizeSenderAddress(data.from_address);
+  const remoteAllowed = senderAddress !== null && trustedSenders?.includes(senderAddress) === true;
   const showRemoteBanner = !remoteAllowed && hasRemoteResources(data.html);
 
   const paneContent = (
@@ -149,62 +159,43 @@ export function ReadingPane() {
       <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
         <h2 className="text-lg font-bold leading-tight">{data.subject}</h2>
 
-        {headerMode === "summary" ? (
-          <div className="text-sm text-foreground">
-            From{" "}
-            <AddressChip
-              address={data.from_address}
-              name={data.from_name || null}
-            />
-            {" "}
-            on {humanizeDate(data.date)}
-          </div>
-        ) : (
-          <>
+        <div className="text-sm text-foreground">
+          From{" "}
+          <button
+            type="button"
+            aria-expanded={messageView.senderDetailsOpen}
+            aria-controls="sender-details"
+            onClick={() => setMessageView({ ...messageView, senderDetailsOpen: !messageView.senderDetailsOpen })}
+            className="inline-flex items-center gap-1 rounded px-0.5 text-sm text-foreground underline decoration-muted-foreground/30 underline-offset-2 hover:bg-accent hover:decoration-foreground"
+          >
+            {data.from_name || data.from_address}
+            {messageView.senderDetailsOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          </button>
+          {" "}on {humanizeDate(data.date)}
+        </div>
+
+        {messageView.senderDetailsOpen && (
+          <div id="sender-details" role="region" aria-label="Sender details" className="space-y-1">
             <div className="text-sm text-foreground">
               <span className="font-medium text-muted-foreground">From: </span>
-              <AddressChip
-                address={data.from_address}
-                name={data.from_name || null}
-              />
+              <AddressChip address={data.from_address} name={data.from_name || null} />
+              {data.from_name && <span className="ml-1 text-muted-foreground">&lt;{data.from_address}&gt;</span>}
             </div>
-
             <div className="text-sm text-foreground">
               <span className="font-medium text-muted-foreground">To: </span>
               <AddressList addresses={data.to_addresses} />
             </div>
-
             {data.cc_addresses.length > 0 && (
               <div className="text-sm text-foreground">
                 <span className="font-medium text-muted-foreground">Cc: </span>
                 <AddressList addresses={data.cc_addresses} />
               </div>
             )}
-
-            <div className="text-sm text-muted-foreground">
-              {humanizeDate(data.date)}
-            </div>
-          </>
+          </div>
         )}
 
         {/* View toggle buttons */}
         <div className="flex gap-1 pt-1">
-          {/* Details / Summary toggle */}
-          <button
-            type="button"
-            onClick={() =>
-              setHeaderMode(headerMode === "details" ? "summary" : "details")
-            }
-            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {headerMode === "details" ? (
-              <ChevronUp className="size-3" />
-            ) : (
-              <ChevronDown className="size-3" />
-            )}
-            {headerMode === "details" ? "Summary" : "Details"}
-          </button>
-
           {/* Plain text / HTML toggle */}
           <button
             type="button"
@@ -317,11 +308,12 @@ export function ReadingPane() {
             variant="outline"
             size="sm"
             className="h-6 text-xs"
-            onClick={() =>
-              setAllowedRemoteUids((prev) => new Set(prev).add(messageKey))
-            }
+            disabled={!accountScope || !senderAddress}
+            onClick={() => {
+              if (accountScope) trustSender(accountScope, data.from_address);
+            }}
           >
-            Allow
+            Always allow from this sender
           </Button>
         </div>
       )}
@@ -352,7 +344,7 @@ export function ReadingPane() {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <AnimatedDiv
-        key={`reading-pane-${data.uid}`}
+        key={`reading-pane-${selectedMessageKey}`}
         data-testid="reading-pane-message-transition"
         variants={paneVariants}
         initial={paneVariants.initial}
