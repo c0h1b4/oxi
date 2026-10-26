@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { useUiStore } from "@/stores/useUiStore";
 import type { Identity } from "@/types/identity";
+import { htmlToPlainText, plainTextToHtml } from "@/lib/compose-format";
 
 export interface ReplyParams {
   to: string;
@@ -86,18 +87,50 @@ export function wrapSignatureHtml(signatureHtml: string): string {
 }
 
 function signatureText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("br").forEach((el) => el.replaceWith("\n"));
-  doc.querySelectorAll("p, div, li").forEach((el) => el.append("\n"));
-  return doc.body.textContent?.trim() ?? "";
+  return htmlToPlainText(html).trim();
+}
+
+function plainSignature(signatureHtml: string): string {
+  return `-- \n${signatureText(signatureHtml)}\n\n`;
+}
+
+function findPlainSignature(body: string, signatureHtml: string): { start: number; end: number } | null {
+  if (!signatureHtml) return null;
+  const signature = plainSignature(signatureHtml).replace(/\n+$/, "");
+  const start = body.indexOf(signature);
+  if (start === -1 || (start > 0 && body[start - 1] !== "\n")) return null;
+  const end = start + signature.length;
+  if (end < body.length && body[end] !== "\n") return null;
+  return { start, end: end + (body.slice(end).match(/^\n{0,2}/)?.[0].length ?? 0) };
+}
+
+/** Keep the editable signature identifiable in both compose formats. */
+export function convertBodyFormat(body: string, isHtml: boolean, signatureHtml: string): string {
+  if (isHtml) {
+    const doc = new DOMParser().parseFromString(body, "text/html");
+    doc.querySelectorAll('[data-signature="true"]').forEach(el => {
+      if (!el.closest("blockquote")) {
+        // Tiptap normalizes away the delimiter's trailing space.
+        const text = htmlToPlainText(el.innerHTML).replace(/^--[ \t]*\n/, "-- \n");
+        el.replaceWith(doc.createTextNode(text + "\n\n"));
+      }
+    });
+    return htmlToPlainText(doc.body.innerHTML);
+  }
+  const signature = findPlainSignature(body, signatureHtml);
+  if (!signature) return plainTextToHtml(body);
+  const signatureBody = plainTextToHtml(signatureText(signatureHtml));
+  return plainTextToHtml(body.slice(0, signature.start))
+    + wrapSignatureHtml(signatureBody)
+    + plainTextToHtml(body.slice(signature.end));
 }
 
 /** Inject before the quote, keeping plain-text messages free of HTML. */
 export function injectSignature(body: string, signatureHtml: string, isHtml = true): string {
   if (!signatureHtml) return body;
   if (!isHtml) {
-    const signature = `-- \n${signatureText(signatureHtml)}\n\n`;
-    const quoteIndex = body.search(/^On .+ wrote:$/m);
+    const signature = plainSignature(signatureHtml);
+    const quoteIndex = body.search(/^(?:On .+ wrote:|> ?.*)$/m);
     return quoteIndex === -1
       ? `${body}\n\n${signature}`
       : body.slice(0, quoteIndex) + signature + body.slice(quoteIndex);
@@ -120,8 +153,8 @@ export function injectSignature(body: string, signatureHtml: string, isHtml = tr
 /** Remove only our own signature, preserving quoted signatures and nested HTML. */
 export function removeSignatureFromBody(body: string, isHtml = true, previousSignatureHtml = ""): string {
   if (!isHtml) {
-    if (!previousSignatureHtml) return body;
-    return body.replace(`-- \n${signatureText(previousSignatureHtml)}\n\n`, "");
+    const signature = findPlainSignature(body, previousSignatureHtml);
+    return signature ? body.slice(0, signature.start) + body.slice(signature.end) : body;
   }
   const doc = new DOMParser().parseFromString(body, "text/html");
   doc.querySelectorAll('[data-signature="true"]').forEach((el) => {
