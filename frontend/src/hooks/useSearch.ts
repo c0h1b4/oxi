@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
+import { hideRemovedSearchResults, useMessageRemovals } from "./pending-message-removals";
 import {
   isValidCommittedSearch,
   normalizeSearchQuery,
@@ -23,6 +24,9 @@ export function useSearch(
   sort: "date_desc" | "date_asc" = "date_desc",
   filters?: SearchFilters,
 ) {
+  // Retained successful operations also protect against stale recovery/search
+  // responses while overlapping actions are still being reconciled.
+  const removals = useMessageRemovals({ includeSuccessful: true });
   const normalizedQuery = normalizeSearchQuery(query);
   const hasValidCommittedQuery = isValidCommittedSearch(normalizedQuery);
 
@@ -41,10 +45,13 @@ export function useSearch(
     if (filters.folder) params.set("folder", filters.folder);
   }
 
-  return useQuery({
+  const search = useQuery({
     queryKey: ["search", normalizedQuery, folder, sort, filters],
     queryFn: () => apiGet<SearchResponse>(`/search?${params.toString()}`),
     enabled: hasValidCommittedQuery,
     placeholderData: (prev) => prev,
   });
+  // Recovery, polling and query changes can all replace the raw cache while
+  // a move/delete is unresolved. Apply the overlay on every read.
+  return { ...search, data: search.data ? hideRemovedSearchResults(search.data, removals) : search.data };
 }

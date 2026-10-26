@@ -55,6 +55,10 @@ const { mockUiState, mockAuthState, mockUseMessage } = vi.hoisted(() => ({
   },
   mockAuthState: {
     activeAccountId: "acc-1",
+    accounts: [
+      { id: "acc-1", email: "one@example.com", imapHost: "imap.one", smtpHost: "smtp.one" },
+      { id: "acc-2", email: "two@example.com", imapHost: "imap.two", smtpHost: "smtp.two" },
+    ],
   },
   mockUseMessage: vi.fn(),
 }));

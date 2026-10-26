@@ -94,6 +94,7 @@ const {
     setIsHtml: vi.fn(),
     setSignatureHtml: vi.fn(),
     setSignatureEnabled: vi.fn(),
+    initializeSignature: vi.fn(),
     addAttachments: vi.fn(),
     removeAttachment: vi.fn(),
     reset: vi.fn(),
