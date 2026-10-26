@@ -1,0 +1,30 @@
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -2 +2 @@
+-import { Inter, JetBrains_Mono } from "next/font/google";
++import localFont from "next/font/local";
+@@ -6 +6,5 @@
+-const inter = Inter({
++const inter = localFont({
++  src: "./fonts/InterVariable.ttf",
++  weight: "100 900",
++  style: "normal",
++  display: "swap",
+@@ -8 +11,0 @@
+-  subsets: ["latin"],
+@@ -11 +14,12 @@
+-const jetbrainsMono = JetBrains_Mono({
++const jetbrainsMono = localFont({
++  src: [
++    { path: "./fonts/JetBrainsMono-Thin.ttf", weight: "100", style: "normal" },
++    { path: "./fonts/JetBrainsMono-ExtraLight.ttf", weight: "200", style: "normal" },
++    { path: "./fonts/JetBrainsMono-Light.ttf", weight: "300", style: "normal" },
++    { path: "./fonts/JetBrainsMono-Regular.ttf", weight: "400", style: "normal" },
++    { path: "./fonts/JetBrainsMono-Medium.ttf", weight: "500", style: "normal" },
++    { path: "./fonts/JetBrainsMono-SemiBold.ttf", weight: "600", style: "normal" },
++    { path: "./fonts/JetBrainsMono-Bold.ttf", weight: "700", style: "normal" },
++    { path: "./fonts/JetBrainsMono-ExtraBold.ttf", weight: "800", style: "normal" },
++  ],
++  display: "swap",
+@@ -13 +26,0 @@
+-  subsets: ["latin"],
