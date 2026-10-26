@@ -3,6 +3,18 @@
 The flake exposes `packages.default` (the server with its static frontend),
 `packages.backend`, `packages.frontend`, and `nixosModules.default`.
 
+## Sandboxed builds
+
+The Nix frontend uses Inter and JetBrains Mono from nixpkgs through
+`next/font/local`. A Nix-only patch preserves the CSS variables and font weights
+without fetching Google Fonts during compilation or changing development builds.
+Both root and subpath asset checks require self-hosted fonts and reject Google
+Fonts references in generated CSS.
+
+The backend source fileset includes `tests/fixtures` as well as Cargo sources
+and migrations. The authentication middleware tests embed a JSON fixture with
+`include_str!`, so omitting it breaks the test build. Rust tests remain enabled.
+
 ## Root and subpath deployments
 
 ```nix
@@ -53,6 +65,11 @@ matches `services.oxi.basePath`. Packages without this metadata are rejected
 even for root deployments. Packages with a mismatched prefix also fail NixOS
 configuration evaluation. Do not add metadata to
 an incompatible prebuilt frontend just to bypass the assertion.
+
+The Nix frontend build uses Bun for offline dependency installation and Node.js
+24 to run Next.js and its page-data workers. This avoids a CommonJS loader
+failure in the pinned Bun runtime during static export. Node is a build-time
+dependency only; the deployed server still serves static assets from Rust.
 
 ## Checks
 
