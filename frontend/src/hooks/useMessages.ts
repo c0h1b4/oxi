@@ -6,7 +6,6 @@ import {
   useQuery,
   useInfiniteQuery,
   useMutation,
-  useMutationState,
   useQueryClient,
 } from "@tanstack/react-query";
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
@@ -15,30 +14,14 @@ import { useWsStatus } from "@/lib/ws-context";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAuthStore } from "@/stores/useAuthStore";
 import type { MessagesResponse, MessageDetail, SearchResponse } from "@/types/message";
+import { hideRemovedSearchResults, isCurrentRemoval, useMessageRemovals } from "./pending-message-removals";
+import type { MessageRemoval } from "./pending-message-removals";
 
 const PER_PAGE = 50;
 
-const searchReconciliationTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>();
-
-function reconcileSearchAfterMoves(queryClient: QueryClient, operation: MoveMessageOperation) {
-  clearTimeout(searchReconciliationTimers.get(queryClient));
-  // onSettled still counts as pending. Check after its state transition, and
-  // coalesce simultaneous settlements rather than letting both skip refresh.
-  searchReconciliationTimers.set(queryClient, setTimeout(() => {
-    searchReconciliationTimers.delete(queryClient);
-    if (isCurrentMove(operation)
-      && queryClient.getMutationCache().getAll().some(move => move.state.variables === operation)
-      && queryClient.isMutating({ mutationKey: ["move-message"] }) === 0) {
-      void queryClient.invalidateQueries({ queryKey: ["search"] });
-    }
-  }, 0));
-}
-
 type MoveMessageVariables = { fromFolder: string; toFolder: string; uid: number };
 type MessageRemovalVariables = { fromFolder: string; toFolder?: string; uid: number };
-type MoveMessageOperation = MessageRemovalVariables & {
-  accountId: string | null;
-  cancelled: boolean;
+type MoveMessageOperation = MessageRemovalVariables & MessageRemoval & {
   ready: Promise<void>;
   cancellation: Promise<void>;
   cancel: () => void;
@@ -58,6 +41,7 @@ function createMoveOperation(queryClient: QueryClient, queued: boolean, variable
     ...variables,
     accountId: useAuthStore.getState().activeAccountId,
     cancelled: false,
+    removed: false,
     ready,
     cancellation,
     cancel,
@@ -66,10 +50,6 @@ function createMoveOperation(queryClient: QueryClient, queued: boolean, variable
       if (moveQueueTails.get(queryClient) === done) moveQueueTails.delete(queryClient);
     },
   };
-}
-
-function isCurrentMove(operation: MoveMessageOperation) {
-  return !operation.cancelled && operation.accountId === useAuthStore.getState().activeAccountId;
 }
 
 // Also used for the initial cache update. Count actual removals once across
@@ -95,10 +75,7 @@ export function hideMovedMessages(
 
 export function useMessages(folder: string) {
   const { status } = useWsStatus();
-  const pendingMoves = useMutationState<MoveMessageOperation>({
-    filters: { mutationKey: ["move-message"], status: "pending" },
-    select: mutation => mutation.state.variables as MoveMessageOperation,
-  });
+  const pendingMoves = useMessageRemovals();
   const query = useInfiniteQuery({
     queryKey: ["messages", folder],
     queryFn: ({ pageParam = 0 }) =>
@@ -115,7 +92,7 @@ export function useMessages(folder: string) {
   });
   // Read-time overlay survives any subsequent flag/WS/polling refetch, and
   // sees moves started by other components sharing this QueryClient.
-  const hidden = new Set(pendingMoves.filter(move => isCurrentMove(move) && move.fromFolder === folder).map(move => move.uid));
+  const hidden = new Set(pendingMoves.filter(move => move.fromFolder === folder).map(move => move.uid));
   return { ...query, data: query.data ? hideMovedMessages(query.data, folder, hidden) : query.data };
 }
 
@@ -173,7 +150,7 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
     networkMode: "always",
     mutationFn: async (operation: MoveMessageOperation) => {
       await Promise.race([operation.ready, operation.cancellation]);
-      if (!isCurrentMove(operation)) throw new Error("Move cancelled because the account changed");
+      if (!isCurrentRemoval(operation)) throw new Error("Move cancelled because the account changed");
       if (!operation.toFolder) {
         return apiDelete(`/messages/${encodeURIComponent(operation.fromFolder)}/${operation.uid}`);
       }
@@ -196,7 +173,7 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
         operation.cancel();
         operation.release();
       });
-      if (!isCurrentMove(operation)) return { unsubscribe };
+      if (!isCurrentRemoval(operation)) return { unsubscribe };
       // Auto-advance: if the moved message is selected, select the next (or previous) message.
       const { selectedMessageUid, selectMessage } = useUiStore.getState();
       if (useUiStore.getState().activeFolder === fromFolder && selectedMessageUid === uid) {
@@ -222,18 +199,9 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
       await Promise.all([
         queryClient.cancelQueries({ queryKey: ["messages", fromFolder] }),
         ...(toFolder ? [queryClient.cancelQueries({ queryKey: ["messages", toFolder] })] : []),
-        queryClient.cancelQueries({ queryKey: ["search"] })
       ]);
 
-      if (!isCurrentMove(operation)) return { unsubscribe };
-      const searchSnapshots = queryClient.getQueriesData<SearchResponse>({ queryKey: ["search"] });
-      for (const [key, search] of searchSnapshots) {
-        if (!search) continue;
-        const results = search.results.filter(item => !(item.folder === fromFolder && item.uid === uid));
-        const removed = search.results.length - results.length;
-        if (removed) queryClient.setQueryData(key, { ...search, results, total_count: Math.max(0, search.total_count - removed) });
-      }
-
+      if (!isCurrentRemoval(operation)) return { unsubscribe };
       const prevFrom = queryClient.getQueryData<InfiniteData<MessagesResponse>>(
         ["messages", fromFolder],
       );
@@ -245,30 +213,18 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
         );
       }
 
+      // Search keeps raw data for rollback; useSearch supplies its overlay.
       // IMAP UIDs are folder-local. Only a destination refetch can supply
       // the moved message's new UID; never insert a source UID here.
 
-      return { prevFrom, searchSnapshots, selectedMessageUid, advancedSelection: useUiStore.getState().selectedMessageUid, unsubscribe };
+      return { prevFrom, selectedMessageUid, advancedSelection: useUiStore.getState().selectedMessageUid, unsubscribe };
     },
     onError: (err, operation, context) => {
-      if (!isCurrentMove(operation)) {
+      if (!isCurrentRemoval(operation)) {
         toast.error("Pending move cancelled because the account changed");
         return;
       }
       const { fromFolder, uid } = operation;
-      // Restore only this move's result, not a whole snapshot that could
-      // resurrect other messages being moved concurrently.
-      for (const [key, snapshot] of context?.searchSnapshots ?? []) {
-        const item = snapshot?.results.find(result => result.folder === fromFolder && result.uid === uid);
-        if (!item) continue;
-        queryClient.setQueryData<SearchResponse>(key, current => {
-          if (!current || current.results.some(result => result.folder === fromFolder && result.uid === uid)) return current;
-          const results = [...current.results];
-          const index = snapshot!.results.indexOf(item);
-          results.splice(Math.min(index, results.length), 0, item);
-          return { ...current, results, total_count: current.total_count + 1 };
-        });
-      }
       toast.error(err instanceof Error ? err.message : "Failed to remove message");
       const ui = useUiStore.getState();
       if (context && ui.activeFolder === fromFolder && ui.selectedMessageUid === context.advancedSelection) {
@@ -294,9 +250,12 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
         });
       }
     },
+    onSuccess: (_data, operation) => {
+      operation.removed = true;
+    },
     onSettled: async (_data, error, operation, context) => {
       try {
-        if (!isCurrentMove(operation)) return;
+        if (!isCurrentRemoval(operation)) return;
         const { fromFolder, toFolder, uid } = operation;
         // Keep the overlay through reconciliation and replace pre-move fetches.
         // TanStack's silent refetch cancellation chains waiting callers onto
@@ -305,15 +264,23 @@ function useRemoveMessage({ queued = false }: { queued?: boolean } = {}) {
           queryClient.invalidateQueries({ queryKey: ["messages", fromFolder] }),
           ...(toFolder ? [queryClient.invalidateQueries({ queryKey: ["messages", toFolder] })] : []),
           queryClient.invalidateQueries({ queryKey: ["folders"] }),
+          queryClient.invalidateQueries({ queryKey: ["search"] }),
         ]);
-        if (!isCurrentMove(operation)) return;
+        if (!isCurrentRemoval(operation)) return;
         // A failed list refresh retains old cache data. A confirmed successful
         // move must not reappear when its pending overlay is released.
         if (!error) {
           queryClient.setQueryData<InfiniteData<MessagesResponse>>(["messages", fromFolder], current =>
             current ? hideMovedMessages(current, fromFolder, new Set([uid])) : current);
         }
-        reconcileSearchAfterMoves(queryClient, operation);
+        // Include successful siblings: a later settlement's stale response
+        // must not restore an earlier success, even if this action failed.
+        const removed = queryClient.getMutationCache()
+          .findAll({ mutationKey: ["move-message"] })
+          .map(mutation => mutation.state.variables as MoveMessageOperation)
+          .filter(removal => isCurrentRemoval(removal) && removal.removed);
+        queryClient.setQueriesData<SearchResponse>({ queryKey: ["search"] }, current =>
+          current ? hideRemovedSearchResults(current, removed) : current);
       } finally {
         context?.unsubscribe();
         operation.release();

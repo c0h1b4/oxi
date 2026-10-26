@@ -281,17 +281,22 @@ async fn fetch_new_after_idle(
     config: &AppConfig,
 ) -> (async_imap::Session<ImapStream>, ReconcileResult) {
     // Read cached folder state from DB.
-    let (cached_modseq, max_cached_uid, cached_count) =
+    let (cached_modseq, max_cached_uid, cached_count, cached_uid_validity, header_sync) =
         match db::pool::open_user_db(&config.data_dir, user_hash) {
             Ok(conn) => {
-                let modseq = db::folders::get_folder(&conn, folder)
-                    .ok()
-                    .flatten()
-                    .map(|f| f.highest_modseq)
-                    .unwrap_or(0);
+                let header_sync = match db::header_sync::HeaderSync::capture(&conn) {
+                    Ok(sync) => sync,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "IDLE fetch: failed to read header generation");
+                        return (session, ReconcileResult::empty());
+                    }
+                };
+                let cached = db::folders::get_folder(&conn, folder).ok().flatten();
+                let modseq = cached.as_ref().map(|f| f.highest_modseq).unwrap_or(0);
+                let validity = cached.as_ref().map(|f| f.uid_validity).unwrap_or(0);
                 let max_uid = db::messages::max_uid(&conn, folder).unwrap_or(0);
                 let count = db::messages::count_messages(&conn, folder).unwrap_or(0);
-                (modseq, max_uid, count)
+                (modseq, max_uid, count, validity, header_sync)
             }
             Err(e) => {
                 tracing::warn!(error = %e, "IDLE fetch: failed to open DB");
@@ -311,6 +316,14 @@ async fn fetch_new_after_idle(
     let server_exists = mailbox.exists;
     let server_modseq = mailbox.highest_modseq.unwrap_or(0);
     let uid_validity = mailbox.uid_validity.unwrap_or(0);
+
+    // Let list sync reset the namespace before IDLE writes any reused UIDs.
+    if cached_uid_validity != 0 && cached_uid_validity != uid_validity {
+        if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
+            let _ = db::folders::invalidate_folder_freshness(&conn, folder);
+        }
+        return (session, ReconcileResult::empty());
+    }
 
     // Early exit: nothing changed (CONDSTORE modseq and count both match).
     if server_modseq > 0 && server_modseq == cached_modseq && server_exists == cached_count {
@@ -394,7 +407,7 @@ async fn fetch_new_after_idle(
             if has_new {
                 let uid_range = format!("{}:*", max_cached_uid + 1);
                 new_count = fetch_and_store_headers(
-                    &mut session, user_hash, folder, config, &uid_range, max_cached_uid,
+                    &mut session, user_hash, folder, config, &uid_range, max_cached_uid, header_sync,
                 )
                 .await;
             }
@@ -414,11 +427,14 @@ async fn fetch_new_after_idle(
             };
 
             // Update folder sync status with new modseq.
-            if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
+            if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+                && let Ok(transaction) = header_sync.begin_write(&conn)
+            {
                 let _ = db::folders::update_folder_sync_status(
                     &conn, folder, uid_validity, server_exists, server_modseq,
                 );
                 let _ = db::folders::refresh_unread_count(&conn, folder);
+                let _ = transaction.commit();
             }
 
             if flags_updated > 0 || new_count > 0 || deleted_count > 0 {
@@ -494,7 +510,7 @@ async fn fetch_new_after_idle(
     if has_new {
         let uid_range = format!("{}:*", max_cached_uid + 1);
         new_count = fetch_and_store_headers(
-            &mut session, user_hash, folder, config, &uid_range, max_cached_uid,
+            &mut session, user_hash, folder, config, &uid_range, max_cached_uid, header_sync,
         )
         .await;
     }
@@ -517,11 +533,14 @@ async fn fetch_new_after_idle(
     }
 
     // Update folder sync status.
-    if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
+    if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+        && let Ok(transaction) = header_sync.begin_write(&conn)
+    {
         let _ = db::folders::update_folder_sync_status(
             &conn, folder, uid_validity, server_exists, server_modseq,
         );
         let _ = db::folders::refresh_unread_count(&conn, folder);
+        let _ = transaction.commit();
     }
 
     // Look up the latest message's sender/subject if new messages arrived.
@@ -593,6 +612,7 @@ async fn fetch_and_store_headers(
     config: &AppConfig,
     uid_range: &str,
     min_uid: u32,
+    header_sync: db::header_sync::HeaderSync,
 ) -> u32 {
     let fetches: Option<Vec<_>> = match session
         .uid_fetch(
@@ -625,6 +645,13 @@ async fn fetch_and_store_headers(
     if let Some(fetches) = fetches
         && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
     {
+        let transaction = match header_sync.begin_write(&conn) {
+            Ok(transaction) => transaction,
+            Err(e) => {
+                tracing::debug!(error = %e, "IDLE fetch: discarded stale headers");
+                return 0;
+            }
+        };
         for fetch in &fetches {
             let uid = match fetch.uid {
                 Some(u) if u > min_uid => u,
@@ -758,6 +785,10 @@ async fn fetch_and_store_headers(
                 }
                 new_count += 1;
             }
+        }
+        if let Err(e) = transaction.commit() {
+            tracing::warn!(error = %e, "IDLE fetch: failed to commit headers");
+            return 0;
         }
     }
 

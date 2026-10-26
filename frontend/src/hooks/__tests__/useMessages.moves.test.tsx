@@ -328,7 +328,7 @@ it.each([false, true])("does not roll back old rows after switching accounts (re
   }
 });
 
-it("does not run a cleared move's delayed search refresh after returning to the same account", async () => {
+it("does not run a cleared move's search refresh after returning to the same account", async () => {
   const client = new QueryClient();
   const previousAccount = useAuthStore.getState().activeAccountId;
   useAuthStore.setState({ activeAccountId: "account-a" });
@@ -340,6 +340,7 @@ it("does not run a cleared move's delayed search refresh after returning to the 
   try {
     await act(async () => {
       await result.current.mutateAsync({ fromFolder: "INBOX", toFolder: "Junk", uid: 7 });
+      invalidations.mockClear();
       useAuthStore.setState({ activeAccountId: "account-b" }); client.clear();
       useAuthStore.setState({ activeAccountId: "account-a" }); client.clear();
     });

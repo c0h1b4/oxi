@@ -28,6 +28,7 @@ import {
   replaceSignatureInBody,
   removeSignatureFromBody,
   injectSignature,
+  convertBodyFormat,
 } from "@/stores/useComposeStore";
 import {
   useSendMessage,
@@ -497,19 +498,9 @@ export function ComposeDialog() {
   );
 
   const handleToggleHtml = useCallback(() => {
-    if (isHtml) {
-      // HTML → plain text: strip tags
-      setField("body", stripHtml(body));
-    } else {
-      // Plain text → HTML: wrap lines in <p> tags
-      const html = body
-        .split("\n")
-        .map((line) => `<p>${line || "<br>"}</p>`)
-        .join("");
-      setField("body", html);
-    }
+    setField("body", convertBodyFormat(body, isHtml, signatureHtml));
     setIsHtml(!isHtml);
-  }, [isHtml, body, setField, setIsHtml]);
+  }, [isHtml, body, signatureHtml, setField, setIsHtml]);
 
   const previewAttachment = previewAttId
     ? attachments.find((a) => a.id === previewAttId)

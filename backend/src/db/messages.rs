@@ -113,6 +113,20 @@ pub fn upsert_message(
     Ok(())
 }
 
+/// Remove a successfully moved/deleted source UID and reject older header reads.
+/// Invalidate freshness so a rejected batch is retried by the next list request.
+pub fn remove_after_mutation(conn: &Connection, folder: &str, uid: u32) -> Result<(), String> {
+    let transaction = rusqlite::Transaction::new_unchecked(
+        conn,
+        rusqlite::TransactionBehavior::Immediate,
+    )
+    .map_err(|e| e.to_string())?;
+    delete_message(conn, folder, uid)?;
+    super::header_sync::invalidate(conn)?;
+    super::folders::invalidate_folder_freshness(conn, folder)?;
+    transaction.commit().map_err(|e| e.to_string())
+}
+
 /// Delete all messages in a folder (used when UIDVALIDITY changes).
 pub fn delete_folder_messages(conn: &Connection, folder: &str) -> Result<usize, String> {
     let deleted = conn

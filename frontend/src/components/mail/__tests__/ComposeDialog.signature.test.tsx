@@ -52,6 +52,37 @@ describe("ComposeDialog reply signatures", () => {
     expect(useComposeStore.getState().body.match(/data-signature=/g)).toHaveLength(1);
   });
 
+  it.each([false, true])("removes and replaces a signature after format switching (round trip=%s)", (roundTrip) => {
+    useComposeStore.getState().openReply(reply);
+    render(<ComposeDialog />);
+    fireEvent.click(screen.getByTitle("Switch to plain text"));
+    if (roundTrip) fireEvent.click(screen.getByTitle("Switch to rich text"));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+    expect(useComposeStore.getState().body).not.toContain("Alias signature");
+    expect(useComposeStore.getState().body.match(/Main signature/g)).toHaveLength(1);
+    expect(useComposeStore.getState().body).toContain("Original");
+    fireEvent.click(screen.getByTitle("Remove signature"));
+    expect(useComposeStore.getState().body).not.toContain("Main signature");
+    expect(useComposeStore.getState().body).toContain("Original");
+    fireEvent.click(screen.getByTitle("Add signature"));
+    expect(useComposeStore.getState().body.match(/Main signature/g)).toHaveLength(1);
+  });
+
+  it("preserves quoted signatures and literal text over a plain-text round trip", () => {
+    useComposeStore.getState().openReply({ ...reply, isHtml: false,
+      body: "Reply <literal> & text\n\nOn Monday, sender wrote:\n> Original\n> -- \n> Alias signature" });
+    render(<ComposeDialog />);
+    fireEvent.click(screen.getByTitle("Switch to rich text"));
+    expect(useComposeStore.getState().body).toContain("&lt;literal&gt; &amp; text");
+    expect(useComposeStore.getState().body.match(/data-signature=/g)).toHaveLength(1);
+    fireEvent.click(screen.getByTitle("Switch to plain text"));
+    fireEvent.click(screen.getByTitle("Remove signature"));
+    const body = useComposeStore.getState().body;
+    expect(body).toContain("Reply <literal> & text");
+    expect(body).toContain("> Alias signature");
+    expect(body.match(/Alias signature/g)).toHaveLength(1);
+  });
+
   it("uses the newly selected identity when re-enabling the signature", () => {
     useComposeStore.getState().openReply(reply);
     render(<ComposeDialog />);
