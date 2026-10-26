@@ -5,6 +5,22 @@ All notable changes are recorded here. oxi uses Semantic Versioning and publishe
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-26
+
+### Fixed
+
+- Recover missing older message headers after interrupted backfills and improve
+  mailbox update recovery, including stale synchronization races.
+- Invalidate the Sent cache after successful IMAP appends.
+- Correct search-index removal and signature formatting.
+- Improve sender privacy and reply handling.
+- Fix Nix builds by bundling fonts for offline builds, including backend test
+  fixtures, and running Next.js static exports with Node.js.
+
+### Changed
+
+- Update frontend dependencies to current stable releases.
+
 ## [0.1.0] - 2026-10-23
 
 Initial versioned beta release.
@@ -33,5 +49,6 @@ Initial versioned beta release.
 - Docker images and source archives are provided; standalone release binaries are
   not currently published.
 
-[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/c0h1b4/oxi/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/c0h1b4/oxi/releases/tag/v0.1.0
