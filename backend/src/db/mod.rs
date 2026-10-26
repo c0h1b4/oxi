@@ -4,6 +4,7 @@ pub mod contacts;
 pub mod display_preferences;
 pub mod drafts;
 pub mod folders;
+pub(crate) mod header_sync;
 pub mod identities;
 pub mod messages;
 pub mod notification_preferences;

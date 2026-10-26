@@ -19,6 +19,7 @@ import {
   Redo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SignatureBlock } from "./SignatureBlock";
 
 interface RichTextEditorProps {
   content: string;
@@ -73,6 +74,7 @@ export function RichTextEditor({
 
   const editor = useEditor({
     extensions: [
+      SignatureBlock,
       StarterKit.configure({
         heading: false,
       }),

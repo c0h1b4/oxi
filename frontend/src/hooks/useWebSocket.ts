@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { apiUrl } from "@/lib/api-url";
@@ -22,135 +22,160 @@ interface WebSocketMessage {
   event: MailEvent;
 }
 
-/**
- * Connects to the backend WebSocket endpoint for real-time mail events.
- * Automatically reconnects with exponential backoff on disconnect.
- * Invalidates React Query caches when events arrive.
- */
+const CONNECT_TIMEOUT_MS = 15_000;
+
+/** Reconnect on resume and refresh mail that may have changed while away. */
 export function useWebSocket(onEvent?: (event: MailEvent) => void) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<WsStatus>("disconnected");
   const [failCount, setFailCount] = useState(0);
   const onEventRef = useRef(onEvent);
-  // Sync ref on every render so the WebSocket handler always calls the latest
-  // callback without restarting the connection (intentionally no dep array).
   useEffect(() => {
     onEventRef.current = onEvent;
   });
-  const wsRef = useRef<WebSocket | null>(null);
-  const backoffRef = useRef(1000);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
-  const connectRef = useRef<(() => void) | null>(null);
-
-  // Debounce WebSocket-driven cache invalidations (300ms quiet period).
-  const pendingInvalidationsRef = useRef<Set<string>>(new Set());
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleInvalidation = useCallback(
-    (key: string) => {
-      pendingInvalidationsRef.current.add(key);
-      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = setTimeout(() => {
-        for (const k of pendingInvalidationsRef.current) {
-          queryClient.invalidateQueries({ queryKey: k === "folders" ? ["folders"] : ["messages", k] });
-        }
-        pendingInvalidationsRef.current.clear();
-        flushTimerRef.current = null;
-      }, 300);
-    },
-    [queryClient],
-  );
 
   useEffect(() => {
-    mountedRef.current = true;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let backoff = 1000;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const invalidations = new Map<string, string[]>();
+
+    const refreshMail = () => {
+      for (const key of ["messages", "message", "folders", "search"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    };
+
+    const scheduleInvalidation = (queryKey: string[]) => {
+      invalidations.set(JSON.stringify(queryKey), queryKey);
+      clearTimeout(flushTimer);
+      flushTimer = setTimeout(() => {
+        for (const key of invalidations.values()) {
+          void queryClient.invalidateQueries({ queryKey: key });
+        }
+        invalidations.clear();
+      }, 300);
+    };
+
+    const disconnect = () => {
+      clearTimeout(reconnectTimer);
+      clearTimeout(connectTimer);
+      if (socket) {
+        // Ignore late close/message callbacks from a replaced connection.
+        socket.onopen = socket.onclose = socket.onmessage = socket.onerror = null;
+        socket.close();
+        socket = null;
+      }
+    };
 
     const connect = () => {
-      if (!mountedRef.current) return;
-
+      if (disposed || !navigator.onLine) return;
+      clearTimeout(reconnectTimer);
       setStatus("connecting");
 
       const wsUrl = new URL(apiUrl("/ws"), window.location.origin);
       wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      socket = ws;
+      const isCurrent = () => !disposed && socket === ws;
+      const retry = () => {
+        if (!isCurrent()) return;
+        disconnect();
+        setStatus("disconnected");
+        setFailCount((count) => count + 1);
+        if (!navigator.onLine) return;
+        const delay = backoff;
+        backoff = Math.min(delay * 2, 30_000);
+        reconnectTimer = setTimeout(connect, delay);
+      };
+      // A suspended tab can retain a CONNECTING socket indefinitely too.
+      connectTimer = setTimeout(retry, CONNECT_TIMEOUT_MS);
 
       ws.onopen = () => {
-        if (!mountedRef.current) return;
+        if (!isCurrent()) return;
+        clearTimeout(connectTimer);
         setStatus("connected");
         setFailCount(0);
-        backoffRef.current = 1000; // Reset backoff on successful connect
+        backoff = 1000;
+        refreshMail();
       };
 
       ws.onmessage = (event) => {
+        if (!isCurrent()) return;
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
+          if (message.accountId !== useAuthStore.getState().activeAccountId) return;
           const mailEvent = message.event;
-          const accountId = message.accountId;
-
-          const activeAccountId = useAuthStore.getState().activeAccountId;
-          if (accountId !== activeAccountId) {
-            return;
-          }
-
           onEventRef.current?.(mailEvent);
 
           switch (mailEvent.type) {
             case "NewMessages":
-              if (mailEvent.data?.folder) {
-                scheduleInvalidation(mailEvent.data.folder);
-              }
-              scheduleInvalidation("folders");
-              break;
             case "FlagsChanged":
               if (mailEvent.data?.folder) {
-                scheduleInvalidation(mailEvent.data.folder);
+                scheduleInvalidation(["messages", mailEvent.data.folder]);
               }
-              scheduleInvalidation("folders");
+              scheduleInvalidation(["folders"]);
               break;
             case "FolderUpdated":
-              scheduleInvalidation("folders");
+              // Background header sync also uses this event (without a folder).
+              scheduleInvalidation(["messages"]);
+              scheduleInvalidation(["folders"]);
               break;
           }
         } catch {
-          // Ignore malformed messages
+          // Ignore malformed messages.
         }
       };
-
-      ws.onclose = () => {
-        if (!mountedRef.current) return;
-        setStatus("disconnected");
-        setFailCount((c) => c + 1);
-        wsRef.current = null;
-
-        // Reconnect with exponential backoff
-        const delay = backoffRef.current;
-        backoffRef.current = Math.min(delay * 2, 30000);
-        reconnectTimerRef.current = setTimeout(() => connectRef.current?.(), delay);
-      };
-
+      ws.onclose = retry;
       ws.onerror = () => {
-        // onclose will fire after onerror, which handles reconnection
+        // onclose handles reconnection; the timeout covers stuck handshakes.
       };
     };
 
-    connectRef.current = connect;
+    const recover = () => {
+      if (document.visibilityState === "hidden" || !navigator.onLine) return;
+      // Visibility, pageshow and focus often arrive together on resume.
+      clearTimeout(recoveryTimer);
+      recoveryTimer = setTimeout(() => {
+        if (disposed) return;
+        disconnect();
+        backoff = 1000;
+        // Do not trust readyState: half-open sockets may still report OPEN.
+        connect();
+        refreshMail();
+      }, 0);
+    };
+    const offline = () => {
+      clearTimeout(recoveryTimer);
+      disconnect();
+      setStatus("disconnected");
+    };
+
+    window.addEventListener("focus", recover);
+    window.addEventListener("pageshow", recover);
+    window.addEventListener("online", recover);
+    window.addEventListener("offline", offline);
+    document.addEventListener("visibilitychange", recover);
+    document.addEventListener("resume", recover);
     connect();
 
     return () => {
-      mountedRef.current = false;
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-      }
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      disposed = true;
+      window.removeEventListener("focus", recover);
+      window.removeEventListener("pageshow", recover);
+      window.removeEventListener("online", recover);
+      window.removeEventListener("offline", offline);
+      document.removeEventListener("visibilitychange", recover);
+      document.removeEventListener("resume", recover);
+      clearTimeout(recoveryTimer);
+      clearTimeout(flushTimer);
+      disconnect();
     };
-  }, [queryClient, scheduleInvalidation]);
+  }, [queryClient]);
 
   return { status, failCount };
 }

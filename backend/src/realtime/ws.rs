@@ -191,7 +191,7 @@ async fn handle_socket_multi_account(
     }
 
     for session in &accounts {
-        idle_manager.stop_all(&session.user_hash).await;
+        idle_manager.stop_idle(&session.user_hash, "INBOX").await;
         event_bus.cleanup(&session.user_hash).await;
     }
 }

@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMessages, useMoveMessage } from "../useMessages";
+import { useSearch } from "../useSearch";
 import { apiGet, apiPost } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({ apiGet: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiDelete: vi.fn() }));
@@ -10,40 +11,42 @@ vi.mock("@/lib/ws-context", () => ({ useWsStatus: () => ({ status: "connected" }
 
 describe("folder navigation", () => {
   it("never inserts the source UID into Spam during or after a move", async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     const source = { pages: [{ messages: [{ uid: 16891, folder: "INBOX" }], page: 0, per_page: 50, total_count: 1 }], pageParams: [0] };
     const destination = { pages: [{ messages: [], page: 0, per_page: 50, total_count: 0 }], pageParams: [0] };
     client.setQueryData(["messages", "INBOX"], source);
     client.setQueryData(["messages", "Spam"], destination);
-    client.setQueryData(["search", "test"], { results: [{ uid: 16891, folder: "INBOX" }], total_count: 1, query: "test" });
+    client.setQueryData(["search", "test", undefined, "date_desc", undefined], { results: [{ uid: 16891, folder: "INBOX" }], total_count: 1, query: "test" });
     let finish!: () => void;
     vi.mocked(apiPost).mockImplementation(() => new Promise(resolve => { finish = () => resolve({ status: "ok" }); }));
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-    const { result, unmount } = renderHook(() => useMoveMessage(), { wrapper });
-    act(() => result.current.mutate({ fromFolder: "INBOX", toFolder: "Spam", uid: 16891 }));
+    const { result, unmount } = renderHook(() => ({ move: useMoveMessage(), search: useSearch("test") }), { wrapper });
+    act(() => result.current.move.mutate({ fromFolder: "INBOX", toFolder: "Spam", uid: 16891 }));
     await waitFor(() => expect(finish).toBeDefined());
     expect(client.getQueryData(["messages", "Spam"])).toEqual(destination);
-    expect(client.getQueryData(["search", "test"])).toEqual({ results: [], total_count: 0, query: "test" });
+    expect(result.current.search.data).toEqual({ results: [], total_count: 0, query: "test" });
+    vi.mocked(apiGet).mockResolvedValue({ results: [], total_count: 0, query: "test" });
     act(() => finish());
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(result.current.move.isSuccess).toBe(true));
     expect(client.getQueryData(["messages", "Spam"])).toEqual(destination);
     unmount();
     client.clear();
   });
   it("restores an optimistically hidden search result when moving fails", async () => {
-    const client = new QueryClient();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     const search = { results: [{ uid: 7, folder: "INBOX" }], total_count: 1, query: "test" };
-    client.setQueryData(["search", "test"], search);
+    client.setQueryData(["search", "test", undefined, "date_desc", undefined], search);
     let fail!: () => void;
     vi.mocked(apiPost).mockImplementation(() => new Promise((_resolve, reject) => { fail = () => reject(new Error("Move failed")); }));
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-    const { result, unmount } = renderHook(() => useMoveMessage(), { wrapper });
-    act(() => result.current.mutate({ fromFolder: "INBOX", toFolder: "Spam", uid: 7 }));
+    const { result, unmount } = renderHook(() => ({ move: useMoveMessage(), search: useSearch("test") }), { wrapper });
+    act(() => result.current.move.mutate({ fromFolder: "INBOX", toFolder: "Spam", uid: 7 }));
     await waitFor(() => expect(fail).toBeDefined());
-    expect(client.getQueryData(["search", "test"])).toEqual({ ...search, results: [], total_count: 0 });
+    expect(result.current.search.data).toEqual({ ...search, results: [], total_count: 0 });
+    vi.mocked(apiGet).mockRejectedValue(new Error("Offline"));
     act(() => fail());
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(client.getQueryData(["search", "test"])).toEqual(search);
+    await waitFor(() => expect(result.current.move.isError).toBe(true));
+    expect(result.current.search.data).toEqual(search);
     unmount();
     client.clear();
   });
