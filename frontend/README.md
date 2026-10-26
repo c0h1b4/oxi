@@ -40,6 +40,14 @@ API package because typescript-eslint still requires the TypeScript 6
 JavaScript API. Keep both aliases until the lint tooling supports TypeScript 7.
 This follows [Microsoft's side-by-side setup](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0).
 
+The ProseMirror overrides keep `model`, `transform`, and `view` on a single
+version across Tiptap's dependency graph. Multiple copies can break Enter and
+list splitting because their node/fragment classes are not interchangeable.
+Update these overrides together, regenerate the lockfile, and run the real
+`RichTextEditor` keyboard regression tests when upgrading Tiptap/ProseMirror.
+After changing overrides, remove `node_modules` before reinstalling: Bun may
+otherwise retain stale nested copies even with `--frozen-lockfile`.
+
 Commit `package.json`, `bun.lock`, and `.bun.nix` together. From the repository
 root, regenerate the Nix snapshot with the pinned bun2nix input:
 

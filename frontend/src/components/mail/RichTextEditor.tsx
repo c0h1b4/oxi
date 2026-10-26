@@ -77,6 +77,8 @@ export function RichTextEditor({
       SignatureBlock,
       StarterKit.configure({
         heading: false,
+        link: false,
+        underline: false,
       }),
       Link.configure({
         openOnClick: false,

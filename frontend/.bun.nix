@@ -3209,10 +3209,6 @@
     url = "https://registry.npmjs.org/prosemirror-model/-/prosemirror-model-1.25.12.tgz";
     hash = "sha512-Ue2gTmXMa7EhpLNhC7J+h4+ykD8ha12K6rrZFFKKJHBForfIStw5gJ6Zrf1mqqAa9NmpmEB4wp9bKmA4eUVjWg==";
   };
-  "prosemirror-model@1.25.4" = fetchurl {
-    url = "https://registry.npmjs.org/prosemirror-model/-/prosemirror-model-1.25.4.tgz";
-    hash = "sha512-PIM7E43PBxKce8OQeezAs9j4TP+5yDpZVbuurd1h5phUxEKIu+G2a+EUZzIC5nS1mJktDJWzbqS23n1tsAf5QA==";
-  };
   "prosemirror-schema-list@1.5.1" = fetchurl {
     url = "https://registry.npmjs.org/prosemirror-schema-list/-/prosemirror-schema-list-1.5.1.tgz";
     hash = "sha512-927lFx/uwyQaGwJxLWCZRkjXG0p48KpMj6ueoYiu4JX05GGuGcgzAy62dfiV8eFZftgyBUvLx76RsMe20fJl+Q==";
@@ -3225,21 +3221,9 @@
     url = "https://registry.npmjs.org/prosemirror-tables/-/prosemirror-tables-1.8.5.tgz";
     hash = "sha512-V/0cDCsHKHe/tfWkeCmthNUcEp1IVO3p6vwN8XtwE9PZQLAZJigbw3QoraAdfJPir4NKJtNvOB8oYGKRl+t0Dw==";
   };
-  "prosemirror-transform@1.11.0" = fetchurl {
-    url = "https://registry.npmjs.org/prosemirror-transform/-/prosemirror-transform-1.11.0.tgz";
-    hash = "sha512-4I7Ce4KpygXb9bkiPS3hTEk4dSHorfRw8uI0pE8IhxlK2GXsqv5tIA7JUSxtSu7u8APVOTtbUBxTmnHIxVkIJw==";
-  };
   "prosemirror-transform@1.12.4" = fetchurl {
     url = "https://registry.npmjs.org/prosemirror-transform/-/prosemirror-transform-1.12.4.tgz";
     hash = "sha512-2/WuPum3pn+O/Vi2vzpi8210ICUe2kIPXdLYjQ09Pv5DtT5bcKWMJhAKPBwvpPjpp5iOYUVwVEr0gOM1BY1Mgw==";
-  };
-  "prosemirror-view@1.41.6" = fetchurl {
-    url = "https://registry.npmjs.org/prosemirror-view/-/prosemirror-view-1.41.6.tgz";
-    hash = "sha512-mxpcDG4hNQa/CPtzxjdlir5bJFDlm0/x5nGBbStB2BWX+XOQ9M8ekEG+ojqB5BcVu2Rc80/jssCMZzSstJuSYg==";
-  };
-  "prosemirror-view@1.42.3" = fetchurl {
-    url = "https://registry.npmjs.org/prosemirror-view/-/prosemirror-view-1.42.3.tgz";
-    hash = "sha512-oTN7EtH+CpwxU9NrwEYWd0UZ4JUx7l048l5A2Xppm4p/60isZYLnth9QVQmC3VRIvdrIWCxwZSd+Uz791G31/w==";
   };
   "prosemirror-view@1.42.7" = fetchurl {
     url = "https://registry.npmjs.org/prosemirror-view/-/prosemirror-view-1.42.7.tgz";
