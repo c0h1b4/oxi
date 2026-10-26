@@ -13,6 +13,7 @@ changes are possible before 1.0; document them in each release's notes.
 
 1. Start a release branch from the current `main`.
 2. Set the same version in `backend/Cargo.toml` and `frontend/package.json`.
+   Also update the frontend version in `nix/frontend.nix`.
    Update the `oxi-email-server` entry in `backend/Cargo.lock` with Cargo and
    commit any resulting lockfile changes. Do not update dependencies incidentally.
 3. Move the relevant `CHANGELOG.md` entries out of `Unreleased` into a dated
