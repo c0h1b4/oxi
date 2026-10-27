@@ -1,8 +1,10 @@
 # Release process
 
 oxi uses Semantic Versioning with Git tags named `vMAJOR.MINOR.PATCH`.
-The 0.x series is beta software and is published as GitHub prereleases. Breaking
-changes are possible before 1.0; document them in each release's notes.
+The 0.x series is beta software. Numbered releases are marked Latest on GitHub
+so they appear in the repository Releases box; keep the Beta label in their
+titles and notes. Breaking changes are possible before 1.0; document them in
+each release's notes.
 
 - Patch releases contain fixes; minor releases add features.
 - For release candidates or additional beta iterations, use a SemVer suffix such
@@ -26,40 +28,40 @@ changes are possible before 1.0; document them in each release's notes.
 ## Tag and publish
 
 Run these commands from a clean checkout after merging the release pull request,
-replacing `0.1.0` with the version being released:
+replacing `0.1.2` with the version being released:
 
 ```bash
 git fetch origin --tags
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0 -m "oxi v0.1.0 (Beta)"
-git push origin v0.1.0
+git tag -a v0.1.2 -m "oxi v0.1.2 (Beta)"
+git push origin v0.1.2
 ```
 
 The tag triggers CI again. It verifies that the tag matches both package versions
 and the backend lockfile, then runs all tests and builds. After those checks pass,
-it publishes Docker images to GHCR with both `v0.1.0` and `0.1.0` tags (and a SHA
+it publishes Docker images to GHCR with both `v0.1.2` and `0.1.2` tags (and a SHA
 tag). Releases do not update `latest`; that tag continues to track `main`.
 No floating minor or major release tags are published.
 
 Wait for the tag's CI run to succeed and verify that the image exists:
 
 ```bash
-gh run list --workflow ci.yml --branch v0.1.0
-docker buildx imagetools inspect ghcr.io/c0h1b4/oxi:v0.1.0
+gh run list --workflow ci.yml --branch v0.1.2
+docker buildx imagetools inspect ghcr.io/c0h1b4/oxi:v0.1.2
 ```
 
 Then publish the GitHub release against the existing tag:
 
 ```bash
-gh release create v0.1.0 --verify-tag \
-  --title "oxi v0.1.0 (Beta)" \
-  --notes-file docs/releases/v0.1.0.md \
-  --prerelease --latest=false
+gh release create v0.1.2 --verify-tag \
+  --title "oxi v0.1.2 (Beta)" \
+  --notes-file docs/releases/v0.1.2.md \
+  --latest
 ```
 
-Use `--prerelease` for all 0.x releases and any version with a prerelease suffix.
-For a stable release at or after 1.0, omit `--prerelease` and use `--latest`.
+For release candidates or versions with a prerelease suffix, use
+`--prerelease --latest=false` instead of `--latest`.
 GitHub provides source archives automatically. Standalone binaries are not
 currently built or attached; the supported packaged distribution is the Docker
 image. If tag CI fails, fix the issue on `main` and prepare a new version rather
