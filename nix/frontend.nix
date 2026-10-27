@@ -17,7 +17,7 @@
         }:
         bun2nix.packages.${system}.default.mkDerivation {
           pname = "oxi-frontend";
-          version = "0.1.1";
+          version = "0.1.2";
           src = ../frontend;
           inherit bunDeps;
           nativeBuildInputs = [ pkgs.nodejs_24 ];
