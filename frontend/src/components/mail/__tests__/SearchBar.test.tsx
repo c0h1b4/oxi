@@ -36,9 +36,9 @@ describe("SearchBar", () => {
   it("renders with empty input initially", () => {
     render(<SearchBar />);
 
-    expect(
-      (screen.getByPlaceholderText("Search mail... (Ctrl+K)") as HTMLInputElement).value,
-    ).toBe("");
+    const input = screen.getByPlaceholderText("Search mail... (Ctrl+K)") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.name).not.toBe("");
     expect(mockUiState.setSearchQuery).not.toHaveBeenCalled();
     expect(mockUiState.setSearchActive).not.toHaveBeenCalled();
     expect(mockUiState.clearSearch).not.toHaveBeenCalled();
