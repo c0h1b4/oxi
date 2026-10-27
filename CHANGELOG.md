@@ -1,9 +1,17 @@
 # Changelog
 
-All notable changes are recorded here. oxi uses Semantic Versioning and publishes
-0.x releases as beta prereleases. See [the release process](docs/RELEASING.md).
+All notable changes are recorded here. oxi uses Semantic Versioning and labels
+0.x releases as beta software. See [the release process](docs/RELEASING.md).
 
 ## [Unreleased]
+
+## [0.1.2] - 2026-10-27
+
+### Fixed
+
+- Restore Enter/newline handling in the email reply editor.
+- Align ProseMirror dependencies to prevent duplicate editor modules, with
+  regression tests for keyboard handling and dependency resolution.
 
 ## [0.1.1] - 2026-10-26
 
@@ -49,6 +57,7 @@ Initial versioned beta release.
 - Docker images and source archives are provided; standalone release binaries are
   not currently published.
 
-[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/c0h1b4/oxi/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/c0h1b4/oxi/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/c0h1b4/oxi/releases/tag/v0.1.0
