@@ -208,6 +208,7 @@ export function SearchBar() {
           <input
             ref={inputRef}
             type="text"
+            name="mail-search"
             value={inputValue}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
