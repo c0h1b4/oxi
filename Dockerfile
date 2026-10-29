@@ -37,8 +37,9 @@ WORKDIR /app/backend
 # Copy manifests first for dependency caching
 COPY backend/Cargo.toml backend/Cargo.lock ./
 
-# Copy migrations (needed at compile time by refinery embed_migrations! macro)
+# Copy migrations embedded at compile time by the database migration runners.
 COPY backend/migrations/ migrations/
+COPY backend/postgres-migrations/ postgres-migrations/
 
 # Create a dummy main.rs so cargo can resolve and compile all dependencies.
 # This layer is cached as long as Cargo.toml / Cargo.lock don't change.

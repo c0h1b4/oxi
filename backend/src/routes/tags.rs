@@ -11,7 +11,7 @@ use crate::config::AppConfig;
 use crate::db;
 use crate::db::tags::{MessageTag, Tag};
 use crate::error::AppError;
-use crate::routes::messages::types::{default_per_page, MessageSummary};
+use crate::routes::messages::types::{MessageSummary, default_per_page};
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -77,10 +77,7 @@ pub struct MessageTagsResponse {
 // ---------------------------------------------------------------------------
 
 /// Build a `MessageSummary` from a cached message and its tags.
-fn build_summary(
-    m: db::messages::CachedMessage,
-    tags: Vec<MessageTag>,
-) -> MessageSummary {
+fn build_summary(m: db::messages::CachedMessage, tags: Vec<MessageTag>) -> MessageSummary {
     MessageSummary {
         uid: m.uid,
         folder: m.folder,
@@ -107,10 +104,13 @@ pub async fn list_tags_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let tags = db::tags::list_tags(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(ListTagsResponse { tags }).into_response())
@@ -129,11 +129,14 @@ pub async fn create_tag_handler(
 
     let color = body.color.as_deref().unwrap_or("#6b7280");
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let id = Uuid::new_v4().to_string();
     db::tags::create_tag(&conn, &id, name, color)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "id": id, "name": name, "color": color })).into_response())
@@ -151,14 +154,20 @@ pub async fn update_tag_handler(
         return Err(AppError::BadRequest("Tag name is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let updated = db::tags::update_tag(&conn, &id, name, &body.color)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if updated {
-        Ok(Json(serde_json::json!({ "id": id, "name": name, "color": body.color })).into_response())
+        Ok(
+            Json(serde_json::json!({ "id": id, "name": name, "color": body.color }))
+                .into_response(),
+        )
     } else {
         Err(AppError::NotFound(format!("Tag '{id}' not found")))
     }
@@ -170,10 +179,13 @@ pub async fn delete_tag_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let deleted = db::tags::delete_tag(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if deleted {
@@ -190,10 +202,13 @@ pub async fn tag_message_handler(
     Path(id): Path<String>,
     Json(body): Json<TagMessageBody>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     db::tags::add_tag_to_message(&conn, &id, body.message_uid, &body.message_folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -205,10 +220,13 @@ pub async fn untag_message_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path((id, folder, uid)): Path<(String, String, u32)>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let removed = db::tags::remove_tag_from_message(&conn, &id, uid, &folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if removed {
@@ -225,18 +243,24 @@ pub async fn bulk_tag_handler(
     Path(id): Path<String>,
     Json(body): Json<BulkTagBody>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let tx = conn.unchecked_transaction()
+    let tx = conn
+        .begin_write()
+        .await
         .map_err(|e| AppError::InternalError(format!("Transaction error: {e}")))?;
 
     for msg in &body.messages {
         db::tags::add_tag_to_message(&tx, &id, msg.uid, &msg.folder)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     }
 
     tx.commit()
+        .await
         .map_err(|e| AppError::InternalError(format!("Transaction commit error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok", "count": body.messages.len() })).into_response())
@@ -249,17 +273,26 @@ pub async fn list_tag_messages_handler(
     Path(id): Path<String>,
     Query(query): Query<PaginationQuery>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let messages = db::tags::get_messages_by_tag(&conn, &id, query.page, query.per_page)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     let total_count = db::tags::count_messages_by_tag(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Batch-fetch tags for returned messages
-    let message_refs: Vec<(u32, &str)> = messages.iter().map(|m| (m.uid, m.folder.as_str())).collect();
-    let tags_map = db::tags::get_tags_for_messages(&conn, &message_refs).unwrap_or_default();
+    let message_refs: Vec<(u32, &str)> = messages
+        .iter()
+        .map(|m| (m.uid, m.folder.as_str()))
+        .collect();
+    let tags_map = db::tags::get_tags_for_messages(&conn, &message_refs)
+        .await
+        .unwrap_or_default();
 
     let summaries: Vec<MessageSummary> = messages
         .into_iter()
@@ -287,10 +320,13 @@ pub async fn get_message_tags_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path((folder, uid)): Path<(String, u32)>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let tags = db::tags::get_message_tags(&conn, uid, &folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(MessageTagsResponse { tags }).into_response())

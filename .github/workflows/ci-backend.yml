@@ -19,7 +19,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [clippy, test]
+        check: [clippy, test, test-postgres]
+    services:
+      postgres:
+        image: ${{ matrix.check == 'test-postgres' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: oxi
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: oxi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oxi -d oxi_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -36,6 +50,11 @@ jobs:
       - name: Clippy
         if: matrix.check == 'clippy'
         run: cargo clippy --locked -- -D warnings
-      - name: Tests
+      - name: Tests (SQLite)
         if: matrix.check == 'test'
+        run: cargo test --locked
+      - name: Tests (PostgreSQL)
+        if: matrix.check == 'test-postgres'
+        env:
+          OXI_TEST_DATABASE_URL: postgres://oxi:test-only@localhost:5432/oxi_test
         run: cargo test --locked

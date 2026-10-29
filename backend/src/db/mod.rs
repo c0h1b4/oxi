@@ -10,3 +10,6 @@ pub mod messages;
 pub mod notification_preferences;
 pub mod pool;
 pub mod tags;
+
+#[cfg(test)]
+mod backend_tests;

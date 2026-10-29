@@ -1,6 +1,8 @@
-use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use sqlx::{Row, any::AnyRow};
 use uuid::Uuid;
+
+use super::pool::{UserDb, now};
 
 // ---------------------------------------------------------------------------
 // Structs
@@ -144,393 +146,327 @@ const EVENT_SELECT_COLS: &str = "id, title, description, location, start_time, e
     source_message_uid, source_message_folder, meeting_url, color, reminder_minutes, \
     created_at, updated_at";
 
-fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarEvent> {
-    let all_day_int: i32 = row.get(6)?;
+fn row_to_event(row: &AnyRow) -> Result<CalendarEvent, sqlx::Error> {
+    let all_day_int: i64 = row.try_get(6)?;
     Ok(CalendarEvent {
-        id: row.get(0)?,
-        title: row.get(1)?,
-        description: row.get(2)?,
-        location: row.get(3)?,
-        start_time: row.get(4)?,
-        end_time: row.get(5)?,
+        id: row.try_get(0)?,
+        title: row.try_get(1)?,
+        description: row.try_get(2)?,
+        location: row.try_get(3)?,
+        start_time: row.try_get(4)?,
+        end_time: row.try_get(5)?,
         all_day: all_day_int != 0,
-        recurrence_rule: row.get(7)?,
-        attendees: row.get(8)?,
-        organizer: row.get(9)?,
-        status: row.get(10)?,
-        source: row.get(11)?,
-        source_uid: row.get(12)?,
-        source_message_uid: row.get(13)?,
-        source_message_folder: row.get(14)?,
-        meeting_url: row.get(15)?,
-        color: row.get(16)?,
-        reminder_minutes: row.get(17)?,
-        created_at: row.get(18)?,
-        updated_at: row.get(19)?,
+        recurrence_rule: row.try_get(7)?,
+        attendees: row.try_get(8)?,
+        organizer: row.try_get(9)?,
+        status: row.try_get(10)?,
+        source: row.try_get(11)?,
+        source_uid: row.try_get(12)?,
+        source_message_uid: row.try_get(13)?,
+        source_message_folder: row.try_get(14)?,
+        meeting_url: row.try_get(15)?,
+        color: row.try_get(16)?,
+        reminder_minutes: row.try_get(17)?,
+        created_at: row.try_get(18)?,
+        updated_at: row.try_get(19)?,
     })
 }
 
-fn row_to_settings(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarSettings> {
-    let caldav_enabled_int: i32 = row.get(10)?;
+fn row_to_settings(row: &AnyRow) -> Result<CalendarSettings, sqlx::Error> {
+    let caldav_enabled_int: i64 = row.try_get(10)?;
     Ok(CalendarSettings {
-        default_view: row.get(0)?,
-        week_starts_on: row.get(1)?,
-        working_hours_start: row.get(2)?,
-        working_hours_end: row.get(3)?,
-        time_format: row.get(4)?,
-        zoom_link: row.get(5)?,
-        teams_link: row.get(6)?,
-        meet_link: row.get(7)?,
-        caldav_url: row.get(8)?,
-        caldav_username: row.get(9)?,
+        default_view: row.try_get(0)?,
+        week_starts_on: row.try_get(1)?,
+        working_hours_start: row.try_get(2)?,
+        working_hours_end: row.try_get(3)?,
+        time_format: row.try_get(4)?,
+        zoom_link: row.try_get(5)?,
+        teams_link: row.try_get(6)?,
+        meet_link: row.try_get(7)?,
+        caldav_url: row.try_get(8)?,
+        caldav_username: row.try_get(9)?,
         caldav_enabled: caldav_enabled_int != 0,
-        updated_at: row.get(11)?,
+        updated_at: row.try_get(11)?,
     })
 }
 
-fn row_to_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingTemplate> {
-    let is_default_int: i32 = row.get(4)?;
+fn row_to_template(row: &AnyRow) -> Result<MeetingTemplate, sqlx::Error> {
+    let is_default_int: i64 = row.try_get(4)?;
     Ok(MeetingTemplate {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        url_template: row.get(2)?,
-        icon: row.get(3)?,
+        id: row.try_get(0)?,
+        name: row.try_get(1)?,
+        url_template: row.try_get(2)?,
+        icon: row.try_get(3)?,
         is_default: is_default_int != 0,
-        created_at: row.get(5)?,
+        created_at: row.try_get(5)?,
     })
 }
 
-// ---------------------------------------------------------------------------
-// Public API — Events
-// ---------------------------------------------------------------------------
-
-/// List events in the given time range (inclusive start, inclusive end).
-pub fn list_events(
-    conn: &Connection,
+/// List events overlapping the inclusive time range.
+pub async fn list_events(
+    db: &UserDb,
     start: &str,
     end: &str,
 ) -> Result<Vec<CalendarEvent>, String> {
     let sql = format!(
         "SELECT {EVENT_SELECT_COLS} FROM calendar_events
-         WHERE end_time >= ?1 AND start_time <= ?2
-         ORDER BY start_time ASC"
+        WHERE user_hash = $1 AND end_time >= $2 AND start_time <= $3 ORDER BY start_time ASC"
     );
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| format!("Failed to prepare list_events: {e}"))?;
-    let rows = stmt
-        .query_map(params![start, end], row_to_event)
+    let mut connection = db.acquire().await?;
+    let rows = sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(start)
+        .bind(end)
+        .fetch_all(&mut *connection)
+        .await
         .map_err(|e| format!("Failed to query events: {e}"))?;
-
-    let mut events = Vec::new();
-    for row in rows {
-        events.push(row.map_err(|e| format!("Failed to read event row: {e}"))?);
-    }
-    Ok(events)
+    rows.iter()
+        .map(row_to_event)
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Failed to read event row: {e}"))
 }
 
-/// Get a single event by ID.
-pub fn get_event(conn: &Connection, id: &str) -> Result<Option<CalendarEvent>, String> {
-    let sql = format!("SELECT {EVENT_SELECT_COLS} FROM calendar_events WHERE id = ?1");
-    let result = conn.query_row(&sql, params![id], row_to_event);
-
-    match result {
-        Ok(e) => Ok(Some(e)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("Failed to get event: {e}")),
-    }
+pub async fn get_event(db: &UserDb, id: &str) -> Result<Option<CalendarEvent>, String> {
+    let sql =
+        format!("SELECT {EVENT_SELECT_COLS} FROM calendar_events WHERE user_hash = $1 AND id = $2");
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(id)
+        .fetch_optional(&mut *connection)
+        .await
+        .and_then(|row| row.as_ref().map(row_to_event).transpose())
+        .map_err(|e| format!("Failed to get event: {e}"))
 }
 
-/// Create a new calendar event. Generates a UUID for the ID.
-pub fn create_event(conn: &Connection, data: &CreateEvent) -> Result<CalendarEvent, String> {
+pub async fn create_event(db: &UserDb, data: &CreateEvent) -> Result<CalendarEvent, String> {
     let id = Uuid::new_v4().to_string();
-    let now: String = conn
-        .query_row("SELECT datetime('now')", [], |row| row.get(0))
-        .map_err(|e| format!("Failed to get current time: {e}"))?;
-
-    conn.execute(
-        "INSERT INTO calendar_events
-            (id, title, description, location, start_time, end_time, all_day,
-             recurrence_rule, attendees, organizer, status, source, source_uid,
-             source_message_uid, source_message_folder, meeting_url, color,
-             reminder_minutes, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
-        params![
-            id,
-            data.title,
-            data.description,
-            data.location,
-            data.start_time,
-            data.end_time,
-            data.all_day as i32,
-            data.recurrence_rule,
-            data.attendees,
-            data.organizer,
-            data.status,
-            data.source,
-            data.source_uid,
-            data.source_message_uid,
-            data.source_message_folder,
-            data.meeting_url,
-            data.color,
-            data.reminder_minutes,
-            now,
-            now,
-        ],
-    )
-    .map_err(|e| format!("Failed to create event: {e}"))?;
-
-    get_event(conn, &id)?.ok_or_else(|| "Event not found after insert".to_string())
+    let timestamp = now();
+    let mut connection = db.acquire().await?;
+    sqlx::query("INSERT INTO calendar_events
+        (user_hash, id, title, description, location, start_time, end_time, all_day,
+         recurrence_rule, attendees, organizer, status, source, source_uid, source_message_uid,
+         source_message_folder, meeting_url, color, reminder_minutes, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20)")
+        .bind(db.user_hash()).bind(&id).bind(&data.title).bind(&data.description).bind(&data.location)
+        .bind(&data.start_time).bind(&data.end_time).bind(i64::from(data.all_day))
+        .bind(&data.recurrence_rule).bind(&data.attendees).bind(&data.organizer).bind(&data.status)
+        .bind(&data.source).bind(&data.source_uid).bind(data.source_message_uid)
+        .bind(&data.source_message_folder).bind(&data.meeting_url).bind(&data.color)
+        .bind(data.reminder_minutes).bind(timestamp).execute(&mut *connection).await
+        .map_err(|e| format!("Failed to create event: {e}"))?;
+    drop(connection);
+    get_event(db, &id)
+        .await?
+        .ok_or_else(|| "Event not found after insert".to_string())
 }
 
-/// Update an existing calendar event. Returns the updated event, or None if not found.
-pub fn update_event(
-    conn: &Connection,
+pub async fn update_event(
+    db: &UserDb,
     id: &str,
     data: &UpdateEvent,
 ) -> Result<Option<CalendarEvent>, String> {
-    // Build SET clauses dynamically for non-None fields.
-    let mut sets = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1u32;
-
-    macro_rules! maybe_set {
-        ($field:ident, $col:expr) => {
-            if let Some(ref v) = data.$field {
-                sets.push(format!("{} = ?{idx}", $col));
-                values.push(Box::new(v.clone()));
-                idx += 1;
-            }
-        };
+    if data.title.is_none()
+        && data.description.is_none()
+        && data.location.is_none()
+        && data.start_time.is_none()
+        && data.end_time.is_none()
+        && data.all_day.is_none()
+        && data.recurrence_rule.is_none()
+        && data.attendees.is_none()
+        && data.organizer.is_none()
+        && data.status.is_none()
+        && data.meeting_url.is_none()
+        && data.color.is_none()
+        && data.reminder_minutes.is_none()
+    {
+        return get_event(db, id).await;
     }
-
-    maybe_set!(title, "title");
-    maybe_set!(description, "description");
-    maybe_set!(location, "location");
-    maybe_set!(start_time, "start_time");
-    maybe_set!(end_time, "end_time");
-    maybe_set!(attendees, "attendees");
-    maybe_set!(organizer, "organizer");
-    maybe_set!(status, "status");
-    maybe_set!(meeting_url, "meeting_url");
-    maybe_set!(color, "color");
-    maybe_set!(recurrence_rule, "recurrence_rule");
-
-    if let Some(v) = data.all_day {
-        sets.push(format!("all_day = ?{idx}"));
-        values.push(Box::new(v as i32));
-        idx += 1;
-    }
-
-    if let Some(v) = data.reminder_minutes {
-        sets.push(format!("reminder_minutes = ?{idx}"));
-        values.push(Box::new(v));
-        idx += 1;
-    }
-
-    if sets.is_empty() {
-        return get_event(conn, id);
-    }
-
-    sets.push("updated_at = datetime('now')".to_string());
-
-    let sql = format!(
-        "UPDATE calendar_events SET {} WHERE id = ?{idx}",
-        sets.join(", ")
-    );
-    values.push(Box::new(id.to_string()));
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
-    let updated = conn
-        .execute(&sql, params_refs.as_slice())
-        .map_err(|e| format!("Failed to update event: {e}"))?;
-
-    if updated == 0 {
+    let mut connection = db.acquire().await?;
+    let updated = sqlx::query(
+        "UPDATE calendar_events SET
+        title = COALESCE($1, title), description = COALESCE($2, description),
+        location = COALESCE($3, location), start_time = COALESCE($4, start_time),
+        end_time = COALESCE($5, end_time), all_day = COALESCE($6, all_day),
+        recurrence_rule = COALESCE($7, recurrence_rule), attendees = COALESCE($8, attendees),
+        organizer = COALESCE($9, organizer), status = COALESCE($10, status),
+        meeting_url = COALESCE($11, meeting_url), color = COALESCE($12, color),
+        reminder_minutes = COALESCE($13, reminder_minutes), updated_at = $14
+        WHERE user_hash = $15 AND id = $16",
+    )
+    .bind(&data.title)
+    .bind(&data.description)
+    .bind(&data.location)
+    .bind(&data.start_time)
+    .bind(&data.end_time)
+    .bind(data.all_day.map(i64::from))
+    .bind(&data.recurrence_rule)
+    .bind(&data.attendees)
+    .bind(&data.organizer)
+    .bind(&data.status)
+    .bind(&data.meeting_url)
+    .bind(&data.color)
+    .bind(data.reminder_minutes)
+    .bind(now())
+    .bind(db.user_hash())
+    .bind(id)
+    .execute(&mut *connection)
+    .await
+    .map_err(|e| format!("Failed to update event: {e}"))?;
+    drop(connection);
+    if updated.rows_affected() == 0 {
         return Ok(None);
     }
-
-    get_event(conn, id)
+    get_event(db, id).await
 }
 
-/// Delete an event by ID. Returns true if a row was deleted.
-pub fn delete_event(conn: &Connection, id: &str) -> Result<bool, String> {
-    let deleted = conn
-        .execute("DELETE FROM calendar_events WHERE id = ?1", params![id])
-        .map_err(|e| format!("Failed to delete event: {e}"))?;
-    Ok(deleted > 0)
+pub async fn delete_event(db: &UserDb, id: &str) -> Result<bool, String> {
+    let mut connection = db.acquire().await?;
+    sqlx::query("DELETE FROM calendar_events WHERE user_hash = $1 AND id = $2")
+        .bind(db.user_hash())
+        .bind(id)
+        .execute(&mut *connection)
+        .await
+        .map(|result| result.rows_affected() > 0)
+        .map_err(|e| format!("Failed to delete event: {e}"))
 }
 
-/// Find an event by its source_uid (for deduplication during ICS import).
-pub fn find_event_by_source_uid(
-    conn: &Connection,
+pub async fn find_event_by_source_uid(
+    db: &UserDb,
     source_uid: &str,
 ) -> Result<Option<CalendarEvent>, String> {
     let sql = format!(
-        "SELECT {EVENT_SELECT_COLS} FROM calendar_events WHERE source_uid = ?1"
+        "SELECT {EVENT_SELECT_COLS} FROM calendar_events WHERE user_hash = $1 AND source_uid = $2"
     );
-    let result = conn.query_row(&sql, params![source_uid], row_to_event);
-
-    match result {
-        Ok(e) => Ok(Some(e)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("Failed to find event by source_uid: {e}")),
-    }
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(source_uid)
+        .fetch_optional(&mut *connection)
+        .await
+        .and_then(|row| row.as_ref().map(row_to_event).transpose())
+        .map_err(|e| format!("Failed to find event by source_uid: {e}"))
 }
-
-// ---------------------------------------------------------------------------
-// Public API — Settings
-// ---------------------------------------------------------------------------
 
 const SETTINGS_SELECT_COLS: &str = "default_view, week_starts_on, working_hours_start, \
     working_hours_end, time_format, zoom_link, teams_link, meet_link, caldav_url, \
     caldav_username, caldav_enabled, updated_at";
 
-/// Get calendar settings, inserting a default row if none exists.
-pub fn get_calendar_settings(conn: &Connection) -> Result<CalendarSettings, String> {
-    // Ensure the singleton row exists.
-    conn.execute(
-        "INSERT OR IGNORE INTO calendar_settings (id) VALUES (1)",
-        [],
-    )
-    .map_err(|e| format!("Failed to ensure calendar_settings row: {e}"))?;
-
-    let sql = format!(
-        "SELECT {SETTINGS_SELECT_COLS} FROM calendar_settings WHERE id = 1"
+/// Get calendar settings, inserting a default row for this user if needed.
+pub async fn get_calendar_settings(db: &UserDb) -> Result<CalendarSettings, String> {
+    let mut connection = db.acquire().await?;
+    let insert = db.sql(
+        "INSERT INTO calendar_settings (user_hash, id) VALUES ($1, 1) ON CONFLICT(user_hash) DO NOTHING",
+        "INSERT INTO calendar_settings (user_hash) VALUES ($1) ON CONFLICT(user_hash) DO NOTHING",
     );
-    conn.query_row(&sql, [], row_to_settings)
-        .map_err(|e| format!("Failed to get calendar settings: {e}"))
+    sqlx::query(insert)
+        .bind(db.user_hash())
+        .execute(&mut *connection)
+        .await
+        .map_err(|e| format!("Failed to ensure calendar_settings row: {e}"))?;
+    let sql = format!("SELECT {SETTINGS_SELECT_COLS} FROM calendar_settings WHERE user_hash = $1");
+    let row = sqlx::query(&sql)
+        .bind(db.user_hash())
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|e| format!("Failed to get calendar settings: {e}"))?;
+    row_to_settings(&row).map_err(|e| format!("Failed to read calendar settings: {e}"))
 }
 
-/// Update calendar settings. Returns the updated settings.
-pub fn update_calendar_settings(
-    conn: &Connection,
+pub async fn update_calendar_settings(
+    db: &UserDb,
     data: &UpdateCalendarSettings,
 ) -> Result<CalendarSettings, String> {
-    // Ensure the singleton row exists.
-    conn.execute(
-        "INSERT OR IGNORE INTO calendar_settings (id) VALUES (1)",
-        [],
+    get_calendar_settings(db).await?;
+    let changed = data.default_view.is_some()
+        || data.week_starts_on.is_some()
+        || data.working_hours_start.is_some()
+        || data.working_hours_end.is_some()
+        || data.time_format.is_some()
+        || data.zoom_link.is_some()
+        || data.teams_link.is_some()
+        || data.meet_link.is_some()
+        || data.caldav_url.is_some()
+        || data.caldav_username.is_some()
+        || data.caldav_password.is_some()
+        || data.caldav_enabled.is_some();
+    if changed {
+        let mut connection = db.acquire().await?;
+        sqlx::query("UPDATE calendar_settings SET
+            default_view = COALESCE($1, default_view), week_starts_on = COALESCE($2, week_starts_on),
+            working_hours_start = COALESCE($3, working_hours_start), working_hours_end = COALESCE($4, working_hours_end),
+            time_format = COALESCE($5, time_format), zoom_link = COALESCE($6, zoom_link),
+            teams_link = COALESCE($7, teams_link), meet_link = COALESCE($8, meet_link),
+            caldav_url = COALESCE($9, caldav_url), caldav_username = COALESCE($10, caldav_username),
+            caldav_password = COALESCE($11, caldav_password), caldav_enabled = COALESCE($12, caldav_enabled),
+            updated_at = $13 WHERE user_hash = $14")
+            .bind(&data.default_view).bind(data.week_starts_on).bind(&data.working_hours_start)
+            .bind(&data.working_hours_end).bind(&data.time_format).bind(&data.zoom_link)
+            .bind(&data.teams_link).bind(&data.meet_link).bind(&data.caldav_url).bind(&data.caldav_username)
+            .bind(&data.caldav_password).bind(data.caldav_enabled.map(i64::from)).bind(now()).bind(db.user_hash())
+            .execute(&mut *connection).await.map_err(|e| format!("Failed to update calendar settings: {e}"))?;
+        drop(connection);
+    }
+    get_calendar_settings(db).await
+}
+
+pub async fn list_meeting_templates(db: &UserDb) -> Result<Vec<MeetingTemplate>, String> {
+    let mut connection = db.acquire().await?;
+    let rows = sqlx::query(
+        "SELECT id, name, url_template, icon, is_default, created_at
+        FROM meeting_templates WHERE user_hash = $1 ORDER BY is_default DESC, name ASC",
     )
-    .map_err(|e| format!("Failed to ensure calendar_settings row: {e}"))?;
-
-    let mut sets = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1u32;
-
-    macro_rules! maybe_set {
-        ($field:ident, $col:expr) => {
-            if let Some(ref v) = data.$field {
-                sets.push(format!("{} = ?{idx}", $col));
-                values.push(Box::new(v.clone()));
-                idx += 1;
-            }
-        };
-    }
-
-    maybe_set!(default_view, "default_view");
-    maybe_set!(working_hours_start, "working_hours_start");
-    maybe_set!(working_hours_end, "working_hours_end");
-    maybe_set!(time_format, "time_format");
-    maybe_set!(zoom_link, "zoom_link");
-    maybe_set!(teams_link, "teams_link");
-    maybe_set!(meet_link, "meet_link");
-    maybe_set!(caldav_url, "caldav_url");
-    maybe_set!(caldav_username, "caldav_username");
-    maybe_set!(caldav_password, "caldav_password");
-
-    if let Some(v) = data.week_starts_on {
-        sets.push(format!("week_starts_on = ?{idx}"));
-        values.push(Box::new(v));
-        idx += 1;
-    }
-
-    if let Some(v) = data.caldav_enabled {
-        sets.push(format!("caldav_enabled = ?{idx}"));
-        values.push(Box::new(v as i32));
-        #[allow(unused_assignments)]
-        {
-            idx += 1;
-        }
-    }
-
-    if !sets.is_empty() {
-        sets.push("updated_at = datetime('now')".to_string());
-        let sql = format!(
-            "UPDATE calendar_settings SET {} WHERE id = 1",
-            sets.join(", ")
-        );
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            values.iter().map(|b| b.as_ref()).collect();
-        conn.execute(&sql, params_refs.as_slice())
-            .map_err(|e| format!("Failed to update calendar settings: {e}"))?;
-    }
-
-    get_calendar_settings(conn)
+    .bind(db.user_hash())
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|e| format!("Failed to query meeting templates: {e}"))?;
+    rows.iter()
+        .map(row_to_template)
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Failed to read template row: {e}"))
 }
 
-// ---------------------------------------------------------------------------
-// Public API — Meeting Templates
-// ---------------------------------------------------------------------------
-
-/// List all meeting templates.
-pub fn list_meeting_templates(conn: &Connection) -> Result<Vec<MeetingTemplate>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, url_template, icon, is_default, created_at
-             FROM meeting_templates ORDER BY is_default DESC, name ASC",
-        )
-        .map_err(|e| format!("Failed to prepare list_meeting_templates: {e}"))?;
-    let rows = stmt
-        .query_map([], row_to_template)
-        .map_err(|e| format!("Failed to query meeting templates: {e}"))?;
-
-    let mut templates = Vec::new();
-    for row in rows {
-        templates.push(row.map_err(|e| format!("Failed to read template row: {e}"))?);
-    }
-    Ok(templates)
-}
-
-/// Create a new meeting template.
-pub fn create_meeting_template(
-    conn: &Connection,
+pub async fn create_meeting_template(
+    db: &UserDb,
     name: &str,
     url_template: &str,
     icon: &str,
 ) -> Result<MeetingTemplate, String> {
-    conn.execute(
-        "INSERT INTO meeting_templates (name, url_template, icon) VALUES (?1, ?2, ?3)",
-        params![name, url_template, icon],
+    let mut connection = db.acquire().await?;
+    let row = sqlx::query(
+        "INSERT INTO meeting_templates (user_hash, name, url_template, icon, created_at)
+        VALUES ($1, $2, $3, $4, $5) RETURNING id, name, url_template, icon, is_default, created_at",
     )
+    .bind(db.user_hash())
+    .bind(name)
+    .bind(url_template)
+    .bind(icon)
+    .bind(now())
+    .fetch_one(&mut *connection)
+    .await
     .map_err(|e| format!("Failed to create meeting template: {e}"))?;
-
-    let id = conn.last_insert_rowid();
-    let sql = "SELECT id, name, url_template, icon, is_default, created_at
-               FROM meeting_templates WHERE id = ?1";
-    conn.query_row(sql, params![id], row_to_template)
-        .map_err(|e| format!("Failed to read created template: {e}"))
+    row_to_template(&row).map_err(|e| format!("Failed to read created template: {e}"))
 }
 
-/// Delete a meeting template by ID. Returns true if a row was deleted.
-pub fn delete_meeting_template(conn: &Connection, id: i64) -> Result<bool, String> {
-    let deleted = conn
-        .execute("DELETE FROM meeting_templates WHERE id = ?1", params![id])
-        .map_err(|e| format!("Failed to delete meeting template: {e}"))?;
-    Ok(deleted > 0)
+pub async fn delete_meeting_template(db: &UserDb, id: i64) -> Result<bool, String> {
+    let mut connection = db.acquire().await?;
+    sqlx::query("DELETE FROM meeting_templates WHERE user_hash = $1 AND id = $2")
+        .bind(db.user_hash())
+        .bind(id)
+        .execute(&mut *connection)
+        .await
+        .map(|result| result.rows_affected() > 0)
+        .map_err(|e| format!("Failed to delete meeting template: {e}"))
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::pool::open_test_db;
 
-    #[test]
-    fn test_create_and_get_event() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_create_and_get_event() {
+        let conn = open_test_db().await;
         let data = CreateEvent {
             title: "Team Standup".to_string(),
             description: "Daily standup meeting".to_string(),
@@ -551,19 +487,19 @@ mod tests {
             reminder_minutes: Some(15),
         };
 
-        let event = create_event(&conn, &data).unwrap();
+        let event = create_event(&conn, &data).await.unwrap();
         assert_eq!(event.title, "Team Standup");
         assert_eq!(event.location, "Room A");
         assert!(!event.all_day);
 
-        let fetched = get_event(&conn, &event.id).unwrap();
+        let fetched = get_event(&conn, &event.id).await.unwrap();
         assert!(fetched.is_some());
         assert_eq!(fetched.unwrap().title, "Team Standup");
     }
 
-    #[test]
-    fn test_list_events_range() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_list_events_range() {
+        let conn = open_test_db().await;
 
         let early = CreateEvent {
             title: "Early".to_string(),
@@ -592,20 +528,25 @@ mod tests {
             ..early.clone_fields()
         };
 
-        create_event(&conn, &early).unwrap();
-        create_event(&conn, &late).unwrap();
+        create_event(&conn, &early).await.unwrap();
+        create_event(&conn, &late).await.unwrap();
 
-        let march = list_events(&conn, "2025-03-01T00:00:00Z", "2025-03-31T23:59:59Z").unwrap();
+        let march = list_events(&conn, "2025-03-01T00:00:00Z", "2025-03-31T23:59:59Z")
+            .await
+            .unwrap();
         assert_eq!(march.len(), 1);
         assert_eq!(march[0].title, "Early");
 
-        let all = list_events(&conn, "2025-01-01T00:00:00Z", "2025-12-31T23:59:59Z").unwrap();
+        let all = list_events(&conn, "2025-01-01T00:00:00Z", "2025-12-31T23:59:59Z")
+            .await
+            .unwrap();
         assert_eq!(all.len(), 2);
     }
 
-    #[test]
-    fn test_update_event() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_event() {
+        let db = open_test_db().await;
+        let conn = db.begin_write().await.unwrap();
         let data = CreateEvent {
             title: "Original".to_string(),
             description: String::new(),
@@ -626,31 +567,37 @@ mod tests {
             reminder_minutes: None,
         };
 
-        let event = create_event(&conn, &data).unwrap();
+        let event = create_event(&conn, &data).await.unwrap();
         let update = UpdateEvent {
             title: Some("Updated".to_string()),
             description: None,
             location: None,
             start_time: None,
             end_time: None,
-            all_day: None,
+            all_day: Some(true),
             recurrence_rule: None,
             attendees: None,
             organizer: None,
             status: None,
             meeting_url: None,
             color: None,
-            reminder_minutes: None,
+            reminder_minutes: Some(30),
         };
 
-        let updated = update_event(&conn, &event.id, &update).unwrap();
-        assert!(updated.is_some());
-        assert_eq!(updated.unwrap().title, "Updated");
+        let updated = update_event(&conn, &event.id, &update)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.title, "Updated");
+        assert!(updated.all_day);
+        assert_eq!(updated.reminder_minutes, Some(30));
+        assert_eq!(updated.start_time, data.start_time);
+        conn.commit().await.unwrap();
     }
 
-    #[test]
-    fn test_delete_event() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_delete_event() {
+        let conn = open_test_db().await;
         let data = CreateEvent {
             title: "To Delete".to_string(),
             description: String::new(),
@@ -671,15 +618,15 @@ mod tests {
             reminder_minutes: None,
         };
 
-        let event = create_event(&conn, &data).unwrap();
-        assert!(delete_event(&conn, &event.id).unwrap());
-        assert!(!delete_event(&conn, &event.id).unwrap());
-        assert!(get_event(&conn, &event.id).unwrap().is_none());
+        let event = create_event(&conn, &data).await.unwrap();
+        assert!(delete_event(&conn, &event.id).await.unwrap());
+        assert!(!delete_event(&conn, &event.id).await.unwrap());
+        assert!(get_event(&conn, &event.id).await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_find_event_by_source_uid() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_find_event_by_source_uid() {
+        let conn = open_test_db().await;
         let data = CreateEvent {
             title: "Imported".to_string(),
             description: String::new(),
@@ -700,21 +647,26 @@ mod tests {
             reminder_minutes: None,
         };
 
-        create_event(&conn, &data).unwrap();
+        create_event(&conn, &data).await.unwrap();
 
-        let found = find_event_by_source_uid(&conn, "unique-uid-123@example.com").unwrap();
+        let found = find_event_by_source_uid(&conn, "unique-uid-123@example.com")
+            .await
+            .unwrap();
         assert!(found.is_some());
         assert_eq!(found.unwrap().title, "Imported");
 
-        let missing = find_event_by_source_uid(&conn, "nonexistent@example.com").unwrap();
+        let missing = find_event_by_source_uid(&conn, "nonexistent@example.com")
+            .await
+            .unwrap();
         assert!(missing.is_none());
     }
 
-    #[test]
-    fn test_calendar_settings() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_calendar_settings() {
+        let db = open_test_db().await;
+        let conn = db.begin_write().await.unwrap();
 
-        let settings = get_calendar_settings(&conn).unwrap();
+        let settings = get_calendar_settings(&conn).await.unwrap();
         assert_eq!(settings.default_view, "month");
         assert_eq!(settings.week_starts_on, 0);
         assert_eq!(settings.time_format, "12h");
@@ -734,27 +686,29 @@ mod tests {
             caldav_enabled: None,
         };
 
-        let updated = update_calendar_settings(&conn, &update).unwrap();
+        let updated = update_calendar_settings(&conn, &update).await.unwrap();
         assert_eq!(updated.default_view, "week");
         assert_eq!(updated.week_starts_on, 1);
         assert_eq!(updated.time_format, "24h");
+        conn.commit().await.unwrap();
     }
 
-    #[test]
-    fn test_meeting_templates() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_meeting_templates() {
+        let conn = open_test_db().await;
 
-        let template =
-            create_meeting_template(&conn, "Zoom", "https://zoom.us/j/{id}", "video").unwrap();
+        let template = create_meeting_template(&conn, "Zoom", "https://zoom.us/j/{id}", "video")
+            .await
+            .unwrap();
         assert_eq!(template.name, "Zoom");
 
-        let all = list_meeting_templates(&conn).unwrap();
+        let all = list_meeting_templates(&conn).await.unwrap();
         assert_eq!(all.len(), 1);
 
-        assert!(delete_meeting_template(&conn, template.id).unwrap());
-        assert!(!delete_meeting_template(&conn, template.id).unwrap());
+        assert!(delete_meeting_template(&conn, template.id).await.unwrap());
+        assert!(!delete_meeting_template(&conn, template.id).await.unwrap());
 
-        let all = list_meeting_templates(&conn).unwrap();
+        let all = list_meeting_templates(&conn).await.unwrap();
         assert_eq!(all.len(), 0);
     }
 

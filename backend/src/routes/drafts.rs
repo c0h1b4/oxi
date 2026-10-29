@@ -93,7 +93,9 @@ pub async fn upsert_draft_handler(
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
     Json(req): Json<UpsertDraftRequest>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     db::drafts::upsert_draft(
@@ -108,11 +110,12 @@ pub async fn upsert_draft_handler(
         req.in_reply_to.as_deref(),
         req.references.as_deref(),
     )
+    .await
     .map_err(AppError::InternalError)?;
 
     // Read the old UIDs before APPEND, and remove them only after the new copy
     // exists. A failed append must never destroy the last server-side draft.
-    if let Some((creds, folder)) = draft_mailbox(&config, &session)? {
+    if let Some((creds, folder)) = draft_mailbox(&config, &session).await? {
         let message_id = draft_message_id(&req.id);
         let sync_result = async {
             let old_uids = draft_uids(imap_client.as_ref(), &creds, &folder, &message_id).await?;
@@ -153,16 +156,19 @@ fn draft_message_id(id: &str) -> String {
     )
 }
 
-fn draft_mailbox(
+async fn draft_mailbox(
     config: &AppConfig,
     session: &SessionState,
 ) -> Result<Option<(ImapCredentials, String)>, AppError> {
     let Some(host) = config.imap_host.as_ref() else {
         return Ok(None);
     };
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(e.to_string()))?;
     let folder = db::folders::find_folder_by_attribute(&conn, "\\Drafts")
+        .await
         .map_err(AppError::InternalError)?
         .unwrap_or_else(|| "Drafts".to_string());
     Ok(Some((
@@ -206,13 +212,17 @@ async fn remove_draft_copies(
             .expunge_message(creds, folder, uid)
             .await
             .map_err(|e| e.to_string())?;
-        let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+        let conn = config
+            .user_db(&session.user_hash)
+            .await
             .map_err(|e| e.to_string())?;
-        db::messages::remove_after_mutation(&conn, folder, uid)?;
+        db::messages::remove_after_mutation(&conn, folder, uid).await?;
     }
-    let conn =
-        db::pool::open_user_db(&config.data_dir, &session.user_hash).map_err(|e| e.to_string())?;
-    db::folders::invalidate_folder_freshness(&conn, folder)?;
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    db::folders::invalidate_folder_freshness(&conn, folder).await?;
     Ok(())
 }
 
@@ -222,7 +232,7 @@ pub(super) async fn delete_imap_draft(
     session: &SessionState,
     id: &str,
 ) -> Result<(), AppError> {
-    if let Some((creds, folder)) = draft_mailbox(config, session)? {
+    if let Some((creds, folder)) = draft_mailbox(config, session).await? {
         let uids = draft_uids(client, &creds, &folder, &draft_message_id(id))
             .await
             .map_err(AppError::InternalError)?;
@@ -235,7 +245,7 @@ pub(super) async fn delete_imap_draft(
 
 /// Build a minimal RFC822 message from draft fields for IMAP APPEND.
 fn build_draft_rfc822(req: &UpsertDraftRequest, from_email: &str) -> Result<Vec<u8>, String> {
-    use lettre::message::{header::ContentType, Mailbox, MultiPart, SinglePart};
+    use lettre::message::{Mailbox, MultiPart, SinglePart, header::ContentType};
 
     let from_mailbox: Mailbox = from_email
         .parse()
@@ -294,10 +304,14 @@ pub async fn list_drafts_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
-    let drafts = db::drafts::list_drafts(&conn).map_err(AppError::InternalError)?;
+    let drafts = db::drafts::list_drafts(&conn)
+        .await
+        .map_err(AppError::InternalError)?;
 
     let items: Vec<DraftListItem> = drafts
         .into_iter()
@@ -319,14 +333,18 @@ pub async fn get_draft_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let draft = db::drafts::get_draft(&conn, &id)
+        .await
         .map_err(AppError::InternalError)?
         .ok_or_else(|| AppError::NotFound("Draft not found".to_string()))?;
 
     let attachments = db::drafts::get_draft_attachments(&conn, &id)
+        .await
         .map_err(AppError::InternalError)?;
 
     let att_infos: Vec<AttachmentInfo> = attachments
@@ -363,13 +381,16 @@ pub async fn delete_draft_handler(
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     delete_imap_draft(imap_client.as_ref(), &config, &session, &id).await?;
 
-    let deleted =
-        db::drafts::delete_draft(&conn, &id).map_err(AppError::InternalError)?;
+    let deleted = db::drafts::delete_draft(&conn, &id)
+        .await
+        .map_err(AppError::InternalError)?;
 
     if !deleted {
         return Err(AppError::NotFound("Draft not found".to_string()));

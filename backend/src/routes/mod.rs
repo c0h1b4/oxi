@@ -14,8 +14,8 @@ pub mod notification_preferences;
 pub mod quota;
 pub mod search;
 pub mod send;
-pub mod tags;
 pub mod subject_suggestions;
+pub mod tags;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -24,13 +24,13 @@ use std::time::Duration;
 
 use axum::extract::ConnectInfo;
 use axum::http::Request;
+use axum::http::{HeaderName, HeaderValue, Method, header};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Router, middleware};
 use tower_governor::GovernorError;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
-use axum::http::{header, HeaderName, HeaderValue, Method};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -41,7 +41,11 @@ fn development_cors(origin: Option<&str>) -> CorsLayer {
     let origin = origin.unwrap_or(DEFAULT_DEV_CORS_ORIGIN);
 
     CorsLayer::new()
-        .allow_origin(origin.parse::<HeaderValue>().expect("default dev CORS origin must be valid"))
+        .allow_origin(
+            origin
+                .parse::<HeaderValue>()
+                .expect("default dev CORS origin must be valid"),
+        )
         .allow_credentials(true)
         .allow_methods([
             Method::GET,
@@ -86,7 +90,11 @@ impl ProxyAwareIpExtractor {
             .any(|trusted| trusted.contains(ip))
     }
 
-    fn forwarded_client_ip(&self, headers: &axum::http::HeaderMap, peer_ip: IpAddr) -> Option<IpAddr> {
+    fn forwarded_client_ip(
+        &self,
+        headers: &axum::http::HeaderMap,
+        peer_ip: IpAddr,
+    ) -> Option<IpAddr> {
         let mut current_hop = peer_ip;
 
         for value in headers.get_all("x-forwarded-for").iter().rev() {
@@ -134,7 +142,7 @@ async fn spa_fallback(
     uri: axum::http::Uri,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> axum::response::Response {
-    use axum::http::{header, StatusCode};
+    use axum::http::{StatusCode, header};
     use axum::response::IntoResponse;
 
     let static_dir = Path::new(&config.static_dir);
@@ -220,7 +228,10 @@ pub fn create_router(
     // These routes only need the browser cookie, not full auth.
     let browser_routes = Router::new()
         .route("/accounts", get(auth::list_accounts))
-        .route("/accounts/{id}", delete(auth::remove_account).layer(middleware::from_fn(csrf_protection)));
+        .route(
+            "/accounts/{id}",
+            delete(auth::remove_account).layer(middleware::from_fn(csrf_protection)),
+        );
 
     // Protected auth routes (auth_guard + CSRF).
     let protected_auth = Router::new()
@@ -258,7 +269,10 @@ pub fn create_router(
             "/messages/{folder}/{uid}/attachments/{attachment_id}",
             get(messages::download_attachment),
         )
-        .route("/messages/subject-suggestions", get(subject_suggestions::suggest_subjects))
+        .route(
+            "/messages/subject-suggestions",
+            get(subject_suggestions::suggest_subjects),
+        )
         .route("/messages/move", post(messages::move_message_handler))
         .route("/messages/send", post(send::send_message_handler))
         .route(
@@ -310,10 +324,7 @@ pub fn create_router(
             "/tags/{id}/messages",
             post(tags::tag_message_handler).get(tags::list_tag_messages_handler),
         )
-        .route(
-            "/tags/{id}/messages/bulk",
-            post(tags::bulk_tag_handler),
-        )
+        .route("/tags/{id}/messages/bulk", post(tags::bulk_tag_handler))
         .route(
             "/tags/{id}/messages/{folder}/{uid}",
             delete(tags::untag_message_handler),
@@ -368,10 +379,7 @@ pub fn create_router(
             "/calendar/events",
             get(calendar::list_events).post(calendar::create_event),
         )
-        .route(
-            "/calendar/events/import-ics",
-            post(calendar::import_ics),
-        )
+        .route("/calendar/events/import-ics", post(calendar::import_ics))
         .route(
             "/calendar/events/{id}",
             get(calendar::get_event)
@@ -380,13 +388,11 @@ pub fn create_router(
         )
         .route(
             "/calendar/settings",
-            get(calendar::get_calendar_settings)
-                .put(calendar::update_calendar_settings),
+            get(calendar::get_calendar_settings).put(calendar::update_calendar_settings),
         )
         .route(
             "/calendar/meeting-templates",
-            get(calendar::list_meeting_templates)
-                .post(calendar::create_meeting_template),
+            get(calendar::list_meeting_templates).post(calendar::create_meeting_template),
         )
         .route(
             "/calendar/meeting-templates/{id}",
@@ -398,11 +404,11 @@ pub fn create_router(
 
     // WebSocket route — auth is handled inside the handler via cookie,
     // so it bypasses CSRF and auth_guard middleware.
-    let ws_route = Router::new()
-        .route("/ws", get(crate::realtime::ws::ws_handler));
+    let ws_route = Router::new().route("/ws", get(crate::realtime::ws::ws_handler));
 
     let api_router = Router::new()
         .route("/health", get(health::health_check))
+        .route("/ready", get(health::readiness))
         .nest("/auth", auth_router)
         .merge(ws_route)
         .merge(protected_data);
@@ -427,7 +433,8 @@ pub fn create_router(
                             && let Ok(location) = location.to_str()
                             && location.starts_with('/')
                             && !location.starts_with("//")
-                            && let Ok(location) = format!("{base_path}{location}").parse::<HeaderValue>()
+                            && let Ok(location) =
+                                format!("{base_path}{location}").parse::<HeaderValue>()
                         {
                             response.headers_mut().insert(header::LOCATION, location);
                         }
