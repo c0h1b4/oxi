@@ -29,6 +29,8 @@ vi.mock("../EmailRenderer", () => ({ EmailRenderer: () => null, hasRemoteResourc
 vi.mock("../ThreadView", () => ({ ThreadView: () => null }));
 vi.mock("@/hooks/useIdentities", () => ({ useIdentities: () => ({ data: [] }) }));
 vi.mock("../ComposeDialog/RecipientInput", () => ({ RecipientInput: () => null }));
+vi.mock("@/hooks/useSubjectSuggestions", () => ({ useSubjectSuggestions: () => [] }));
+
 vi.mock("@/hooks/useCompose", () => ({
   useSendMessage: () => ({ mutate: vi.fn() }),
   useSaveDraft: () => ({ mutate: vi.fn() }),

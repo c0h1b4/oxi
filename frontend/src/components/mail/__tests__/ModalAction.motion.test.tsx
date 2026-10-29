@@ -174,6 +174,8 @@ vi.mock("@/stores/useComposeStore", () => {
   };
 });
 
+vi.mock("@/hooks/useSubjectSuggestions", () => ({ useSubjectSuggestions: () => [] }));
+
 vi.mock("@/hooks/useCompose", () => ({
   useSendMessage: () => mockSendMessage,
   useSaveDraft: () => ({ isPending: false, mutate: vi.fn() }),

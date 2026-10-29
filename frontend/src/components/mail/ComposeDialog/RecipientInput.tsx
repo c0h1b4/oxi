@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAutocomplete } from "@/hooks/useAutocomplete";
 
 interface RecipientInputProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  inputRef?: React.Ref<HTMLInputElement>;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
 }
 
 function HighlightedText({ html }: { html: string }) {
@@ -63,6 +63,21 @@ export function RecipientInput({
   // query naturally re-opens it without setState-in-effect.
   const [dismissedQuery, setDismissedQuery] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(inputRef, () => textareaRef.current!, []);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const resize = () => {
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    resize();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    if (containerRef.current) observer?.observe(containerRef.current);
+    return () => observer?.disconnect();
+  }, [value]);
 
   // Extract the text after the last comma as the autocomplete query
   const query = value.split(",").pop()?.trim() ?? "";
@@ -89,7 +104,11 @@ export function RecipientInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (!showDropdown || results.length === 0) return;
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) return;
+      if (!showDropdown || results.length === 0) {
+        if (e.key === "Enter") e.preventDefault();
+        return;
+      }
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -100,7 +119,7 @@ export function RecipientInput({
       } else if (e.key === "Enter" || e.key === "Tab") {
         if (showDropdown && results.length > 0) {
           e.preventDefault();
-          selectSuggestion(results[selectedIndex].item);
+          selectSuggestion(results[Math.min(selectedIndex, results.length - 1)].item);
         }
       } else if (e.key === "Escape") {
         setDismissedQuery(query);
@@ -121,19 +140,20 @@ export function RecipientInput({
   }, [query]);
 
   return (
-    <div ref={containerRef} className="relative flex-1">
-      <input
-        ref={inputRef}
-        type="text"
+    <div ref={containerRef} className="relative min-w-0 flex-1">
+      <textarea
+        ref={textareaRef}
+        rows={1}
+        aria-label={placeholder ?? "Recipients"}
         value={value}
         onChange={(e) => {
-          onChange(e.target.value);
+          onChange(e.target.value.replace(/\r?\n/g, " "));
           setSelectedIndex(0);
         }}
         onKeyDown={handleKeyDown}
         onFocus={() => setDismissedQuery(null)}
         placeholder={placeholder}
-        className="w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
+        className="block max-h-40 w-full resize-none overflow-x-hidden overflow-y-auto break-words bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
       />
       {showDropdown && results.length > 0 && (
         <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">

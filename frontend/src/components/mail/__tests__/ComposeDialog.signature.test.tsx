@@ -4,6 +4,8 @@ import type { Identity } from "@/types/identity";
 
 const { identityQuery } = vi.hoisted(() => ({ identityQuery: { data: undefined as Identity[] | undefined } }));
 vi.mock("@/hooks/useIdentities", () => ({ useIdentities: () => identityQuery }));
+vi.mock("@/hooks/useSubjectSuggestions", () => ({ useSubjectSuggestions: () => [] }));
+
 vi.mock("@/hooks/useCompose", () => {
   const mutation = () => ({ isPending: false, mutate: vi.fn() });
   return { useSendMessage: mutation, useSaveDraft: mutation, useUploadAttachment: mutation, useDeleteAttachment: mutation, useDeleteDraft: mutation };
@@ -57,7 +59,7 @@ describe("ComposeDialog reply signatures", () => {
     render(<ComposeDialog />);
     fireEvent.click(screen.getByTitle("Switch to plain text"));
     if (roundTrip) fireEvent.click(screen.getByTitle("Switch to rich text"));
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "" }), { target: { value: "1" } });
     expect(useComposeStore.getState().body).not.toContain("Alias signature");
     expect(useComposeStore.getState().body.match(/Main signature/g)).toHaveLength(1);
     expect(useComposeStore.getState().body).toContain("Original");
@@ -87,7 +89,7 @@ describe("ComposeDialog reply signatures", () => {
     useComposeStore.getState().openReply(reply);
     render(<ComposeDialog />);
     fireEvent.click(screen.getByTitle("Remove signature"));
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "" }), { target: { value: "1" } });
     expect(useComposeStore.getState().body).not.toContain("signature");
     fireEvent.click(screen.getByTitle("Add signature"));
     expect(useComposeStore.getState().body).toContain("Main signature");
