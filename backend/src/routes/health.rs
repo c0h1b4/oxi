@@ -15,6 +15,22 @@ pub async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+/// Readiness reflects the initialized relational backend; liveness remains independent.
+pub async fn readiness(
+    axum::Extension(config): axum::Extension<std::sync::Arc<crate::config::AppConfig>>,
+) -> Result<Json<HealthResponse>, crate::error::AppError> {
+    let database = config.database.as_ref().ok_or_else(|| {
+        crate::error::AppError::ServiceUnavailable("Database not initialized".into())
+    })?;
+    database
+        .ready()
+        .await
+        .map_err(|_| crate::error::AppError::ServiceUnavailable("Database unavailable".into()))?;
+    Ok(Json(HealthResponse {
+        status: "ok".into(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -24,9 +40,9 @@ mod tests {
     use crate::config::AppConfig;
     use crate::imap::client::ImapClient;
     use crate::imap::client::mock::MockImapClient;
+    use crate::routes::create_router;
     use crate::smtp::client::SmtpClient;
     use crate::smtp::client::mock::MockSmtpClient;
-    use crate::routes::create_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -43,6 +59,9 @@ mod tests {
             smtp_port: 587,
             tls_enabled: true,
             data_dir: "/tmp/oxi-test".to_string(),
+            database_url: None,
+            database_max_connections: 10,
+            database: None,
             session_timeout_hours: 24,
             static_dir: "nonexistent_static_dir".to_string(),
             environment: "development".to_string(),
@@ -59,7 +78,15 @@ mod tests {
         ));
         let event_bus = Arc::new(crate::realtime::events::EventBus::new());
         let idle_manager = Arc::new(crate::realtime::idle::IdleManager::new());
-        let app = create_router(config, store, imap_client, smtp_client, search_engine, event_bus, idle_manager);
+        let app = create_router(
+            config,
+            store,
+            imap_client,
+            smtp_client,
+            search_engine,
+            event_bus,
+            idle_manager,
+        );
 
         let response = app
             .oneshot(

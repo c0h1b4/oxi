@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::extract::Path as AxumPath;
 use axum::extract::Multipart;
+use axum::extract::Path as AxumPath;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Serialize;
@@ -38,14 +38,18 @@ pub async fn upload_attachment(
     AxumPath(draft_id): AxumPath<String>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     // Ensure draft exists (create it if not — auto-creates on first attachment upload).
     let existing = db::drafts::get_draft(&conn, &draft_id)
+        .await
         .map_err(AppError::InternalError)?;
     if existing.is_none() {
         db::drafts::upsert_draft(&conn, &draft_id, "", "", "", "", "", None, None, None)
+            .await
             .map_err(AppError::InternalError)?;
     }
 
@@ -65,10 +69,7 @@ pub async fn upload_attachment(
         .await
         .map_err(|e| AppError::BadRequest(format!("Invalid multipart data: {e}")))?
     {
-        let filename = field
-            .file_name()
-            .unwrap_or("unnamed")
-            .to_string();
+        let filename = field.file_name().unwrap_or("unnamed").to_string();
         let content_type = field
             .content_type()
             .unwrap_or("application/octet-stream")
@@ -104,6 +105,7 @@ pub async fn upload_attachment(
             size,
             file_path.to_str().unwrap_or(""),
         )
+        .await
         .map_err(AppError::InternalError)?;
 
         uploaded.push(UploadResponse {
@@ -132,10 +134,13 @@ pub async fn get_attachment_content(
     Extension(config): Extension<Arc<AppConfig>>,
     AxumPath((draft_id, attachment_id)): AxumPath<(String, String)>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let attachments = db::drafts::get_draft_attachments(&conn, &draft_id)
+        .await
         .map_err(AppError::InternalError)?;
 
     let attachment = attachments
@@ -162,11 +167,14 @@ pub async fn delete_attachment(
     Extension(config): Extension<Arc<AppConfig>>,
     AxumPath((draft_id, attachment_id)): AxumPath<(String, String)>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     // Get the attachment record so we can find the file path.
     let attachments = db::drafts::get_draft_attachments(&conn, &draft_id)
+        .await
         .map_err(AppError::InternalError)?;
 
     let attachment = attachments
@@ -182,6 +190,7 @@ pub async fn delete_attachment(
 
     // Delete from DB.
     db::drafts::delete_draft_attachment(&conn, &attachment_id)
+        .await
         .map_err(AppError::InternalError)?;
 
     Ok(Json(DeleteResponse {

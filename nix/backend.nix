@@ -16,6 +16,7 @@
         fileset = lib.fileset.unions [
           (craneLib.fileset.commonCargoSources root)
           (root + "/migrations")
+          (root + "/postgres-migrations")
           # include_str! in the auth middleware tests needs this JSON fixture;
           # commonCargoSources only selects Cargo-related source files.
           (root + "/tests/fixtures")

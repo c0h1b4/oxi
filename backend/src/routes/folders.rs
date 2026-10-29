@@ -41,18 +41,20 @@ pub async fn list_folders(
     Extension(imap_client): Extension<Arc<dyn ImapClient>>,
 ) -> Result<Response, AppError> {
     // Open the per-user database.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // If the folder cache was updated recently, skip the IMAP round-trip.
     let cache_fresh = db::folders::is_folder_cache_fresh(&conn, FOLDER_LIST_TTL_SECS)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if !cache_fresh {
-        let imap_host = config
-            .imap_host
-            .as_deref()
-            .ok_or_else(|| AppError::ServiceUnavailable("Mail server not configured".to_string()))?;
+        let imap_host = config.imap_host.as_deref().ok_or_else(|| {
+            AppError::ServiceUnavailable("Mail server not configured".to_string())
+        })?;
 
         let creds = ImapCredentials {
             host: imap_host.to_string(),
@@ -79,16 +81,19 @@ pub async fn list_folders(
                 folder.delimiter.as_deref(),
                 &flags_csv,
             )
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
         }
 
         // Remove stale folders that no longer exist on the server.
         let current_names: Vec<String> = imap_folders.iter().map(|f| f.name.clone()).collect();
         db::folders::remove_stale_folders(&conn, &current_names)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         // Touch updated_at on all folders so the cache TTL resets.
         db::folders::touch_all_folders(&conn)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     }
 
@@ -97,18 +102,22 @@ pub async fn list_folders(
     // Those folders have a manually adjusted unread_count (via adjust_unread_count)
     // that should be preserved until the folder's messages are resynced from IMAP.
     let all_folders = db::folders::get_all_folders(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     for f in &all_folders {
         let invalidated = db::folders::is_folder_messages_invalidated(&conn, &f.name)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
         if !invalidated {
             db::folders::refresh_unread_count(&conn, &f.name)
+                .await
                 .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
         }
     }
 
     // Read back from cache to get the refreshed counts.
     let cached = db::folders::get_all_folders(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Build response from cached data (includes any stored counts).

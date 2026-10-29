@@ -47,7 +47,13 @@ fn cookie_path(config: &AppConfig) -> &str {
     config.normalized_base_path()
 }
 
-fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
+fn browser_cookie(
+    browser_id: &str,
+    max_age_secs: u64,
+    secure: bool,
+    same_site: &str,
+    path: &str,
+) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
         "{}={};{} SameSite={}; Path={}; Max-Age={}",
@@ -55,7 +61,14 @@ fn browser_cookie(browser_id: &str, max_age_secs: u64, secure: bool, same_site: 
     )
 }
 
-fn account_session_cookie(account_id: &str, token: &str, max_age_secs: u64, secure: bool, same_site: &str, path: &str) -> String {
+fn account_session_cookie(
+    account_id: &str,
+    token: &str,
+    max_age_secs: u64,
+    secure: bool,
+    same_site: &str,
+    path: &str,
+) -> String {
     let secure_flag = if secure { " Secure;" } else { "" };
     format!(
         "oxi_session_{}={};{} HttpOnly; SameSite={}; Path={}; Max-Age={}",
@@ -101,8 +114,12 @@ fn extract_browser_id(headers: &axum::http::HeaderMap) -> Option<String> {
 fn extract_session_cookies(headers: &axum::http::HeaderMap) -> Vec<(String, String)> {
     let prefix = "oxi_session_";
     let mut sessions = Vec::new();
-    
-    for cookie in headers.get_all("cookie").iter().filter_map(|v| v.to_str().ok()) {
+
+    for cookie in headers
+        .get_all("cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+    {
         for segment in cookie.split(';') {
             let trimmed = segment.trim();
             if let Some(rest) = trimmed.strip_prefix(prefix)
@@ -182,14 +199,17 @@ pub async fn login(
 
     match result {
         AuthResult::Success => {
-            let provided_browser_id = body.browser_id.clone().or_else(|| extract_browser_id(&headers));
-            
+            let provided_browser_id = body
+                .browser_id
+                .clone()
+                .or_else(|| extract_browser_id(&headers));
+
             if let Some(ref browser_id) = provided_browser_id {
                 let existing_accounts = store.get_browser_accounts(browser_id);
-                let duplicate = existing_accounts.iter().find(|a| {
-                    a.email == body.email && a.imap_host == imap_host
-                });
-                
+                let duplicate = existing_accounts
+                    .iter()
+                    .find(|a| a.email == body.email && a.imap_host == imap_host);
+
                 if let Some(dup) = duplicate {
                     tracing::debug!(
                         email = %body.email,
@@ -212,9 +232,9 @@ pub async fn login(
                         .into_response();
                 }
             }
-            
+
             let user_hash = user_data::hash_email(&body.email);
-            if let Err(e) = user_data::provision_user_data(&config.data_dir, &user_hash) {
+            if let Err(e) = user_data::provision_user_data(&config.data_dir, &user_hash).await {
                 tracing::error!(error = %e, "failed to provision user data directory");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -231,24 +251,37 @@ pub async fn login(
                     .into_response();
             }
 
-            if let Ok(conn) = db::pool::open_user_db(&config.data_dir, &user_hash) {
-                match db::identities::has_identities(&conn) {
-                    Ok(false) => {
-                        let default_identity = db::identities::CreateIdentity {
+            let database = match config.user_db(&user_hash).await {
+                Ok(database) => database,
+                Err(error) => {
+                    tracing::error!(%error, "Failed to initialize user database");
+                    return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                        "error": { "code": "SERVICE_UNAVAILABLE", "message": "User database unavailable", "status": 503 }
+                    }))).into_response();
+                }
+            };
+            let initialized = async {
+                let transaction = database.begin_write().await?;
+                if !db::identities::has_identities(&transaction).await? {
+                    db::identities::create_identity(
+                        &transaction,
+                        &db::identities::CreateIdentity {
                             email: body.email.clone(),
                             display_name: String::new(),
                             signature_html: String::new(),
                             is_default: true,
-                        };
-                        if let Err(e) = db::identities::create_identity(&conn, &default_identity) {
-                            tracing::warn!(error = %e, "Failed to auto-create default identity");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to check for existing identities");
-                    }
-                    _ => {}
+                        },
+                    )
+                    .await?;
                 }
+                transaction.commit().await
+            }
+            .await;
+            if let Err(error) = initialized {
+                tracing::error!(%error, "Failed to initialize sender identity");
+                return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                    "error": { "code": "SERVICE_UNAVAILABLE", "message": "User database unavailable", "status": 503 }
+                }))).into_response();
             }
 
             const REMEMBER_ME_HOURS: u64 = 30 * 24;
@@ -258,7 +291,9 @@ pub async fn login(
                 config.session_timeout_hours
             };
 
-            let browser_id = provided_browser_id.clone().unwrap_or_else(|| store.create_browser());
+            let browser_id = provided_browser_id
+                .clone()
+                .unwrap_or_else(|| store.create_browser());
             tracing::debug!(
                 email = %body.email,
                 provided_browser_id = ?provided_browser_id,
@@ -283,8 +318,10 @@ pub async fn login(
             let secure = config.environment != "development";
             let same_site = same_site_policy(&config);
             let path = cookie_path(&config);
-            let browser_cookie_header = browser_cookie(&browser_id, max_age, secure, same_site, path);
-            let session_cookie_header = account_session_cookie(&account_id, &token, max_age, secure, same_site, path);
+            let browser_cookie_header =
+                browser_cookie(&browser_id, max_age, secure, same_site, path);
+            let session_cookie_header =
+                account_session_cookie(&account_id, &token, max_age, secure, same_site, path);
 
             let response = (
                 StatusCode::CREATED,
@@ -390,17 +427,18 @@ pub async fn list_accounts(
     }
 
     let session_cookies = extract_session_cookies(&headers);
-    let session_map: std::collections::HashMap<String, String> = session_cookies.into_iter().collect();
-    
+    let session_map: std::collections::HashMap<String, String> =
+        session_cookies.into_iter().collect();
+
     let browser_accounts = store.get_browser_accounts(&browser_id);
     let browser_account_ids: Vec<String> = browser_accounts
         .iter()
         .map(|s| s.account_id.clone())
         .collect();
-    
+
     let mut valid_accounts: Vec<serde_json::Value> = Vec::new();
     let mut clear_cookies: Vec<String> = Vec::new();
-    
+
     for session in &browser_accounts {
         if let Some(token) = session_map.get(&session.account_id) {
             if let Some(valid_session) = store.get(token) {
@@ -412,7 +450,12 @@ pub async fn list_accounts(
                 }));
             } else {
                 store.remove_account(&session.account_id);
-                clear_cookies.push(clearing_account_cookie(&session.account_id, secure, same_site, cookie_path(&config)));
+                clear_cookies.push(clearing_account_cookie(
+                    &session.account_id,
+                    secure,
+                    same_site,
+                    cookie_path(&config),
+                ));
             }
         } else {
             store.remove_account(&session.account_id);
@@ -421,7 +464,12 @@ pub async fn list_accounts(
 
     for account_id in session_map.keys() {
         if !browser_account_ids.contains(account_id) {
-            clear_cookies.push(clearing_account_cookie(account_id, secure, same_site, cookie_path(&config)));
+            clear_cookies.push(clearing_account_cookie(
+                account_id,
+                secure,
+                same_site,
+                cookie_path(&config),
+            ));
         }
     }
 
@@ -432,7 +480,7 @@ pub async fn list_accounts(
         );
         let clear_browser = clearing_browser_cookie(secure, same_site, cookie_path(&config));
         let body = serde_json::json!({ "accounts": [], "browserSessionExpired": true }).to_string();
-        
+
         let mut response = axum::response::Response::new(axum::body::Body::from(body));
         *response.status_mut() = StatusCode::OK;
         response.headers_mut().insert(
@@ -500,9 +548,7 @@ pub async fn remove_account(
     };
 
     let browser_accounts = store.get_browser_accounts(&browser_id);
-    let account_belongs_to_browser = browser_accounts
-        .iter()
-        .any(|s| s.account_id == account_id);
+    let account_belongs_to_browser = browser_accounts.iter().any(|s| s.account_id == account_id);
 
     if !account_belongs_to_browser {
         return (
@@ -566,7 +612,11 @@ pub async fn logout(
         store.remove_browser(browser_id);
     }
 
-    cookies_to_clear.push(clearing_browser_cookie(secure, same_site, cookie_path(&config)));
+    cookies_to_clear.push(clearing_browser_cookie(
+        secure,
+        same_site,
+        cookie_path(&config),
+    ));
 
     let response = (
         StatusCode::OK,
@@ -636,6 +686,9 @@ mod tests {
             smtp_port: 587,
             tls_enabled: true,
             data_dir: "/data".to_string(),
+            database_url: None,
+            database_max_connections: 10,
+            database: None,
             session_timeout_hours: 24,
             static_dir: "./static".to_string(),
             environment: environment.to_string(),
@@ -656,17 +709,29 @@ mod tests {
             for _ in 0..3 {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut stream = BufReader::new(stream);
-                stream.get_mut().write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+                stream
+                    .get_mut()
+                    .write_all(b"* OK test IMAP ready\r\n")
+                    .await
+                    .unwrap();
                 let mut command = String::new();
                 stream.read_line(&mut command).await.unwrap();
                 let tag = command.split_whitespace().next().unwrap();
                 let response = format!("{tag} OK LOGIN completed\r\n");
-                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+                stream
+                    .get_mut()
+                    .write_all(response.as_bytes())
+                    .await
+                    .unwrap();
                 command.clear();
                 stream.read_line(&mut command).await.unwrap();
                 let tag = command.split_whitespace().next().unwrap();
                 let response = format!("* BYE logging out\r\n{tag} OK LOGOUT completed\r\n");
-                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+                stream
+                    .get_mut()
+                    .write_all(response.as_bytes())
+                    .await
+                    .unwrap();
             }
         });
 
@@ -690,11 +755,17 @@ mod tests {
         };
 
         let first = login(
-            Extension(store.clone()), Extension(config.clone()),
-            axum::http::HeaderMap::new(), Json(request("first@example.com")),
-        ).await;
+            Extension(store.clone()),
+            Extension(config.clone()),
+            axum::http::HeaderMap::new(),
+            Json(request("first@example.com")),
+        )
+        .await;
         assert_eq!(first.status(), StatusCode::CREATED);
-        let cookie = first.headers().get_all("set-cookie").iter()
+        let cookie = first
+            .headers()
+            .get_all("set-cookie")
+            .iter()
             .map(|value| value.to_str().unwrap())
             .find(|value| value.starts_with("oxi_browser="))
             .unwrap();
@@ -705,21 +776,39 @@ mod tests {
         headers.insert("cookie", cookie_pair.parse().unwrap());
 
         let second = login(
-            Extension(store.clone()), Extension(config.clone()),
-            headers.clone(), Json(request("second@example.com")),
-        ).await;
+            Extension(store.clone()),
+            Extension(config.clone()),
+            headers.clone(),
+            Json(request("second@example.com")),
+        )
+        .await;
         assert_eq!(second.status(), StatusCode::CREATED);
-        assert!(second.headers().get_all("set-cookie").iter()
-            .any(|value| value.to_str().unwrap().starts_with(&format!("{cookie_pair};"))));
+        assert!(second.headers().get_all("set-cookie").iter().any(|value| {
+            value
+                .to_str()
+                .unwrap()
+                .starts_with(&format!("{cookie_pair};"))
+        }));
         let accounts = store.get_browser_accounts(browser_id);
         assert_eq!(accounts.len(), 2);
-        assert!(accounts.iter().any(|account| account.email == "first@example.com"));
-        assert!(accounts.iter().any(|account| account.email == "second@example.com"));
+        assert!(
+            accounts
+                .iter()
+                .any(|account| account.email == "first@example.com")
+        );
+        assert!(
+            accounts
+                .iter()
+                .any(|account| account.email == "second@example.com")
+        );
 
         let duplicate = login(
-            Extension(store.clone()), Extension(config),
-            headers, Json(request("second@example.com")),
-        ).await;
+            Extension(store.clone()),
+            Extension(config),
+            headers,
+            Json(request("second@example.com")),
+        )
+        .await;
         assert_eq!(duplicate.status(), StatusCode::CONFLICT);
         assert_eq!(store.get_browser_accounts(browser_id).len(), 2);
         imap.await.unwrap();
@@ -748,7 +837,11 @@ mod tests {
                     .split(';')
                     .map(str::trim)
                     .find_map(|attribute| attribute.strip_prefix("Path="));
-                assert_eq!(path_attribute, Some(expected_path), "{base_path:?}: {cookie}");
+                assert_eq!(
+                    path_attribute,
+                    Some(expected_path),
+                    "{base_path:?}: {cookie}"
+                );
             }
         }
     }
@@ -758,7 +851,13 @@ mod tests {
         let config = test_config("development", Some("http://localhost:3000"));
         assert_eq!(same_site_policy(&config), "Lax");
 
-        let cookie = browser_cookie("browser", 3600, false, same_site_policy(&config), cookie_path(&config));
+        let cookie = browser_cookie(
+            "browser",
+            3600,
+            false,
+            same_site_policy(&config),
+            cookie_path(&config),
+        );
         assert!(cookie.contains("SameSite=Lax"));
     }
 
@@ -767,7 +866,13 @@ mod tests {
         let config = test_config("production", Some("https://app.example.com"));
         assert_eq!(same_site_policy(&config), "Strict");
 
-        let cookie = browser_cookie("browser", 3600, true, same_site_policy(&config), cookie_path(&config));
+        let cookie = browser_cookie(
+            "browser",
+            3600,
+            true,
+            same_site_policy(&config),
+            cookie_path(&config),
+        );
         assert!(cookie.contains("SameSite=Strict"));
     }
 }

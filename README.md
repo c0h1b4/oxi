@@ -39,7 +39,7 @@ Not a mail platform — just a clean, modern webmail UI.
 | **Frontend** | Next.js 16, React 19, Tailwind CSS 4, Shadcn/ui, Zustand, TanStack Query |
 | **Backend** | Rust, Axum, Tokio, async-imap, Lettre (SMTP) |
 | **Search** | Tantivy (Rust-native full-text search) |
-| **Database** | SQLite per user (local cache via rusqlite + Refinery migrations) |
+| **Database** | SQLite per user (default) or shared PostgreSQL via async SQLx |
 | **Editor** | Tiptap (rich text compose) |
 | **Deploy** | Docker (GHCR), single binary serves frontend + API |
 
@@ -134,12 +134,74 @@ All configuration is via environment variables:
 | `SMTP_HOST` | — | SMTP server hostname (**required**) |
 | `SMTP_PORT` | `587` | SMTP server port |
 | `TLS_ENABLED` | `true` | Enable TLS for mail connections |
-| `DATA_DIR` | `/data` | Persistent data storage directory |
+| `DATA_DIR` | `/data` | Persistent data storage directory (still required with PostgreSQL) |
+| `DATABASE_URL` | unset | Optional PostgreSQL URL; unset keeps existing per-user SQLite files |
+| `DATABASE_MAX_CONNECTIONS` | `10` | Maximum PostgreSQL pool connections per Oxi process |
 | `SESSION_TIMEOUT_HOURS` | `24` | Session expiry in hours |
 | `STATIC_DIR` | `./static` | Frontend static files directory |
 | `ENVIRONMENT` | `development` | Runtime environment |
 | `BASE_PATH` | — | Base path prefix for reverse proxy (e.g. `/oxi`) |
 | `RUST_LOG` | `info` | Log level filter |
+
+## PostgreSQL (optional)
+
+Set `DATABASE_URL=postgres://user:password@host:5432/oxi` to use PostgreSQL for
+all relational data. Without it, Oxi continues using existing SQLite files.
+There is no automatic fallback if a configured PostgreSQL server is unavailable.
+Migrations run before HTTP startup, using a migration lock. Use a dedicated database
+and role that can create/alter its schema; back it up with standard PostgreSQL tools.
+The default pool limit is 10 connections per process (plus one temporary migration
+connection at startup); set `DATABASE_MAX_CONNECTIONS` to match your server budget.
+
+For production, use certificate-verified TLS, for example
+`?sslmode=verify-full&sslrootcert=/run/secrets/postgres-ca.crt`. Mount a private CA
+when needed. Supply the URL through your deployment's secret mechanism, not source
+control. URL-encode reserved characters in credentials.
+
+For local Compose testing, set `POSTGRES_PASSWORD` in your environment and run:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+
+The example uses a private Compose network without PostgreSQL TLS. Production
+connections should use TLS. See `deploy/kubernetes-postgres.yaml` for a
+single-replica Kubernetes example; build and publish the new image first, create
+the `oxi-database` Secret separately, and replace the example mail hosts/image.
+
+**PostgreSQL support does not make Oxi stateless or horizontally scalable.**
+Keep one replica and persistent `DATA_DIR` storage for Tantivy indexes and draft
+attachment bytes. Use a Recreate rollout to avoid concurrent writers on that
+volume. Body-search indexes are not automatically rebuilt from already-cached
+message bodies if the volume is lost. Sessions and live mail credentials remain
+in memory, so pod restarts require login. Cross-pod sessions, event delivery, and
+sync ownership are not supported. Back up draft files as well as the database.
+
+`/api/health` is process liveness; `/api/ready` checks database availability after
+initialization. Prefix these paths with `BASE_PATH` when deploying under a subpath;
+the frontend must also be built with the matching prefix.
+
+### Switching an existing installation
+
+Selecting PostgreSQL starts with a new relational store; it does **not** import
+SQLite data or delete the old files. IMAP cache data can be fetched again, but
+contacts, identities, drafts, tags, settings, and locally created calendar records
+are application-owned data. There is no built-in lossless importer in this release.
+Do not switch a populated deployment without a data-transfer/backup plan. Preserve
+the original SQLite files and attachment volume. The existing email-only account
+hash remains unchanged; account-key redesign is outside this feature.
+
+### Database tests
+
+`cargo test` runs SQLite tests without requiring PostgreSQL. To run the same
+repository suites against an isolated PostgreSQL test database:
+
+```sh
+OXI_TEST_DATABASE_URL=postgres://localhost/oxi_test cargo test
+```
+
+Use a dedicated disposable database: tests create isolated users and exercise
+schema migrations. CI runs both modes.
 
 ## Architecture
 
@@ -148,7 +210,7 @@ graph LR
     Browser["Browser\n(Next.js)"] -->|HTTP / WS| Backend["Rust Backend\n(Axum)"]
     Backend -->|IMAP| IMAP["IMAP Server"]
     Backend -->|SMTP| SMTP["SMTP Server"]
-    Backend --- SQLite["SQLite\n(cache)"]
+    Backend --- Database["SQLite or PostgreSQL\n(cache + application data)"]
     Backend --- Tantivy["Tantivy\n(search)"]
 ```
 

@@ -22,8 +22,8 @@ ipnet = "2.11"
 rand = "0.9"
 base64 = "0.22"
 sha2 = "0.10"
-rusqlite = { version = "0.34", features = ["bundled"] }
-refinery = { version = "0.9", features = ["rusqlite"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "any", "postgres", "sqlite", "migrate", "macros"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 async-trait = "0.1.92"
 mail-parser = "0.11.2"

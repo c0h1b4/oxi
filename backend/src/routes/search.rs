@@ -176,7 +176,20 @@ fn parse_date_start(date_str: &str) -> Option<i64> {
     }
 
     // Days from full months in the target year
-    let days_in_months = [31, 28 + i64::from(is_leap_year(year)), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let days_in_months = [
+        31,
+        28 + i64::from(is_leap_year(year)),
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     for days in days_in_months.iter().take((month - 1) as usize) {
         total_days += days;
     }
@@ -273,12 +286,7 @@ pub async fn search_messages(
     Query(params): Query<SearchParams>,
 ) -> Result<Response, AppError> {
     // Validate that `q` is provided and non-empty.
-    let query_text = params
-        .q
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let query_text = params.q.as_deref().unwrap_or("").trim().to_string();
 
     if query_text.is_empty() {
         return Err(AppError::BadRequest(
@@ -299,31 +307,23 @@ pub async fn search_messages(
     let date_to = params.date_to.or(parsed.date_to);
     let has_attachment = params.has_attachment.or(parsed.has_attachment);
 
-    // Run SQLite queries in spawn_blocking to avoid blocking the Tokio executor.
-    let data_dir = config.data_dir.clone();
-    let user_hash = session.user_hash.clone();
-    let text_clone = parsed.text.clone();
-    let folder_clone = folder.clone();
-    let from_clone = from.clone();
-    let to_clone = to.clone();
-    let sqlite_results = tokio::task::spawn_blocking(move || {
-        let conn = db::pool::open_user_db(&data_dir, &user_hash)
-            .map_err(|e| format!("Database error: {e}"))?;
-        db::messages::search_messages_sqlite(
-            &conn,
-            &text_clone,
-            folder_clone.as_deref(),
-            from_clone.as_deref(),
-            to_clone.as_deref(),
-            date_from,
-            date_to,
-            has_attachment,
-            limit,
-        )
-    })
+    let database = config
+        .user_db(&session.user_hash)
+        .await
+        .map_err(AppError::InternalError)?;
+    let sqlite_results = db::messages::search_messages_sqlite(
+        &database,
+        &parsed.text,
+        folder.as_deref(),
+        from.as_deref(),
+        to.as_deref(),
+        date_from,
+        date_to,
+        has_attachment,
+        limit,
+    )
     .await
-    .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
-    .map_err(|e| AppError::InternalError(format!("Search error: {e}")))?;
+    .map_err(AppError::InternalError)?;
 
     // Collect SQLite results as SearchResultItems.
     let mut seen = std::collections::HashSet::new();
@@ -349,7 +349,8 @@ pub async fn search_messages(
 
     // Secondary search: Tantivy for body text matches not found by SQLite.
     // Only add results up to the limit cap.
-    if !parsed.text.is_empty() && results.len() < limit
+    if !parsed.text.is_empty()
+        && results.len() < limit
         && let Ok(user_index) = search_engine.open_user_index(&session.user_hash)
         && let Ok((tantivy_results, _)) = user_index.search(&SearchQuery {
             text: parsed.text,
@@ -364,27 +365,20 @@ pub async fn search_messages(
             offset: params.offset,
         })
     {
-        // Resolve Tantivy UIDs via SQLite in spawn_blocking.
-        let data_dir2 = config.data_dir.clone();
-        let user_hash2 = session.user_hash.clone();
         let remaining = limit.saturating_sub(results.len());
-        let tantivy_enriched = tokio::task::spawn_blocking(move || {
-            let conn = db::pool::open_user_db(&data_dir2, &user_hash2)
-                .map_err(|e| format!("Database error: {e}"))?;
-            let mut items = Vec::new();
-            for sr in &tantivy_results {
-                if items.len() >= remaining {
-                    break;
-                }
-                if let Ok(Some(msg)) = db::messages::get_single_message(&conn, &sr.folder, sr.uid) {
-                    items.push((sr.score, sr.snippet.clone(), msg));
-                }
+        let mut tantivy_enriched = Vec::new();
+        for result in &tantivy_results {
+            if tantivy_enriched.len() >= remaining {
+                break;
             }
-            Ok::<_, String>(items)
-        })
-        .await
-        .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+            if let Some(message) =
+                db::messages::get_single_message(&database, &result.folder, result.uid)
+                    .await
+                    .map_err(AppError::InternalError)?
+            {
+                tantivy_enriched.push((result.score, result.snippet.clone(), message));
+            }
+        }
 
         for (score, snippet, msg) in tantivy_enriched {
             if seen.contains(&(msg.folder.clone(), msg.uid)) {
@@ -402,7 +396,11 @@ pub async fn search_messages(
                 date: msg.date,
                 flags: msg.flags,
                 has_attachments: msg.has_attachments,
-                snippet: if snippet.is_empty() { msg.snippet } else { snippet },
+                snippet: if snippet.is_empty() {
+                    msg.snippet
+                } else {
+                    snippet
+                },
             });
         }
     }
@@ -412,7 +410,11 @@ pub async fn search_messages(
     results.sort_by(|a, b| {
         let da = crate::db::messages::parse_date_to_epoch_public(&a.date);
         let db_val = crate::db::messages::parse_date_to_epoch_public(&b.date);
-        if sort_asc { da.cmp(&db_val) } else { db_val.cmp(&da) }
+        if sort_asc {
+            da.cmp(&db_val)
+        } else {
+            db_val.cmp(&da)
+        }
     });
 
     // Cap to requested limit after sorting.
@@ -512,7 +514,9 @@ mod tests {
 
     #[test]
     fn parse_multiple_operators() {
-        let p = parse_search_query("from:alice@test.com to:bob@test.com in:INBOX has:attachment meeting");
+        let p = parse_search_query(
+            "from:alice@test.com to:bob@test.com in:INBOX has:attachment meeting",
+        );
         assert_eq!(p.from.as_deref(), Some("alice@test.com"));
         assert_eq!(p.to.as_deref(), Some("bob@test.com"));
         assert_eq!(p.folder.as_deref(), Some("INBOX"));

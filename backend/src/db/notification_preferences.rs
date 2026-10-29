@@ -1,4 +1,6 @@
-use rusqlite::Connection;
+use sqlx::Row;
+
+use crate::db::pool::{UserDb, now};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -16,93 +18,80 @@ pub struct UpdateNotificationPreferences {
     pub folders: Option<Vec<String>>,
 }
 
-/// Retrieve the singleton notification preferences row.
-/// Returns sensible defaults if the row does not yet exist.
-pub fn get_preferences(conn: &Connection) -> Result<NotificationPreferences, String> {
-    let result = conn.query_row(
-        "SELECT enabled, sound, folders, updated_at FROM notification_preferences WHERE id = 1",
-        [],
-        |row| {
-            let enabled_int: i32 = row.get(0)?;
-            let sound_int: i32 = row.get(1)?;
-            let folders_json: String = row.get(2)?;
-            let updated_at: String = row.get(3)?;
-            Ok((enabled_int, sound_int, folders_json, updated_at))
-        },
-    );
+/// Retrieve this user's notification preferences, falling back to defaults.
+pub async fn get_preferences(db: &UserDb) -> Result<NotificationPreferences, String> {
+    let mut conn = db.acquire().await?;
+    let row = sqlx::query(
+        "SELECT enabled, sound, folders, updated_at FROM notification_preferences WHERE user_hash = $1",
+    )
+    .bind(db.user_hash())
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|e| format!("Failed to get notification preferences: {e}"))?;
 
-    match result {
-        Ok((enabled_int, sound_int, folders_json, updated_at)) => {
-            let folders: Vec<String> = serde_json::from_str(&folders_json)
+    match row {
+        Some(row) => {
+            let folders_json: String = row.try_get(2).map_err(|e| e.to_string())?;
+            let folders = serde_json::from_str(&folders_json)
                 .map_err(|e| format!("Failed to parse folders JSON: {e}"))?;
             Ok(NotificationPreferences {
-                enabled: enabled_int != 0,
-                sound: sound_int != 0,
+                enabled: row.try_get::<i64, _>(0).map_err(|e| e.to_string())? != 0,
+                sound: row.try_get::<i64, _>(1).map_err(|e| e.to_string())? != 0,
                 folders,
-                updated_at,
+                updated_at: row.try_get(3).map_err(|e| e.to_string())?,
             })
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(NotificationPreferences {
+        None => Ok(NotificationPreferences {
             enabled: true,
             sound: false,
             folders: vec!["INBOX".to_string()],
             updated_at: String::new(),
         }),
-        Err(e) => Err(format!("Failed to get notification preferences: {e}")),
     }
 }
 
-/// Update the singleton notification preferences row.
-/// Only provided fields are changed. Returns the updated preferences.
-pub fn update_preferences(
-    conn: &Connection,
+/// Change only the supplied fields of this user's preferences.
+pub async fn update_preferences(
+    db: &UserDb,
     data: &UpdateNotificationPreferences,
 ) -> Result<NotificationPreferences, String> {
-    // Ensure the row exists.
-    conn.execute(
-        "INSERT OR IGNORE INTO notification_preferences (id) VALUES (1)",
-        [],
+    let folders_json = data
+        .folders
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| format!("Failed to serialize folders: {e}"))?;
+    let mut conn = db.acquire().await?;
+    sqlx::query(
+        "INSERT INTO notification_preferences (user_hash, id, updated_at) VALUES ($1, 1, $2)
+         ON CONFLICT (user_hash) DO NOTHING",
     )
+    .bind(db.user_hash())
+    .bind(now())
+    .execute(&mut *conn)
+    .await
     .map_err(|e| format!("Failed to ensure preferences row: {e}"))?;
 
-    let mut sets = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1;
-
-    if let Some(enabled) = data.enabled {
-        sets.push(format!("enabled = ?{idx}"));
-        values.push(Box::new(enabled as i32));
-        idx += 1;
-    }
-    if let Some(sound) = data.sound {
-        sets.push(format!("sound = ?{idx}"));
-        values.push(Box::new(sound as i32));
-        idx += 1;
-    }
-    if let Some(ref folders) = data.folders {
-        let folders_json =
-            serde_json::to_string(folders).map_err(|e| format!("Failed to serialize folders: {e}"))?;
-        sets.push(format!("folders = ?{idx}"));
-        values.push(Box::new(folders_json));
-        idx += 1;
-    }
-
-    if sets.is_empty() {
-        return get_preferences(conn);
-    }
-
-    sets.push("updated_at = datetime('now')".to_string());
-    let set_clause = sets.join(", ");
-    let sql = format!("UPDATE notification_preferences SET {set_clause} WHERE id = ?{idx}");
-    values.push(Box::new(1_i32));
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        values.iter().map(|v| v.as_ref()).collect();
-
-    conn.execute(&sql, params_refs.as_slice())
+    if data.enabled.is_some() || data.sound.is_some() || data.folders.is_some() {
+        sqlx::query(
+            "UPDATE notification_preferences SET
+                 enabled = COALESCE($1, enabled),
+                 sound = COALESCE($2, sound),
+                 folders = COALESCE($3, folders),
+                 updated_at = $4
+             WHERE user_hash = $5",
+        )
+        .bind(data.enabled.map(i64::from))
+        .bind(data.sound.map(i64::from))
+        .bind(folders_json)
+        .bind(now())
+        .bind(db.user_hash())
+        .execute(&mut *conn)
+        .await
         .map_err(|e| format!("Failed to update notification preferences: {e}"))?;
-
-    get_preferences(conn)
+    }
+    drop(conn);
+    get_preferences(db).await
 }
 
 #[cfg(test)]
@@ -110,19 +99,19 @@ mod tests {
     use super::*;
     use crate::db::pool::open_test_db;
 
-    #[test]
-    fn test_get_default_preferences() {
-        let conn = open_test_db();
-        let prefs = get_preferences(&conn).unwrap();
+    #[tokio::test]
+    async fn test_get_default_preferences() {
+        let conn = open_test_db().await;
+        let prefs = get_preferences(&conn).await.unwrap();
 
         assert!(prefs.enabled);
         assert!(!prefs.sound);
         assert_eq!(prefs.folders, vec!["INBOX".to_string()]);
     }
 
-    #[test]
-    fn test_update_enabled() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_enabled() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -132,6 +121,7 @@ mod tests {
                 folders: None,
             },
         )
+        .await
         .unwrap();
 
         assert!(!prefs.enabled);
@@ -139,9 +129,9 @@ mod tests {
         assert_eq!(prefs.folders, vec!["INBOX".to_string()]);
     }
 
-    #[test]
-    fn test_update_folders() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_folders() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -151,18 +141,16 @@ mod tests {
                 folders: Some(vec!["INBOX".to_string(), "Sent".to_string()]),
             },
         )
+        .await
         .unwrap();
 
         assert!(prefs.enabled);
-        assert_eq!(
-            prefs.folders,
-            vec!["INBOX".to_string(), "Sent".to_string()]
-        );
+        assert_eq!(prefs.folders, vec!["INBOX".to_string(), "Sent".to_string()]);
     }
 
-    #[test]
-    fn test_update_all_fields() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_all_fields() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -172,6 +160,7 @@ mod tests {
                 folders: Some(vec!["Drafts".to_string()]),
             },
         )
+        .await
         .unwrap();
 
         assert!(!prefs.enabled);

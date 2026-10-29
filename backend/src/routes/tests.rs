@@ -1,1757 +1,2248 @@
-    use super::*;
-    use axum::body::Body;
-    use axum::extract::ConnectInfo;
-    use axum::http::{HeaderValue, Request, StatusCode};
-    use http_body_util::BodyExt;
-    use std::fs;
-    use std::net::{IpAddr, SocketAddr};
-    use std::time::Duration;
-    use tempfile::TempDir;
-    use tower::ServiceExt;
-    use tower_governor::key_extractor::KeyExtractor;
 
-    use crate::imap::client::mock::MockImapClient;
-    use crate::imap::client::{
-        EmailAddress, ImapAttachment, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
-    };
-    use crate::smtp::client::SmtpError;
-    use crate::smtp::client::mock::MockSmtpClient;
+use super::*;
+use axum::body::Body;
+use axum::extract::ConnectInfo;
+use axum::http::{HeaderValue, Request, StatusCode};
+use http_body_util::BodyExt;
+use std::fs;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+use tempfile::TempDir;
+use tower::ServiceExt;
+use tower_governor::key_extractor::KeyExtractor;
 
-    /// Helper: create a test AppConfig with the given static dir.
-    fn test_config(static_dir: &str) -> Arc<AppConfig> {
-        Arc::new(AppConfig {
-            host: "127.0.0.1".to_string(),
-            port: 3100,
-            imap_host: None,
-            imap_port: 993,
-            smtp_host: None,
-            smtp_port: 587,
-            tls_enabled: true,
-            data_dir: "/tmp/oxi-test".to_string(),
-            session_timeout_hours: 24,
-            static_dir: static_dir.to_string(),
-            environment: "development".to_string(),
-            base_path: None,
-            serve_static: true,
-            cors_origin: None,
-            trusted_proxies: None,
-        })
+use crate::imap::client::mock::MockImapClient;
+use crate::imap::client::{
+    EmailAddress, ImapAttachment, ImapError, ImapFolder, ImapMessageBody, ImapMessageHeader,
+};
+use crate::smtp::client::SmtpError;
+use crate::smtp::client::mock::MockSmtpClient;
+
+/// Helper: create a test AppConfig with the given static dir.
+fn test_config(static_dir: &str) -> Arc<AppConfig> {
+    Arc::new(AppConfig {
+        host: "127.0.0.1".to_string(),
+        port: 3100,
+        imap_host: None,
+        imap_port: 993,
+        smtp_host: None,
+        smtp_port: 587,
+        tls_enabled: true,
+        data_dir: "/tmp/oxi-test".to_string(),
+        session_timeout_hours: 24,
+        static_dir: static_dir.to_string(),
+        environment: "development".to_string(),
+        base_path: None,
+        serve_static: true,
+        cors_origin: None,
+        trusted_proxies: None,
+        database_url: None,
+        database_max_connections: 10,
+        database: None,
+    })
+}
+
+/// Helper: create a test AppConfig with IMAP host configured and a custom data dir.
+fn test_config_with_imap(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
+    Arc::new(AppConfig {
+        host: "127.0.0.1".to_string(),
+        port: 3100,
+        imap_host: Some("imap.example.com".to_string()),
+        imap_port: 993,
+        smtp_host: None,
+        smtp_port: 587,
+        tls_enabled: true,
+        data_dir: data_dir.to_string(),
+        session_timeout_hours: 24,
+        static_dir: static_dir.to_string(),
+        environment: "development".to_string(),
+        base_path: None,
+        serve_static: true,
+        cors_origin: None,
+        trusted_proxies: None,
+        database_url: None,
+        database_max_connections: 10,
+        database: None,
+    })
+}
+
+/// Helper: create a test AppConfig with IMAP + SMTP hosts configured.
+fn test_config_with_smtp(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
+    Arc::new(AppConfig {
+        host: "127.0.0.1".to_string(),
+        port: 3001,
+        imap_host: Some("imap.example.com".to_string()),
+        imap_port: 993,
+        smtp_host: Some("smtp.example.com".to_string()),
+        smtp_port: 587,
+        tls_enabled: true,
+        data_dir: data_dir.to_string(),
+        session_timeout_hours: 24,
+        static_dir: static_dir.to_string(),
+        environment: "development".to_string(),
+        base_path: None,
+        serve_static: true,
+        cors_origin: None,
+        trusted_proxies: None,
+        database_url: None,
+        database_max_connections: 10,
+        database: None,
+    })
+}
+
+/// Helper: create a fresh SessionStore for tests.
+fn test_store() -> Arc<SessionStore> {
+    Arc::new(SessionStore::new(Duration::from_secs(3600)))
+}
+
+/// Helper: create a default mock IMAP client.
+fn test_imap_client() -> Arc<dyn ImapClient> {
+    Arc::new(MockImapClient::new())
+}
+
+/// Helper: create a default mock SMTP client.
+fn test_smtp_client() -> Arc<dyn SmtpClient> {
+    Arc::new(MockSmtpClient::new())
+}
+
+/// Helper: create a temporary static directory with an index.html.
+fn setup_static_dir() -> TempDir {
+    let dir = TempDir::new().expect("should create temp dir");
+    fs::write(
+        dir.path().join("index.html"),
+        "<!DOCTYPE html><html><body>SPA</body></html>",
+    )
+    .expect("should write index.html");
+    dir
+}
+
+/// Helper: create a test SearchEngine backed by the given data directory.
+fn test_search_engine(data_dir: &str) -> Arc<crate::search::engine::SearchEngine> {
+    Arc::new(crate::search::engine::SearchEngine::new(
+        std::path::PathBuf::from(data_dir),
+    ))
+}
+
+/// Helper: create a test EventBus.
+fn test_event_bus() -> Arc<crate::realtime::events::EventBus> {
+    Arc::new(crate::realtime::events::EventBus::new())
+}
+
+/// Helper: create a test IdleManager.
+fn test_idle_manager() -> Arc<crate::realtime::idle::IdleManager> {
+    Arc::new(crate::realtime::idle::IdleManager::new())
+}
+
+fn test_proxy_extractor(trusted_proxies: Option<&str>) -> ProxyAwareIpExtractor {
+    let mut config = (*test_config("/tmp")).clone();
+    config.trusted_proxies = trusted_proxies.map(str::to_string);
+    ProxyAwareIpExtractor {
+        trusted_proxies: config.parsed_trusted_proxies(),
     }
+}
 
-    /// Helper: create a test AppConfig with IMAP host configured and a custom data dir.
-    fn test_config_with_imap(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
-        Arc::new(AppConfig {
-            host: "127.0.0.1".to_string(),
-            port: 3100,
-            imap_host: Some("imap.example.com".to_string()),
-            imap_port: 993,
-            smtp_host: None,
-            smtp_port: 587,
-            tls_enabled: true,
-            data_dir: data_dir.to_string(),
-            session_timeout_hours: 24,
-            static_dir: static_dir.to_string(),
-            environment: "development".to_string(),
-            base_path: None,
-            serve_static: true,
-            cors_origin: None,
-            trusted_proxies: None,
-        })
-    }
+fn extract_ip(extractor: &ProxyAwareIpExtractor, peer: &str, forwarded: Option<&str>) -> IpAddr {
+    let peer_addr = SocketAddr::new(peer.parse().unwrap(), 443);
+    let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+    request
+        .extensions_mut()
+        .insert(ConnectInfo::<SocketAddr>(peer_addr));
 
-    /// Helper: create a test AppConfig with IMAP + SMTP hosts configured.
-    fn test_config_with_smtp(static_dir: &str, data_dir: &str) -> Arc<AppConfig> {
-        Arc::new(AppConfig {
-            host: "127.0.0.1".to_string(),
-            port: 3001,
-            imap_host: Some("imap.example.com".to_string()),
-            imap_port: 993,
-            smtp_host: Some("smtp.example.com".to_string()),
-            smtp_port: 587,
-            tls_enabled: true,
-            data_dir: data_dir.to_string(),
-            session_timeout_hours: 24,
-            static_dir: static_dir.to_string(),
-            environment: "development".to_string(),
-            base_path: None,
-            serve_static: true,
-            cors_origin: None,
-            trusted_proxies: None,
-        })
-    }
-
-    /// Helper: create a fresh SessionStore for tests.
-    fn test_store() -> Arc<SessionStore> {
-        Arc::new(SessionStore::new(Duration::from_secs(3600)))
-    }
-
-    /// Helper: create a default mock IMAP client.
-    fn test_imap_client() -> Arc<dyn ImapClient> {
-        Arc::new(MockImapClient::new())
-    }
-
-    /// Helper: create a default mock SMTP client.
-    fn test_smtp_client() -> Arc<dyn SmtpClient> {
-        Arc::new(MockSmtpClient::new())
-    }
-
-    /// Helper: create a temporary static directory with an index.html.
-    fn setup_static_dir() -> TempDir {
-        let dir = TempDir::new().expect("should create temp dir");
-        fs::write(
-            dir.path().join("index.html"),
-            "<!DOCTYPE html><html><body>SPA</body></html>",
-        )
-        .expect("should write index.html");
-        dir
-    }
-
-    /// Helper: create a test SearchEngine backed by the given data directory.
-    fn test_search_engine(data_dir: &str) -> Arc<crate::search::engine::SearchEngine> {
-        Arc::new(crate::search::engine::SearchEngine::new(
-            std::path::PathBuf::from(data_dir),
-        ))
-    }
-
-    /// Helper: create a test EventBus.
-    fn test_event_bus() -> Arc<crate::realtime::events::EventBus> {
-        Arc::new(crate::realtime::events::EventBus::new())
-    }
-
-    /// Helper: create a test IdleManager.
-    fn test_idle_manager() -> Arc<crate::realtime::idle::IdleManager> {
-        Arc::new(crate::realtime::idle::IdleManager::new())
-    }
-
-    fn test_proxy_extractor(trusted_proxies: Option<&str>) -> ProxyAwareIpExtractor {
-        let mut config = (*test_config("/tmp")).clone();
-        config.trusted_proxies = trusted_proxies.map(str::to_string);
-        ProxyAwareIpExtractor {
-            trusted_proxies: config.parsed_trusted_proxies(),
-        }
-    }
-
-    fn extract_ip(
-        extractor: &ProxyAwareIpExtractor,
-        peer: &str,
-        forwarded: Option<&str>,
-    ) -> IpAddr {
-        let peer_addr = SocketAddr::new(peer.parse().unwrap(), 443);
-        let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+    if let Some(forwarded) = forwarded {
         request
-            .extensions_mut()
-            .insert(ConnectInfo::<SocketAddr>(peer_addr));
-
-        if let Some(forwarded) = forwarded {
-            request.headers_mut().insert(
-                "x-forwarded-for",
-                HeaderValue::from_str(forwarded).unwrap(),
-            );
-        }
-
-        extractor.extract(&request).unwrap()
+            .headers_mut()
+            .insert("x-forwarded-for", HeaderValue::from_str(forwarded).unwrap());
     }
 
-    /// Helper: create a multi-account session for testing protected routes.
-    /// Returns (browser_id, account_id, token) for use in request headers.
-    fn setup_test_account(
-        store: &SessionStore,
-        email: &str,
-    ) -> (String, String, String) {
-        let browser_id = store.create_browser();
-        let (token, account_id) = store.add_account_to_browser(
-            &browser_id,
-            email.to_string(),
-            "password".to_string(),
-            crate::auth::user_data::hash_email(email),
-            "imap.example.com".to_string(),
-            993,
-            true,
-            "smtp.example.com".to_string(),
-            587,
-            true,
-        );
-        (browser_id, account_id, token)
-    }
+    extractor.extract(&request).unwrap()
+}
 
-    /// Helper: build auth headers for multi-account requests.
-    fn auth_headers(browser_id: &str, account_id: &str, token: &str) -> Vec<(&'static str, String)> {
-        vec![
-            ("cookie", format!("oxi_browser={browser_id}; oxi_session_{account_id}={token}")),
-            ("x-active-account", account_id.to_string()),
-        ]
-    }
+/// Helper: create a multi-account session for testing protected routes.
+/// Returns (browser_id, account_id, token) for use in request headers.
+fn setup_test_account(store: &SessionStore, email: &str) -> (String, String, String) {
+    let browser_id = store.create_browser();
+    let (token, account_id) = store.add_account_to_browser(
+        &browser_id,
+        email.to_string(),
+        "password".to_string(),
+        crate::auth::user_data::hash_email(email),
+        "imap.example.com".to_string(),
+        993,
+        true,
+        "smtp.example.com".to_string(),
+        587,
+        true,
+    );
+    (browser_id, account_id, token)
+}
 
-    /// Helper: provision a user database so that route handlers can open it.
-    /// Migrations are applied automatically by `open_user_db`.
-    fn provision_user_db(data_dir: &str, user_hash: &str) {
-        let _conn = crate::db::pool::open_user_db(data_dir, user_hash).unwrap();
-    }
+/// Helper: build auth headers for multi-account requests.
+fn auth_headers(browser_id: &str, account_id: &str, token: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "cookie",
+            format!("oxi_browser={browser_id}; oxi_session_{account_id}={token}"),
+        ),
+        ("x-active-account", account_id.to_string()),
+    ]
+}
 
-    // -----------------------------------------------------------------------
-    // Proxy-aware IP extraction tests
-    // -----------------------------------------------------------------------
+/// Helper: provision a user database so that route handlers can open it.
+/// Migrations are applied automatically by `open_user_db`.
+async fn provision_user_db(data_dir: &str, user_hash: &str) {
+    let _conn = crate::db::pool::open_user_db(data_dir, user_hash)
+        .await
+        .unwrap();
+}
 
-    #[test]
-    fn trusted_ipv4_proxy_uses_forwarded_client_ip() {
-        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+// -----------------------------------------------------------------------
+// Proxy-aware IP extraction tests
+// -----------------------------------------------------------------------
 
-        let client_ip = extract_ip(
-            &extractor,
-            "10.0.0.10",
-            Some("203.0.113.9, 10.1.1.1, 10.2.2.2"),
-        );
+#[test]
+fn trusted_ipv4_proxy_uses_forwarded_client_ip() {
+    let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
 
-        assert_eq!(client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
-    }
+    let client_ip = extract_ip(
+        &extractor,
+        "10.0.0.10",
+        Some("203.0.113.9, 10.1.1.1, 10.2.2.2"),
+    );
 
-    #[test]
-    fn repeated_forwarded_headers_use_the_full_proxy_chain() {
-        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
-        let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
-        request.extensions_mut().insert(ConnectInfo::<SocketAddr>(
-            "10.0.0.10:443".parse().unwrap(),
-        ));
-        request.headers_mut().append("x-forwarded-for", HeaderValue::from_static("203.0.113.99"));
-        request.headers_mut().append("x-forwarded-for", HeaderValue::from_static("198.51.100.20, 10.1.1.1"));
+    assert_eq!(client_ip, "203.0.113.9".parse::<IpAddr>().unwrap());
+}
 
-        assert_eq!(extractor.extract(&request).unwrap(), "198.51.100.20".parse::<IpAddr>().unwrap());
-    }
+#[test]
+fn repeated_forwarded_headers_use_the_full_proxy_chain() {
+    let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+    let mut request = Request::builder().uri("/api/auth/login").body(()).unwrap();
+    request
+        .extensions_mut()
+        .insert(ConnectInfo::<SocketAddr>("10.0.0.10:443".parse().unwrap()));
+    request
+        .headers_mut()
+        .append("x-forwarded-for", HeaderValue::from_static("203.0.113.99"));
+    request.headers_mut().append(
+        "x-forwarded-for",
+        HeaderValue::from_static("198.51.100.20, 10.1.1.1"),
+    );
 
-    #[test]
-    fn untrusted_peer_ignores_spoofed_forwarded_header() {
-        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+    assert_eq!(
+        extractor.extract(&request).unwrap(),
+        "198.51.100.20".parse::<IpAddr>().unwrap()
+    );
+}
 
-        let client_ip = extract_ip(
-            &extractor,
-            "198.51.100.20",
-            Some("203.0.113.9, 10.1.1.1"),
-        );
+#[test]
+fn untrusted_peer_ignores_spoofed_forwarded_header() {
+    let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
 
-        assert_eq!(client_ip, "198.51.100.20".parse::<IpAddr>().unwrap());
-    }
+    let client_ip = extract_ip(&extractor, "198.51.100.20", Some("203.0.113.9, 10.1.1.1"));
 
-    #[test]
-    fn trusted_ipv6_cidr_uses_forwarded_client_ip() {
-        let extractor = test_proxy_extractor(Some("2001:db8:abcd::/48"));
+    assert_eq!(client_ip, "198.51.100.20".parse::<IpAddr>().unwrap());
+}
 
-        let client_ip = extract_ip(
-            &extractor,
-            "2001:db8:abcd::10",
-            Some("2001:db8::123, 2001:db8:abcd::20"),
-        );
+#[test]
+fn trusted_ipv6_cidr_uses_forwarded_client_ip() {
+    let extractor = test_proxy_extractor(Some("2001:db8:abcd::/48"));
 
-        assert_eq!(client_ip, "2001:db8::123".parse::<IpAddr>().unwrap());
-    }
+    let client_ip = extract_ip(
+        &extractor,
+        "2001:db8:abcd::10",
+        Some("2001:db8::123, 2001:db8:abcd::20"),
+    );
 
-    #[test]
-    fn malformed_forwarded_header_falls_back_to_peer_ip() {
-        let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
+    assert_eq!(client_ip, "2001:db8::123".parse::<IpAddr>().unwrap());
+}
 
-        let client_ip = extract_ip(&extractor, "10.0.0.10", Some("203.0.113.9, garbage"));
+#[test]
+fn malformed_forwarded_header_falls_back_to_peer_ip() {
+    let extractor = test_proxy_extractor(Some("10.0.0.0/8"));
 
-        assert_eq!(client_ip, "10.0.0.10".parse::<IpAddr>().unwrap());
-    }
+    let client_ip = extract_ip(&extractor, "10.0.0.10", Some("203.0.113.9, garbage"));
 
-    // -----------------------------------------------------------------------
-    // Existing tests (updated to pass imap_client)
-    // -----------------------------------------------------------------------
+    assert_eq!(client_ip, "10.0.0.10".parse::<IpAddr>().unwrap());
+}
 
-    #[tokio::test]
-    async fn api_health_works_with_static_fallback() {
+// -----------------------------------------------------------------------
+// Existing tests (updated to pass imap_client)
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn api_health_works_with_static_fallback() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "ok");
+}
+
+#[tokio::test]
+async fn invalid_dev_cors_origin_falls_back_to_default_credentialed_cors() {
+    let dir = setup_static_dir();
+    let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+    cfg.cors_origin = Some("bad\norigin".to_string());
+    let config = Arc::new(cfg);
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/api/health")
+                .header("origin", "http://localhost:3000")
+                .header("access-control-request-method", "GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("access-control-allow-origin"),
+        Some(&HeaderValue::from_static("http://localhost:3000"))
+    );
+    assert_eq!(
+        response.headers().get("access-control-allow-credentials"),
+        Some(&HeaderValue::from_static("true"))
+    );
+}
+
+#[tokio::test]
+async fn root_serves_index_html() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("SPA"));
+}
+
+#[tokio::test]
+async fn unknown_path_falls_back_to_index_html() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("SPA"));
+}
+
+#[tokio::test]
+async fn static_file_is_served_directly() {
+    let dir = setup_static_dir();
+    fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/style.css")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let css = String::from_utf8(body.to_vec()).unwrap();
+    assert!(css.contains("color: red"));
+}
+
+#[tokio::test]
+async fn directory_redirect_keeps_base_path_and_serves_login_index() {
+    for (base_path, prefix) in [(None, ""), (Some("/oxi"), "/oxi")] {
         let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+        fs::create_dir(dir.path().join("login")).unwrap();
+        fs::write(dir.path().join("login/index.html"), "LOGIN PAGE").unwrap();
+        let mut config = (*test_config(dir.path().to_str().unwrap())).clone();
+        config.base_path = base_path.map(str::to_string);
+        let app = create_router(
+            Arc::new(config),
+            test_store(),
+            test_imap_client(),
+            test_smtp_client(),
+            test_search_engine("/tmp/oxi-test"),
+            test_event_bus(),
+            test_idle_manager(),
+        );
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/health")
+                    .uri(format!("{prefix}/login?next=mail"))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["status"], "ok");
-    }
-
-    #[tokio::test]
-    async fn invalid_dev_cors_origin_falls_back_to_default_credentialed_cors() {
-        let dir = setup_static_dir();
-        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
-        cfg.cors_origin = Some("bad\norigin".to_string());
-        let config = Arc::new(cfg);
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("OPTIONS")
-                    .uri("/api/health")
-                    .header("origin", "http://localhost:3000")
-                    .header("access-control-request-method", "GET")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
         assert_eq!(
-            response.headers().get("access-control-allow-origin"),
-            Some(&HeaderValue::from_static("http://localhost:3000"))
+            response.headers()["location"],
+            format!("{prefix}/login/?next=mail")
         );
-        assert_eq!(
-            response.headers().get("access-control-allow-credentials"),
-            Some(&HeaderValue::from_static("true"))
-        );
-    }
-
-    #[tokio::test]
-    async fn root_serves_index_html() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
 
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/")
+                    .uri(format!("{prefix}/login/"))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-
         assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("SPA"));
+        assert!(response.headers().get("location").is_none());
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.as_ref(), b"LOGIN PAGE");
     }
+}
 
-    #[tokio::test]
-    async fn unknown_path_falls_back_to_index_html() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+#[tokio::test]
+async fn nested_spa_path_falls_back_to_index() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/login")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/inbox/some-message-id")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::OK);
 
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("SPA"));
-    }
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("SPA"));
+}
 
-    #[tokio::test]
-    async fn static_file_is_served_directly() {
-        let dir = setup_static_dir();
-        fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+#[tokio::test]
+async fn login_without_csrf_header_returns_403() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/style.css")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let css = String::from_utf8(body.to_vec()).unwrap();
-        assert!(css.contains("color: red"));
-    }
-
-    #[tokio::test]
-    async fn directory_redirect_keeps_base_path_and_serves_login_index() {
-        for (base_path, prefix) in [(None, ""), (Some("/oxi"), "/oxi")] {
-            let dir = setup_static_dir();
-            fs::create_dir(dir.path().join("login")).unwrap();
-            fs::write(dir.path().join("login/index.html"), "LOGIN PAGE").unwrap();
-            let mut config = (*test_config(dir.path().to_str().unwrap())).clone();
-            config.base_path = base_path.map(str::to_string);
-            let app = create_router(
-                Arc::new(config), test_store(), test_imap_client(), test_smtp_client(),
-                test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager(),
-            );
-
-            let response = app.clone().oneshot(
-                Request::builder().uri(format!("{prefix}/login?next=mail")).body(Body::empty()).unwrap(),
-            ).await.unwrap();
-            assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-            assert_eq!(response.headers()["location"], format!("{prefix}/login/?next=mail"));
-
-            let response = app.oneshot(
-                Request::builder().uri(format!("{prefix}/login/")).body(Body::empty()).unwrap(),
-            ).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            assert!(response.headers().get("location").is_none());
-            let body = response.into_body().collect().await.unwrap().to_bytes();
-            assert_eq!(body.as_ref(), b"LOGIN PAGE");
-        }
-    }
-
-    #[tokio::test]
-    async fn nested_spa_path_falls_back_to_index() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/inbox/some-message-id")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("SPA"));
-    }
-
-    #[tokio::test]
-    async fn login_without_csrf_header_returns_403() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"email":"test@test.com","password":"pass"}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn login_no_imap_host_returns_503() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header("content-type", "application/json")
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::from(
-                        r#"{"email":"test@test.com","password":"pass"}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
-        assert_eq!(json["error"]["message"], "IMAP server not configured");
-    }
-
-    #[tokio::test]
-    async fn login_empty_email_returns_400() {
-        let dir = setup_static_dir();
-        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
-        cfg.imap_host = Some("127.0.0.1".to_string());
-        let config = Arc::new(cfg);
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header("content-type", "application/json")
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::from(r#"{"email":"","password":"pass"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "BAD_REQUEST");
-    }
-
-    #[tokio::test]
-    async fn login_empty_password_returns_400() {
-        let dir = setup_static_dir();
-        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
-        cfg.imap_host = Some("127.0.0.1".to_string());
-        let config = Arc::new(cfg);
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header("content-type", "application/json")
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::from(
-                        r#"{"email":"test@test.com","password":""}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn login_unreachable_imap_returns_503() {
-        let dir = setup_static_dir();
-        let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
-        cfg.imap_host = Some("127.0.0.1".to_string());
-        cfg.imap_port = 19999; // Nothing listening here
-        cfg.tls_enabled = false;
-        let config = Arc::new(cfg);
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/login")
-                    .header("content-type", "application/json")
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::from(
-                        r#"{"email":"test@test.com","password":"pass"}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "SERVER_UNREACHABLE");
-        assert!(json["error"]["message"].as_str().unwrap().contains("Connection refused"));
-    }
-
-    #[tokio::test]
-    async fn get_session_without_auth_returns_401() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/auth/session")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn get_session_with_valid_session_returns_200() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .uri("/api/auth/session");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["user"]["email"], "alice@example.com");
-    }
-
-    #[tokio::test]
-    async fn logout_without_auth_returns_401() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/auth/logout")
-                    .header("x-requested-with", "XMLHttpRequest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn logout_with_valid_session_returns_200() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-        let app = create_router(config, store.clone(), test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/auth/logout")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["status"], "logged_out");
-
-        // Session should be removed from the store.
-        assert!(store.get(&token).is_none());
-    }
-
-    #[tokio::test]
-    async fn base_path_mounts_protected_data_routes_and_scopes_logout_cookies() {
-        for (base_path, prefix, cookie_path) in [
-            (None, "", "/"),
-            (Some(""), "", "/"),
-            (Some("/"), "", "/"),
-            (Some("/oxi"), "/oxi", "/oxi"),
-        ] {
-            let static_dir = setup_static_dir();
-            let data_dir = TempDir::new().unwrap();
-            let mut config = (*test_config_with_imap(
-                static_dir.path().to_str().unwrap(),
-                data_dir.path().to_str().unwrap(),
-            ))
-            .clone();
-            config.base_path = base_path.map(str::to_string);
-            let store = test_store();
-            let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-            provision_user_db(
-                data_dir.path().to_str().unwrap(),
-                &crate::auth::user_data::hash_email("alice@example.com"),
-            );
-            let app = create_router(
-                Arc::new(config),
-                store,
-                test_imap_client(),
-                test_smtp_client(),
-                test_search_engine(data_dir.path().to_str().unwrap()),
-                test_event_bus(),
-                test_idle_manager(),
-            );
-
-            // This route is outside /api/auth, where browsers default empty cookie paths.
-            let mut request = Request::builder().uri(format!("{prefix}/api/folders"));
-            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-                request = request.header(name, value);
-            }
-            let response = app
-                .clone()
-                .oneshot(request.body(Body::empty()).unwrap())
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
-            let body = response.into_body().collect().await.unwrap().to_bytes();
-            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert!(json["folders"].is_array(), "{base_path:?}: {json}");
-
-            let mut request = Request::builder()
+    let response = app
+        .oneshot(
+            Request::builder()
                 .method("POST")
-                .uri(format!("{prefix}/api/auth/logout"))
-                .header("x-requested-with", "XMLHttpRequest");
-            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-                request = request.header(name, value);
-            }
-            let response = app
-                .oneshot(request.body(Body::empty()).unwrap())
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
-            let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
-            assert_eq!(cookies.len(), 2);
-            for cookie in cookies {
-                let attributes: Vec<_> = cookie.to_str().unwrap().split(';').map(str::trim).collect();
-                assert!(attributes.contains(&format!("Path={cookie_path}").as_str()));
-                assert!(attributes.contains(&"Max-Age=0"));
-            }
-        }
-    }
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"email":"test@test.com","password":"pass"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
-    #[tokio::test]
-    async fn logout_clears_cookie() {
-        let dir = setup_static_dir();
-        let config = test_config(dir.path().to_str().unwrap());
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn login_no_imap_host_returns_503() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .header("x-requested-with", "XMLHttpRequest")
+                .body(Body::from(r#"{"email":"test@test.com","password":"pass"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
+    assert_eq!(json["error"]["message"], "IMAP server not configured");
+}
+
+#[tokio::test]
+async fn login_empty_email_returns_400() {
+    let dir = setup_static_dir();
+    let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+    cfg.imap_host = Some("127.0.0.1".to_string());
+    let config = Arc::new(cfg);
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .header("x-requested-with", "XMLHttpRequest")
+                .body(Body::from(r#"{"email":"","password":"pass"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "BAD_REQUEST");
+}
+
+#[tokio::test]
+async fn login_empty_password_returns_400() {
+    let dir = setup_static_dir();
+    let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+    cfg.imap_host = Some("127.0.0.1".to_string());
+    let config = Arc::new(cfg);
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .header("x-requested-with", "XMLHttpRequest")
+                .body(Body::from(r#"{"email":"test@test.com","password":""}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn login_unreachable_imap_returns_503() {
+    let dir = setup_static_dir();
+    let mut cfg = (*test_config(dir.path().to_str().unwrap())).clone();
+    cfg.imap_host = Some("127.0.0.1".to_string());
+    cfg.imap_port = 19999; // Nothing listening here
+    cfg.tls_enabled = false;
+    let config = Arc::new(cfg);
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("content-type", "application/json")
+                .header("x-requested-with", "XMLHttpRequest")
+                .body(Body::from(r#"{"email":"test@test.com","password":"pass"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "SERVER_UNREACHABLE");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Connection refused")
+    );
+}
+
+#[tokio::test]
+async fn get_session_without_auth_returns_401() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn get_session_with_valid_session_returns_200() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder().uri("/api/auth/session");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["user"]["email"], "alice@example.com");
+}
+
+#[tokio::test]
+async fn logout_without_auth_returns_401() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header("x-requested-with", "XMLHttpRequest")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn logout_with_valid_session_returns_200() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    let app = create_router(
+        config,
+        store.clone(),
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/auth/logout")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "logged_out");
+
+    // Session should be removed from the store.
+    assert!(store.get(&token).is_none());
+}
+
+#[tokio::test]
+async fn base_path_mounts_protected_data_routes_and_scopes_logout_cookies() {
+    for (base_path, prefix, cookie_path) in [
+        (None, "", "/"),
+        (Some(""), "", "/"),
+        (Some("/"), "", "/"),
+        (Some("/oxi"), "/oxi", "/oxi"),
+    ] {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let mut config = (*test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        ))
+        .clone();
+        config.base_path = base_path.map(str::to_string);
         let store = test_store();
         let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+        provision_user_db(
+            data_dir.path().to_str().unwrap(),
+            &crate::auth::user_data::hash_email("alice@example.com"),
+        )
+        .await;
+        let app = create_router(
+            Arc::new(config),
+            store,
+            test_imap_client(),
+            test_smtp_client(),
+            test_search_engine(data_dir.path().to_str().unwrap()),
+            test_event_bus(),
+            test_idle_manager(),
+        );
 
-        let mut req = Request::builder()
+        // This route is outside /api/auth, where browsers default empty cookie paths.
+        let mut request = Request::builder().uri(format!("{prefix}/api/folders"));
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            request = request.header(name, value);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["folders"].is_array(), "{base_path:?}: {json}");
+
+        let mut request = Request::builder()
             .method("POST")
-            .uri("/api/auth/logout")
+            .uri(format!("{prefix}/api/auth/logout"))
             .header("x-requested-with", "XMLHttpRequest");
         for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
+            request = request.header(name, value);
         }
         let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
+            .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let set_cookie = response
-            .headers()
-            .get_all("set-cookie");
-        // Should have clearing cookies for both browser and account session
-        let cookie_str = format!("{:?}", set_cookie);
-        assert!(cookie_str.contains("oxi_browser=;") || cookie_str.contains("Max-Age=0"));
-    }
-
-    // -----------------------------------------------------------------------
-    // New tests for folders and messages routes
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn get_folders_returns_200_with_folder_list() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        // Provision user database.
-        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
-
-        let mock = MockImapClient::new().with_folders(vec![
-            ImapFolder {
-                name: "INBOX".to_string(),
-                delimiter: Some("/".to_string()),
-                attributes: vec!["\\HasNoChildren".to_string()],
-            },
-            ImapFolder {
-                name: "Sent".to_string(),
-                delimiter: Some("/".to_string()),
-                attributes: vec![],
-            },
-        ]);
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .uri("/api/folders")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
+        assert_eq!(response.status(), StatusCode::OK, "{base_path:?}");
+        let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
+        assert_eq!(cookies.len(), 2);
+        for cookie in cookies {
+            let attributes: Vec<_> = cookie.to_str().unwrap().split(';').map(str::trim).collect();
+            assert!(attributes.contains(&format!("Path={cookie_path}").as_str()));
+            assert!(attributes.contains(&"Max-Age=0"));
         }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        let folders = json["folders"].as_array().unwrap();
-        assert_eq!(folders.len(), 2);
-        assert_eq!(folders[0]["name"], "INBOX");
-        assert_eq!(folders[1]["name"], "Sent");
     }
+}
 
-    #[tokio::test]
-    async fn get_folders_returns_503_when_imap_fails() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+#[tokio::test]
+async fn logout_clears_cookie() {
+    let dir = setup_static_dir();
+    let config = test_config(dir.path().to_str().unwrap());
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let mock = MockImapClient::new()
-            .with_error(ImapError::ConnectionFailed("test failure".to_string()));
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .uri("/api/folders")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/auth/logout")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
 
-    #[tokio::test]
-    async fn get_folders_returns_401_without_auth() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager());
+    assert_eq!(response.status(), StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/folders")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+    let set_cookie = response.headers().get_all("set-cookie");
+    // Should have clearing cookies for both browser and account session
+    let cookie_str = format!("{:?}", set_cookie);
+    assert!(cookie_str.contains("oxi_browser=;") || cookie_str.contains("Max-Age=0"));
+}
 
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+// -----------------------------------------------------------------------
+// New tests for folders and messages routes
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_folders_returns_200_with_folder_list() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    // Provision user database.
+    provision_user_db(
+        data_dir.path().to_str().unwrap(),
+        &crate::auth::user_data::hash_email("alice@example.com"),
+    )
+    .await;
+
+    let mock = MockImapClient::new().with_folders(vec![
+        ImapFolder {
+            name: "INBOX".to_string(),
+            delimiter: Some("/".to_string()),
+            attributes: vec!["\\HasNoChildren".to_string()],
+        },
+        ImapFolder {
+            name: "Sent".to_string(),
+            delimiter: Some("/".to_string()),
+            attributes: vec![],
+        },
+    ]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .uri("/api/folders")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
 
-    #[tokio::test]
-    async fn get_messages_returns_200_with_paginated_list() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    assert_eq!(response.status(), StatusCode::OK);
 
-        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        let mock = MockImapClient::new().with_headers(vec![
-            ImapMessageHeader {
-                uid: 1,
-                subject: Some("Hello World".to_string()),
-                from: vec![EmailAddress {
-                    name: Some("Alice".to_string()),
-                    address: "alice@example.com".to_string(),
-                }],
-                to: vec![EmailAddress {
-                    name: None,
-                    address: "bob@example.com".to_string(),
-                }],
-                date: Some("2024-01-01T10:00:00Z".to_string()),
-                flags: vec!["\\Seen".to_string()],
-                has_attachments: false,
-                size: 2048,
-                message_id: None,
-                in_reply_to: None,
-                references: None,
-                cc: vec![],
-                reaction: None,
-            },
-            ImapMessageHeader {
-                uid: 2,
-                subject: Some("Second message".to_string()),
-                from: vec![EmailAddress {
-                    name: Some("Bob".to_string()),
-                    address: "bob@example.com".to_string(),
-                }],
-                to: vec![EmailAddress {
-                    name: None,
-                    address: "alice@example.com".to_string(),
-                }],
-                date: Some("2024-01-02T10:00:00Z".to_string()),
-                flags: vec![],
-                has_attachments: false,
-                size: 4096,
-                message_id: None,
-                in_reply_to: None,
-                references: None,
-                cc: vec![],
-                reaction: None,
-            },
-        ]);
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    let folders = json["folders"].as_array().unwrap();
+    assert_eq!(folders.len(), 2);
+    assert_eq!(folders[0]["name"], "INBOX");
+    assert_eq!(folders[1]["name"], "Sent");
+}
 
-        let mut req = Request::builder()
-            .uri("/api/folders/INBOX/messages?page=0&per_page=50")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+#[tokio::test]
+async fn get_folders_returns_503_when_imap_fails() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        assert_eq!(response.status(), StatusCode::OK);
+    let mock =
+        MockImapClient::new().with_error(ImapError::ConnectionFailed("test failure".to_string()));
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        assert_eq!(json["total_count"], 2);
-        assert_eq!(json["page"], 0);
-        assert_eq!(json["per_page"], 50);
-
-        let messages = json["messages"].as_array().unwrap();
-        assert_eq!(messages.len(), 2);
+    let mut req = Request::builder()
+        .uri("/api/folders")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
 
-    #[tokio::test]
-    async fn get_message_returns_sanitized_html() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
 
-        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
+#[tokio::test]
+async fn get_folders_returns_401_without_auth() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine("/tmp/oxi-test"),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        // First, we need the message header in cache (fetch_headers first).
-        let mock = MockImapClient::new()
-            .with_headers(vec![ImapMessageHeader {
-                uid: 42,
-                subject: Some("Test Subject".to_string()),
-                from: vec![EmailAddress {
-                    name: Some("Alice".to_string()),
-                    address: "alice@example.com".to_string(),
-                }],
-                to: vec![EmailAddress {
-                    name: None,
-                    address: "bob@example.com".to_string(),
-                }],
-                date: Some("2024-01-01T10:00:00Z".to_string()),
-                flags: vec!["\\Seen".to_string()],
-                has_attachments: false,
-                size: 1024,
-                message_id: None,
-                in_reply_to: None,
-                references: None,
-                cc: vec![],
-                reaction: None,
-            }])
-            .with_bodies(vec![ImapMessageBody {
-                uid: 42,
-                text_plain: Some("Hello plain text".to_string()),
-                text_html: Some(
-                    "<p>Hello</p><script>alert('xss')</script><b>bold</b>".to_string(),
-                ),
-                attachments: vec![],
-                raw_headers: String::new(),
-            }]);
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config.clone(), store.clone(), imap_client.clone(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        // First, populate the message cache by listing messages.
-        let mut req1 = Request::builder()
-            .uri("/api/folders/INBOX/messages")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req1 = req1.header(name, value);
-        }
-        let response = app
-            .oneshot(req1.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // Now get the full message.
-        let app2 = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-        let mut req2 = Request::builder()
-            .uri("/api/messages/INBOX/42")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req2 = req2.header(name, value);
-        }
-        let response = app2
-            .oneshot(req2.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        assert_eq!(json["uid"], 42);
-        assert_eq!(json["subject"], "Test Subject");
-
-        // Script tag is preserved (frontend handles security via iframe sandbox).
-        let html = json["html"].as_str().unwrap();
-        assert!(html.contains("script"));
-        assert!(html.contains("<b>bold</b>"));
-        assert!(html.contains("<p>Hello</p>"));
-
-        // Plain text should be preserved.
-        assert_eq!(json["text"], "Hello plain text");
-
-        // Flags should be an array.
-        assert!(json["flags"].is_array());
-
-        // to_addresses should be an array.
-        assert!(json["to_addresses"].is_array());
-    }
-
-    #[tokio::test]
-    async fn update_flags_returns_200() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        // Seed a message in the cache.
-        let conn = crate::db::pool::open_user_db(
-            data_dir.path().to_str().unwrap(),
-            &user_hash,
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/folders")
+                .body(Body::empty())
+                .unwrap(),
         )
+        .await
         .unwrap();
-        crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
-            .unwrap();
-        crate::db::messages::upsert_message(
-            &conn, "INBOX", 1, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "", None,
-        )
-        .unwrap();
-        drop(conn);
 
-        let mock = MockImapClient::new();
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
 
-        let mut req = Request::builder()
-            .method("PATCH")
-            .uri("/api/messages/INBOX/1/flags")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"flags":["\\Seen","\\Flagged"],"add":true}"#,
-            )).unwrap())
-            .await
-            .unwrap();
+#[tokio::test]
+async fn get_messages_returns_200_with_paginated_list() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        assert_eq!(response.status(), StatusCode::OK);
+    provision_user_db(
+        data_dir.path().to_str().unwrap(),
+        &crate::auth::user_data::hash_email("alice@example.com"),
+    )
+    .await;
+
+    let mock = MockImapClient::new().with_headers(vec![
+        ImapMessageHeader {
+            uid: 1,
+            subject: Some("Hello World".to_string()),
+            from: vec![EmailAddress {
+                name: Some("Alice".to_string()),
+                address: "alice@example.com".to_string(),
+            }],
+            to: vec![EmailAddress {
+                name: None,
+                address: "bob@example.com".to_string(),
+            }],
+            date: Some("2024-01-01T10:00:00Z".to_string()),
+            flags: vec!["\\Seen".to_string()],
+            has_attachments: false,
+            size: 2048,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            cc: vec![],
+            reaction: None,
+        },
+        ImapMessageHeader {
+            uid: 2,
+            subject: Some("Second message".to_string()),
+            from: vec![EmailAddress {
+                name: Some("Bob".to_string()),
+                address: "bob@example.com".to_string(),
+            }],
+            to: vec![EmailAddress {
+                name: None,
+                address: "alice@example.com".to_string(),
+            }],
+            date: Some("2024-01-02T10:00:00Z".to_string()),
+            flags: vec![],
+            has_attachments: false,
+            size: 4096,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            cc: vec![],
+            reaction: None,
+        },
+    ]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .uri("/api/folders/INBOX/messages?page=0&per_page=50")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
 
-    #[tokio::test]
-    async fn update_flags_rejects_invalid_flag_characters() {
-        // Flag values must be IMAP atom characters (RFC 3501 §9). A value
-        // containing a space — e.g. two flags accidentally joined into one
-        // string — must be rejected with 400 before reaching the IMAP client.
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    assert_eq!(response.status(), StatusCode::OK);
 
-        let mock = MockImapClient::new();
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        let mut req = Request::builder()
-            .method("PATCH")
-            .uri("/api/messages/INBOX/1/flags")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"flags":["\\Seen \\Flagged"],"add":true}"#,
-            )).unwrap())
-            .await
-            .unwrap();
+    assert_eq!(json["total_count"], 2);
+    assert_eq!(json["page"], 0);
+    assert_eq!(json["per_page"], 50);
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        // BAD_REQUEST confirms rejection at the validation layer — the IMAP
-        // error path returns SERVICE_UNAVAILABLE (503), not 400.
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "BAD_REQUEST");
-    }
+    let messages = json["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2);
+}
 
-    #[tokio::test]
-    async fn update_flags_rejects_empty_flag() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+#[tokio::test]
+async fn get_message_returns_sanitized_html() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        let mock = MockImapClient::new();
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    provision_user_db(
+        data_dir.path().to_str().unwrap(),
+        &crate::auth::user_data::hash_email("alice@example.com"),
+    )
+    .await;
 
-        let mut req = Request::builder()
-            .method("PATCH")
-            .uri("/api/messages/INBOX/1/flags")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"flags":[""],"add":true}"#,
-            )).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn move_message_returns_200() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        // Seed a message in the cache.
-        let conn = crate::db::pool::open_user_db(
-            data_dir.path().to_str().unwrap(),
-            &user_hash,
-        )
-        .unwrap();
-        crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
-            .unwrap();
-        crate::db::messages::upsert_message(
-            &conn, "INBOX", 42, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "", None,
-        )
-        .unwrap();
-        drop(conn);
-
-        let mock = MockImapClient::new();
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/move")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"from_folder":"INBOX","to_folder":"Archive","uid":42}"#,
-            )).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn delete_message_returns_200() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        // Seed a message in the cache.
-        let conn = crate::db::pool::open_user_db(
-            data_dir.path().to_str().unwrap(),
-            &user_hash,
-        )
-        .unwrap();
-        crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
-            .unwrap();
-        crate::db::messages::upsert_message(
-            &conn, "INBOX", 7, None, None, None, "Test", "a@b.com", "A", "[]", "[]",
-            "2024-01-01", "", 0, false, "", None,
-        )
-        .unwrap();
-        drop(conn);
-
-        let mock = MockImapClient::new();
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("DELETE")
-            .uri("/api/messages/INBOX/7")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    // -----------------------------------------------------------------------
-    // Attachment download tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn download_attachment_returns_binary_with_correct_headers() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let attachment_data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+    // First, we need the message header in cache (fetch_headers first).
+    let mock = MockImapClient::new()
+        .with_headers(vec![ImapMessageHeader {
             uid: 42,
+            subject: Some("Test Subject".to_string()),
+            from: vec![EmailAddress {
+                name: Some("Alice".to_string()),
+                address: "alice@example.com".to_string(),
+            }],
+            to: vec![EmailAddress {
+                name: None,
+                address: "bob@example.com".to_string(),
+            }],
+            date: Some("2024-01-01T10:00:00Z".to_string()),
+            flags: vec!["\\Seen".to_string()],
+            has_attachments: false,
+            size: 1024,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            cc: vec![],
+            reaction: None,
+        }])
+        .with_bodies(vec![ImapMessageBody {
+            uid: 42,
+            text_plain: Some("Hello plain text".to_string()),
+            text_html: Some("<p>Hello</p><script>alert('xss')</script><b>bold</b>".to_string()),
+            attachments: vec![],
+            raw_headers: String::new(),
+        }]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config.clone(),
+        store.clone(),
+        imap_client.clone(),
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    // First, populate the message cache by listing messages.
+    let mut req1 = Request::builder()
+        .uri("/api/folders/INBOX/messages")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req1 = req1.header(name, value);
+    }
+    let response = app
+        .oneshot(req1.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Now get the full message.
+    let app2 = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+    let mut req2 = Request::builder()
+        .uri("/api/messages/INBOX/42")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req2 = req2.header(name, value);
+    }
+    let response = app2
+        .oneshot(req2.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["uid"], 42);
+    assert_eq!(json["subject"], "Test Subject");
+
+    // Script tag is preserved (frontend handles security via iframe sandbox).
+    let html = json["html"].as_str().unwrap();
+    assert!(html.contains("script"));
+    assert!(html.contains("<b>bold</b>"));
+    assert!(html.contains("<p>Hello</p>"));
+
+    // Plain text should be preserved.
+    assert_eq!(json["text"], "Hello plain text");
+
+    // Flags should be an array.
+    assert!(json["flags"].is_array());
+
+    // to_addresses should be an array.
+    assert!(json["to_addresses"].is_array());
+}
+
+#[tokio::test]
+async fn update_flags_returns_200() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    // Seed a message in the cache.
+    let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
+        .await
+        .unwrap();
+    crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
+        .await
+        .unwrap();
+    crate::db::messages::upsert_message(
+        &conn,
+        "INBOX",
+        1,
+        None,
+        None,
+        None,
+        "Test",
+        "a@b.com",
+        "A",
+        "[]",
+        "[]",
+        "2024-01-01",
+        "",
+        0,
+        false,
+        "",
+        None,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let mock = MockImapClient::new();
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("PATCH")
+        .uri("/api/messages/INBOX/1/flags")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(r#"{"flags":["\\Seen","\\Flagged"],"add":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn update_flags_rejects_invalid_flag_characters() {
+    // Flag values must be IMAP atom characters (RFC 3501 §9). A value
+    // containing a space — e.g. two flags accidentally joined into one
+    // string — must be rejected with 400 before reaching the IMAP client.
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let mock = MockImapClient::new();
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("PATCH")
+        .uri("/api/messages/INBOX/1/flags")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(r#"{"flags":["\\Seen \\Flagged"],"add":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // BAD_REQUEST confirms rejection at the validation layer — the IMAP
+    // error path returns SERVICE_UNAVAILABLE (503), not 400.
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "BAD_REQUEST");
+}
+
+#[tokio::test]
+async fn update_flags_rejects_empty_flag() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let mock = MockImapClient::new();
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("PATCH")
+        .uri("/api/messages/INBOX/1/flags")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(r#"{"flags":[""],"add":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn move_message_returns_200() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    // Seed a message in the cache.
+    let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
+        .await
+        .unwrap();
+    crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
+        .await
+        .unwrap();
+    crate::db::messages::upsert_message(
+        &conn,
+        "INBOX",
+        42,
+        None,
+        None,
+        None,
+        "Test",
+        "a@b.com",
+        "A",
+        "[]",
+        "[]",
+        "2024-01-01",
+        "",
+        0,
+        false,
+        "",
+        None,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let mock = MockImapClient::new();
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/move")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(
+                r#"{"from_folder":"INBOX","to_folder":"Archive","uid":42}"#,
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_message_returns_200() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    // Seed a message in the cache.
+    let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
+        .await
+        .unwrap();
+    crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 0, 0)
+        .await
+        .unwrap();
+    crate::db::messages::upsert_message(
+        &conn,
+        "INBOX",
+        7,
+        None,
+        None,
+        None,
+        "Test",
+        "a@b.com",
+        "A",
+        "[]",
+        "[]",
+        "2024-01-01",
+        "",
+        0,
+        false,
+        "",
+        None,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let mock = MockImapClient::new();
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("DELETE")
+        .uri("/api/messages/INBOX/7")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+// -----------------------------------------------------------------------
+// Attachment download tests
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn download_attachment_returns_binary_with_correct_headers() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let attachment_data: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+        uid: 42,
+        text_plain: Some("text".to_string()),
+        text_html: None,
+        attachments: vec![ImapAttachment {
+            filename: Some("document.pdf".to_string()),
+            content_type: "application/pdf".to_string(),
+            size: 4,
+            data: attachment_data.clone(),
+            content_id: None,
+        }],
+        raw_headers: String::new(),
+    }]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .uri("/api/messages/INBOX/42/attachments/0")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Verify content-type header.
+    let ct = response
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(ct, "application/pdf");
+
+    // Verify content-disposition header.
+    let cd = response
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(cd.contains("inline"));
+    assert!(cd.contains("document.pdf"));
+
+    // Verify body bytes match the attachment data.
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(body.as_ref(), &attachment_data);
+}
+
+#[tokio::test]
+async fn download_attachment_strips_control_chars_from_filename() {
+    for (filename, expected_filename) in [
+        ("doc\r\nument.pdf", "document.pdf"),
+        ("\r\n\0\u{7f}", "attachment_0"),
+    ] {
+        // MIME decoders can surface control characters in attachment filenames
+        // via quoted-pair escapes. Control characters must be stripped before
+        // the filename is used in the Content-Disposition header.
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+            uid: 1,
             text_plain: Some("text".to_string()),
             text_html: None,
             attachments: vec![ImapAttachment {
-                filename: Some("document.pdf".to_string()),
+                filename: Some(filename.to_string()),
                 content_type: "application/pdf".to_string(),
                 size: 4,
-                data: attachment_data.clone(),
+                data: vec![0u8; 4],
                 content_id: None,
             }],
             raw_headers: String::new(),
         }]);
         let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+        let app = create_router(
+            config,
+            store,
+            imap_client,
+            test_smtp_client(),
+            test_search_engine(data_dir.path().to_str().unwrap()),
+            test_event_bus(),
+            test_idle_manager(),
+        );
 
         let mut req = Request::builder()
-            .uri("/api/messages/INBOX/42/attachments/0")
+            .uri("/api/messages/INBOX/1/attachments/0")
             .header("x-requested-with", "XMLHttpRequest");
         for (name, value) in auth_headers(&browser_id, &account_id, &token) {
             req = req.header(name, value);
         }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-
-        // Verify content-type header.
-        let ct = response
-            .headers()
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert_eq!(ct, "application/pdf");
-
-        // Verify content-disposition header.
         let cd = response
             .headers()
             .get("content-disposition")
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(cd.contains("inline"));
-        assert!(cd.contains("document.pdf"));
-
-        // Verify body bytes match the attachment data.
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(body.as_ref(), &attachment_data);
+        // Control characters stripped; the rest of the filename is intact.
+        assert!(cd.contains(expected_filename), "got: {cd}");
+        assert!(!cd.contains('\r'));
+        assert!(!cd.contains('\n'));
     }
+}
 
-    #[tokio::test]
-    async fn download_attachment_strips_control_chars_from_filename() {
-        for (filename, expected_filename) in [
-            ("doc\r\nument.pdf", "document.pdf"),
-            ("\r\n\0\u{7f}", "attachment_0"),
-        ] {
-            // MIME decoders can surface control characters in attachment filenames
-            // via quoted-pair escapes. Control characters must be stripped before
-            // the filename is used in the Content-Disposition header.
-            let static_dir = setup_static_dir();
-            let data_dir = TempDir::new().unwrap();
-            let config = test_config_with_imap(
-                static_dir.path().to_str().unwrap(),
-                data_dir.path().to_str().unwrap(),
-            );
-            let store = test_store();
-            let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+#[tokio::test]
+async fn download_attachment_returns_404_for_invalid_index() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-            let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-            provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
 
-            let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
-                uid: 1,
-                text_plain: Some("text".to_string()),
-                text_html: None,
-                attachments: vec![ImapAttachment {
-                    filename: Some(filename.to_string()),
-                    content_type: "application/pdf".to_string(),
-                    size: 4,
-                    data: vec![0u8; 4],
-                    content_id: None,
-                }],
-                raw_headers: String::new(),
-            }]);
-            let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-            let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+        uid: 42,
+        text_plain: Some("text".to_string()),
+        text_html: None,
+        attachments: vec![ImapAttachment {
+            filename: Some("document.pdf".to_string()),
+            content_type: "application/pdf".to_string(),
+            size: 4,
+            data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            content_id: None,
+        }],
+        raw_headers: String::new(),
+    }]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-            let mut req = Request::builder()
-                .uri("/api/messages/INBOX/1/attachments/0")
-                .header("x-requested-with", "XMLHttpRequest");
-            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-                req = req.header(name, value);
-            }
-            let response = app
-                .oneshot(req.body(Body::empty()).unwrap())
+    let mut req = Request::builder()
+        .uri("/api/messages/INBOX/42/attachments/99")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn download_attachment_returns_400_for_non_numeric_id() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
+        uid: 42,
+        text_plain: Some("text".to_string()),
+        text_html: None,
+        attachments: vec![ImapAttachment {
+            filename: Some("document.pdf".to_string()),
+            content_type: "application/pdf".to_string(),
+            size: 4,
+            data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            content_id: None,
+        }],
+        raw_headers: String::new(),
+    }]);
+    let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+    let app = create_router(
+        config,
+        store,
+        imap_client,
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .uri("/api/messages/INBOX/42/attachments/abc")
+        .header("x-requested-with", "XMLHttpRequest");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// -----------------------------------------------------------------------
+// Send message endpoint tests
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn send_returns_200_on_success() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_smtp(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
+        .await
+        .unwrap();
+    for folder in ["Sent", "INBOX"] {
+        crate::db::folders::insert_folder_if_new(&conn, folder, None, "")
+            .await
+            .unwrap();
+        crate::db::folders::update_folder_status(&conn, folder, 1, 0)
+            .await
+            .unwrap();
+        assert!(
+            crate::db::folders::is_folder_fresh(&conn, folder, 30)
                 .await
-                .unwrap();
-
-            assert_eq!(response.status(), StatusCode::OK);
-            let cd = response
-                .headers()
-                .get("content-disposition")
                 .unwrap()
-                .to_str()
-                .unwrap();
-            // Control characters stripped; the rest of the filename is intact.
-            assert!(cd.contains(expected_filename), "got: {cd}");
-            assert!(!cd.contains('\r'));
-            assert!(!cd.contains('\n'));
-        }
+        );
     }
 
-    #[tokio::test]
-    async fn download_attachment_returns_404_for_invalid_index() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
+    let mock_imap = Arc::new(MockImapClient::new());
+    let app = create_router(
+        config,
+        store,
+        mock_imap.clone(),
+        mock_smtp,
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
-            uid: 42,
-            text_plain: Some("text".to_string()),
-            text_html: None,
-            attachments: vec![ImapAttachment {
-                filename: Some("document.pdf".to_string()),
-                content_type: "application/pdf".to_string(),
-                size: 4,
-                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
-                content_id: None,
-            }],
-            raw_headers: String::new(),
-        }]);
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .uri("/api/messages/INBOX/42/attachments/99")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
-
-    #[tokio::test]
-    async fn download_attachment_returns_400_for_non_numeric_id() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_imap(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let mock = MockImapClient::new().with_bodies(vec![ImapMessageBody {
-            uid: 42,
-            text_plain: Some("text".to_string()),
-            text_html: None,
-            attachments: vec![ImapAttachment {
-                filename: Some("document.pdf".to_string()),
-                content_type: "application/pdf".to_string(),
-                size: 4,
-                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
-                content_id: None,
-            }],
-            raw_headers: String::new(),
-        }]);
-        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
-        let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .uri("/api/messages/INBOX/42/attachments/abc")
-            .header("x-requested-with", "XMLHttpRequest");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    // -----------------------------------------------------------------------
-    // Send message endpoint tests
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn send_returns_200_on_success() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_smtp(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        let conn = crate::db::pool::open_user_db(
-            data_dir.path().to_str().unwrap(), &user_hash,
-        ).unwrap();
-        for folder in ["Sent", "INBOX"] {
-            crate::db::folders::insert_folder_if_new(&conn, folder, None, "").unwrap();
-            crate::db::folders::update_folder_status(&conn, folder, 1, 0).unwrap();
-            assert!(crate::db::folders::is_folder_fresh(&conn, folder, 30).unwrap());
-        }
-
-        let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
-        let mock_imap = Arc::new(MockImapClient::new());
-        let app = create_router(config, store, mock_imap.clone(), mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
+    let response = app
+        .oneshot(
+            req.body(Body::from(
                 r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
-            )).unwrap())
-            .await
-            .unwrap();
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::OK);
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["status"], "sent");
-        assert!(json["message_id"].as_str().is_some());
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "sent");
+    assert!(json["message_id"].as_str().is_some());
+    {
         let appended = mock_imap.appended.lock().unwrap();
         assert_eq!(appended.len(), 1);
         assert_eq!(appended[0].0, "Sent");
         assert!(!appended[0].1.is_empty());
-        assert!(crate::db::folders::is_folder_messages_invalidated(&conn, "Sent").unwrap());
-        assert!(!crate::db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
-        assert!(crate::db::folders::is_folder_fresh(&conn, "INBOX", 30).unwrap());
     }
+    assert!(
+        crate::db::folders::is_folder_messages_invalidated(&conn, "Sent")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !crate::db::folders::is_folder_fresh(&conn, "Sent", 30)
+            .await
+            .unwrap()
+    );
+    assert!(
+        crate::db::folders::is_folder_fresh(&conn, "INBOX", 30)
+            .await
+            .unwrap()
+    );
+}
 
-    #[tokio::test]
-    async fn send_succeeds_when_sent_append_fails() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_smtp(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+#[tokio::test]
+async fn send_succeeds_when_sent_append_fails() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_smtp(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        let conn = crate::db::pool::open_user_db(
-            data_dir.path().to_str().unwrap(), &user_hash,
-        ).unwrap();
-        crate::db::folders::insert_folder_if_new(&conn, "Sent", None, "").unwrap();
-        crate::db::folders::update_folder_status(&conn, "Sent", 1, 0).unwrap();
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
+        .await
+        .unwrap();
+    crate::db::folders::insert_folder_if_new(&conn, "Sent", None, "")
+        .await
+        .unwrap();
+    crate::db::folders::update_folder_status(&conn, "Sent", 1, 0)
+        .await
+        .unwrap();
 
-        let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
-        let mock_imap = Arc::new(MockImapClient::new().with_error(
-            ImapError::ProtocolError("APPEND rejected".to_string()),
-        ));
-        let app = create_router(config, store, mock_imap.clone(), mock_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
+    let mock_smtp: Arc<dyn SmtpClient> = Arc::new(MockSmtpClient::new());
+    let mock_imap = Arc::new(
+        MockImapClient::new().with_error(ImapError::ProtocolError("APPEND rejected".to_string())),
+    );
+    let app = create_router(
+        config,
+        store,
+        mock_imap.clone(),
+        mock_smtp,
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
 
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(
                 r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi Bob"}"#,
-            )).unwrap())
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "sent");
+    assert!(json["message_id"].as_str().is_some());
+    assert!(mock_imap.appended.lock().unwrap().is_empty());
+    assert!(
+        crate::db::folders::is_folder_fresh(&conn, "Sent", 30)
             .await
-            .unwrap();
+            .unwrap()
+    );
+}
 
-        assert_eq!(response.status(), StatusCode::OK);
+#[tokio::test]
+async fn send_returns_400_without_recipients() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_smtp(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["status"], "sent");
-        assert!(json["message_id"].as_str().is_some());
-        assert!(mock_imap.appended.lock().unwrap().is_empty());
-        assert!(crate::db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
-
-    #[tokio::test]
-    async fn send_returns_400_without_recipients() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_smtp(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
+    let response = app
+        .oneshot(
+            req.body(Body::from(
                 r#"{"to":[],"subject":"Hello","text_body":"Hi"}"#,
-            )).unwrap())
-            .await
-            .unwrap();
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "BAD_REQUEST");
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "BAD_REQUEST");
+}
+
+#[tokio::test]
+async fn send_returns_400_with_empty_body_and_subject() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_smtp(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
-
-    #[tokio::test]
-    async fn send_returns_400_with_empty_body_and_subject() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_smtp(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
+    let response = app
+        .oneshot(
+            req.body(Body::from(
                 r#"{"to":["bob@example.com"],"subject":"","text_body":""}"#,
-            )).unwrap())
-            .await
-            .unwrap();
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn send_returns_503_when_smtp_not_configured() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    // Use config WITHOUT smtp_host
+    let config = test_config_with_imap(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
     }
+    let response = app
+        .oneshot(
+            req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
-    #[tokio::test]
-    async fn send_returns_503_when_smtp_not_configured() {
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
+}
+
+#[tokio::test]
+async fn send_returns_503_when_smtp_fails() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let config = test_config_with_smtp(
+        static_dir.path().to_str().unwrap(),
+        data_dir.path().to_str().unwrap(),
+    );
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+
+    let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+    provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
+
+    let failing_smtp: Arc<dyn SmtpClient> = Arc::new(
+        MockSmtpClient::new().with_error(SmtpError::SendFailed("relay denied".to_string())),
+    );
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        failing_smtp,
+        test_search_engine(data_dir.path().to_str().unwrap()),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/api/messages/send")
+        .header("x-requested-with", "XMLHttpRequest")
+        .header("content-type", "application/json");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app
+        .oneshot(
+            req.body(Body::from(
+                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("relay denied")
+    );
+}
+
+#[tokio::test]
+async fn quota_without_server_limit_uses_cached_sizes() {
+    let static_dir = setup_static_dir();
+    let data_dir = TempDir::new().unwrap();
+    let path = data_dir.path().to_str().unwrap();
+    let config = test_config_with_imap(static_dir.path().to_str().unwrap(), path);
+    let store = test_store();
+    let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+    let hash = crate::auth::user_data::hash_email("alice@example.com");
+    let conn = crate::db::pool::open_user_db(path, &hash).await.unwrap();
+    crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 1, 1, 1, 0)
+        .await
+        .unwrap();
+    crate::db::messages::upsert_message(
+        &conn,
+        "INBOX",
+        1,
+        None,
+        None,
+        None,
+        "subject",
+        "alice@example.com",
+        "Alice",
+        "[]",
+        "[]",
+        "",
+        "",
+        4096,
+        false,
+        "",
+        None,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    // The mock's IMAP size fallback returns zero; only SQLite has 4096.
+    let app = create_router(
+        config,
+        store,
+        test_imap_client(),
+        test_smtp_client(),
+        test_search_engine(path),
+        test_event_bus(),
+        test_idle_manager(),
+    );
+    let mut req = Request::builder().uri("/api/quota");
+    for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+        req = req.header(name, value);
+    }
+    let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["usage_bytes"], 4096);
+    assert!(json["limit_bytes"].is_null());
+}
+
+#[tokio::test]
+async fn export_contact_strips_control_chars_from_filename() {
+    for (name, expected_filename) in [
+        ("Bob\nSmith", "BobSmith.vcf"),
+        ("\r\n\0\u{7f}", "contact.vcf"),
+    ] {
+        // A contact name containing control characters must have them stripped
+        // before the name is used in the Content-Disposition header.
         let static_dir = setup_static_dir();
         let data_dir = TempDir::new().unwrap();
-        // Use config WITHOUT smtp_host
         let config = test_config_with_imap(
             static_dir.path().to_str().unwrap(),
             data_dir.path().to_str().unwrap(),
@@ -1760,170 +2251,58 @@
         let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
 
         let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash).await;
 
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
-            )).unwrap())
+        // Insert a contact whose name contains a newline.
+        let conn = crate::db::pool::open_user_db(data_dir.path().to_str().unwrap(), &user_hash)
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE");
-    }
-
-    #[tokio::test]
-    async fn send_returns_503_when_smtp_fails() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let config = test_config_with_smtp(
-            static_dir.path().to_str().unwrap(),
-            data_dir.path().to_str().unwrap(),
-        );
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-        let failing_smtp: Arc<dyn SmtpClient> = Arc::new(
-            MockSmtpClient::new()
-                .with_error(SmtpError::SendFailed("relay denied".to_string())),
-        );
-        let app = create_router(config, store, test_imap_client(), failing_smtp, test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-        let mut req = Request::builder()
-            .method("POST")
-            .uri("/api/messages/send")
-            .header("x-requested-with", "XMLHttpRequest")
-            .header("content-type", "application/json");
-        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-            req = req.header(name, value);
-        }
-        let response = app
-            .oneshot(req.body(Body::from(
-                r#"{"to":["bob@example.com"],"subject":"Hello","text_body":"Hi"}"#,
-            )).unwrap())
+        let contact = crate::db::contacts::Contact {
+            id: "c1".to_string(),
+            email: "bob@example.com".to_string(),
+            name: name.to_string(),
+            company: String::new(),
+            notes: String::new(),
+            is_favorite: false,
+            last_contacted: None,
+            contact_count: 0,
+            source: "manual".to_string(),
+            created_at: "2024-01-01 00:00:00".to_string(),
+            updated_at: "2024-01-01 00:00:00".to_string(),
+        };
+        crate::db::contacts::upsert_contact(&conn, &contact)
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("relay denied"));
-    }
-
-    #[tokio::test]
-    async fn quota_without_server_limit_uses_cached_sizes() {
-        let static_dir = setup_static_dir();
-        let data_dir = TempDir::new().unwrap();
-        let path = data_dir.path().to_str().unwrap();
-        let config = test_config_with_imap(static_dir.path().to_str().unwrap(), path);
-        let store = test_store();
-        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-        let hash = crate::auth::user_data::hash_email("alice@example.com");
-        let conn = crate::db::pool::open_user_db(path, &hash).unwrap();
-        crate::db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 1, 1, 1, 0).unwrap();
-        crate::db::messages::upsert_message(&conn, "INBOX", 1, None, None, None,
-            "subject", "alice@example.com", "Alice", "[]", "[]", "", "", 4096, false, "", None).unwrap();
         drop(conn);
-        // The mock's IMAP size fallback returns zero; only SQLite has 4096.
-        let app = create_router(config, store, test_imap_client(), test_smtp_client(),
-            test_search_engine(path), test_event_bus(), test_idle_manager());
-        let mut req = Request::builder().uri("/api/quota");
+
+        let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
+        let app = create_router(
+            config,
+            store,
+            imap_client,
+            test_smtp_client(),
+            test_search_engine(data_dir.path().to_str().unwrap()),
+            test_event_bus(),
+            test_idle_manager(),
+        );
+
+        let mut req = Request::builder()
+            .uri("/api/contacts/c1/export")
+            .header("x-requested-with", "XMLHttpRequest");
         for (name, value) in auth_headers(&browser_id, &account_id, &token) {
             req = req.header(name, value);
         }
         let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["usage_bytes"], 4096);
-        assert!(json["limit_bytes"].is_null());
+        let cd = response
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        // Control character stripped; the rest of the name is intact.
+        assert!(cd.contains(expected_filename), "got: {cd}");
+        assert!(!cd.contains('\n'));
     }
-
-    #[tokio::test]
-    async fn export_contact_strips_control_chars_from_filename() {
-        for (name, expected_filename) in [
-            ("Bob\nSmith", "BobSmith.vcf"),
-            ("\r\n\0\u{7f}", "contact.vcf"),
-        ] {
-            // A contact name containing control characters must have them stripped
-            // before the name is used in the Content-Disposition header.
-            let static_dir = setup_static_dir();
-            let data_dir = TempDir::new().unwrap();
-            let config = test_config_with_imap(
-                static_dir.path().to_str().unwrap(),
-                data_dir.path().to_str().unwrap(),
-            );
-            let store = test_store();
-            let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
-
-            let user_hash = crate::auth::user_data::hash_email("alice@example.com");
-            provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
-
-            // Insert a contact whose name contains a newline.
-            let conn = crate::db::pool::open_user_db(
-                data_dir.path().to_str().unwrap(),
-                &user_hash,
-            ).unwrap();
-            let contact = crate::db::contacts::Contact {
-                id: "c1".to_string(),
-                email: "bob@example.com".to_string(),
-                name: name.to_string(),
-                company: String::new(),
-                notes: String::new(),
-                is_favorite: false,
-                last_contacted: None,
-                contact_count: 0,
-                source: "manual".to_string(),
-                created_at: "2024-01-01 00:00:00".to_string(),
-                updated_at: "2024-01-01 00:00:00".to_string(),
-            };
-            crate::db::contacts::upsert_contact(&conn, &contact).unwrap();
-            drop(conn);
-
-            let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new());
-            let app = create_router(config, store, imap_client, test_smtp_client(), test_search_engine(data_dir.path().to_str().unwrap()), test_event_bus(), test_idle_manager());
-
-            let mut req = Request::builder()
-                .uri("/api/contacts/c1/export")
-                .header("x-requested-with", "XMLHttpRequest");
-            for (name, value) in auth_headers(&browser_id, &account_id, &token) {
-                req = req.header(name, value);
-            }
-            let response = app
-                .oneshot(req.body(Body::empty()).unwrap())
-                .await
-                .unwrap();
-
-            assert_eq!(response.status(), StatusCode::OK);
-            let cd = response
-                .headers()
-                .get("content-disposition")
-                .unwrap()
-                .to_str()
-                .unwrap();
-            // Control character stripped; the rest of the name is intact.
-            assert!(cd.contains(expected_filename), "got: {cd}");
-            assert!(!cd.contains('\n'));
-        }
-    }
+}

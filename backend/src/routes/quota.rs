@@ -55,9 +55,11 @@ pub async fn get_quota(
             },
         },
         None => {
-            let database = db::pool::UserDb::new(&config.data_dir, &session.user_hash);
-            if let Some(bytes) = database
-                .run(db::messages::cached_storage_bytes)
+            let database = config
+                .user_db(&session.user_hash)
+                .await
+                .map_err(AppError::InternalError)?;
+            if let Some(bytes) = db::messages::cached_storage_bytes(&database)
                 .await
                 .map_err(AppError::InternalError)?
             {
@@ -67,23 +69,12 @@ pub async fn get_quota(
                 })
                 .into_response());
             }
-            // Empty cache: sum RFC822.SIZE across all folders.
-            // Run SQLite access in spawn_blocking to avoid blocking the executor.
-            let data_dir = config.data_dir.clone();
-            let user_hash = session.user_hash.clone();
-            let folders: Vec<String> = tokio::task::spawn_blocking(move || {
-                let conn = db::pool::open_user_db(&data_dir, &user_hash)?;
-                Ok::<_, String>(
-                    db::folders::get_all_folders(&conn)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|f| f.name)
-                        .collect(),
-                )
-            })
-            .await
-            .map_err(|e| AppError::InternalError(format!("Task error: {e}")))?
-            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+            let folders: Vec<String> = db::folders::get_all_folders(&database)
+                .await
+                .map_err(AppError::InternalError)?
+                .into_iter()
+                .map(|folder| folder.name)
+                .collect();
 
             // Fetch sizes with a 90s overall timeout.
             let total = tokio::time::timeout(

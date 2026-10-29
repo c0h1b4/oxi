@@ -13,8 +13,25 @@ permissions:
 
 jobs:
   backend:
-    name: Backend (Rust)
+    name: Backend (Rust, ${{ matrix.database }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: oxi
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: oxi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oxi -d oxi_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend/
@@ -62,7 +79,14 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy -- -D warnings
 
-      - name: Test
+      - name: Test (SQLite)
+        if: matrix.database == 'sqlite'
+        run: cargo test
+
+      - name: Test (PostgreSQL)
+        if: matrix.database == 'postgres'
+        env:
+          OXI_TEST_DATABASE_URL: postgres://oxi:test-only@localhost:5432/oxi_test
         run: cargo test
 
   frontend:
