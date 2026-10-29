@@ -11,6 +11,9 @@ cleanup) pass on PostgreSQL 18. Full test suites pass in both modes; Clippy pass
 with warnings denied. Docker/Kubernetes/Nix execution was not available locally;
 build inputs, YAML examples, CI matrix, and Nix secret-file options were updated.
 Single-replica/local storage and no automatic import remain intentional limits.
+The final review also extended the generation guard to periodic full/CONDSTORE
+reconciliation and serialized cache flag read/modify/write after IMAP succeeds.
+Regression tests pause old flag snapshots across a completed UIDVALIDITY reset.
 
 ## Goal and scope
 
