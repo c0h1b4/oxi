@@ -28,6 +28,7 @@ import {
   replaceSignatureInBody,
   removeSignatureFromBody,
   injectSignature,
+  wrapSignatureHtml,
   convertBodyFormat,
 } from "@/stores/useComposeStore";
 import {
@@ -122,9 +123,26 @@ export function ComposeDialog() {
       return true;
     }
     // An automatic signature alone does not make a message worth saving.
-    const contentBody = removeSignatureFromBody(body, isHtml, signatureHtml);
-    if (!isHtml) return !!contentBody.trim();
-    const doc = new DOMParser().parseFromString(contentBody, "text/html");
+    if (!isHtml) return !!removeSignatureFromBody(body, false, signatureHtml).trim();
+    const doc = new DOMParser().parseFromString(body, "text/html");
+    const expected = new DOMParser().parseFromString(wrapSignatureHtml(signatureHtml), "text/html");
+    const signature = expected.querySelector('[data-signature="true"]');
+    if (signature) {
+      // Tiptap drops the delimiter's trailing space. Be conservative about all
+      // other differences: the editable wrapper may contain the user's message.
+      const signatureContent = (element: Element) => {
+        const copy = element.cloneNode(true) as Element;
+        const delimiter = copy.firstElementChild;
+        if (delimiter?.innerHTML === "-- ") delimiter.textContent = "--";
+        return copy.innerHTML;
+      };
+      const unchangedContent = signatureContent(signature);
+      doc.querySelectorAll('[data-signature="true"]').forEach((element) => {
+        if (!element.closest("blockquote") && signatureContent(element) === unchangedContent) {
+          element.remove();
+        }
+      });
+    }
     return !!(doc.body.textContent?.trim() || doc.body.querySelector("img"));
   }, [to, cc, bcc, subject, body, attachments, isHtml, signatureHtml]);
 
