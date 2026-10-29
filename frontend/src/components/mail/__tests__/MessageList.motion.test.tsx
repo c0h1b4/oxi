@@ -46,7 +46,8 @@ vi.mock("framer-motion", async () => {
   };
 });
 
-const { mockUiState, mockUseMessages } = vi.hoisted(() => ({
+const { mockUiState, mockUseMessages, mockDrafts } = vi.hoisted(() => ({
+  mockDrafts: [] as { id: string; imap_message_id: string; subject: string; to: string; updated_at: string }[],
   mockUiState: {
     activeFolder: "INBOX",
     activeTagId: null as string | null,
@@ -94,7 +95,7 @@ vi.mock("@/hooks/useTags", () => ({
 }));
 
 vi.mock("@/hooks/useCompose", () => ({
-  useListDrafts: () => ({ data: { drafts: [] } }),
+  useListDrafts: () => ({ data: { drafts: mockDrafts } }),
   useGetDraft: () => ({ data: null }),
   useDeleteDraft: () => ({ mutate: vi.fn() }),
 }));
@@ -162,6 +163,22 @@ function setMessages(uids: number[]) {
 }
 
 describe("MessageList and MessageListItem motion transitions", () => {
+  it("shows one editable local draft while preserving unrelated server drafts", () => {
+    mockUiState.activeFolder = "Drafts";
+    mockUiState.effectiveAnimationMode = "off";
+    mockDrafts.push({ id: "draft-1", imap_message_id: "<m-1@example.com>", subject: "Editable draft", to: "bob@example.com", updated_at: "2026-03-14T00:00:00Z" });
+    setMessages([1, 2]);
+    try {
+      render(<MessageList />);
+      expect(screen.getByText("Editable draft")).toBeTruthy();
+      expect(screen.queryByText("Subject 1")).toBeNull();
+      expect(screen.getByText("Subject 2")).toBeTruthy();
+    } finally {
+      mockUiState.activeFolder = "INBOX";
+      mockDrafts.length = 0;
+    }
+  });
+
   it("animates message rows enter/exit in non-off modes", () => {
     mockUiState.effectiveAnimationMode = "medium";
     setMessages([1, 2]);

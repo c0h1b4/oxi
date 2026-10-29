@@ -174,16 +174,17 @@ export function ReadingPane() {
           {" "}on {humanizeDate(data.date)}
         </div>
 
+        <div className="break-words text-sm text-foreground">
+          <span className="font-medium text-muted-foreground">To: </span>
+          <AddressList addresses={data.to_addresses} />
+        </div>
+
         {messageView.senderDetailsOpen && (
           <div id="sender-details" role="region" aria-label="Sender details" className="space-y-1">
             <div className="text-sm text-foreground">
               <span className="font-medium text-muted-foreground">From: </span>
               <AddressChip address={data.from_address} name={data.from_name || null} />
               {data.from_name && <span className="ml-1 text-muted-foreground">&lt;{data.from_address}&gt;</span>}
-            </div>
-            <div className="text-sm text-foreground">
-              <span className="font-medium text-muted-foreground">To: </span>
-              <AddressList addresses={data.to_addresses} />
             </div>
             {data.cc_addresses.length > 0 && (
               <div className="text-sm text-foreground">

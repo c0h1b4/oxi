@@ -15,6 +15,7 @@ pub mod quota;
 pub mod search;
 pub mod send;
 pub mod tags;
+pub mod subject_suggestions;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -257,6 +258,7 @@ pub fn create_router(
             "/messages/{folder}/{uid}/attachments/{attachment_id}",
             get(messages::download_attachment),
         )
+        .route("/messages/subject-suggestions", get(subject_suggestions::suggest_subjects))
         .route("/messages/move", post(messages::move_message_handler))
         .route("/messages/send", post(send::send_message_handler))
         .route(
