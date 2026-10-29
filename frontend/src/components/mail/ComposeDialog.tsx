@@ -118,15 +118,15 @@ export function ComposeDialog() {
   const serializedSendFeedbackMotionProps = useMemo(() => JSON.stringify(sendFeedbackMotionProps), [sendFeedbackMotionProps]);
 
   const hasContent = useCallback(() => {
-    return !!(
-      to.trim() ||
-      cc.trim() ||
-      bcc.trim() ||
-      subject.trim() ||
-      stripHtml(body).trim() ||
-      attachments.length > 0
-    );
-  }, [to, cc, bcc, subject, body, attachments]);
+    if (to.trim() || cc.trim() || bcc.trim() || subject.trim() || attachments.length > 0) {
+      return true;
+    }
+    // An automatic signature alone does not make a message worth saving.
+    const contentBody = removeSignatureFromBody(body, isHtml, signatureHtml);
+    if (!isHtml) return !!contentBody.trim();
+    const doc = new DOMParser().parseFromString(contentBody, "text/html");
+    return !!(doc.body.textContent?.trim() || doc.body.querySelector("img"));
+  }, [to, cc, bcc, subject, body, attachments, isHtml, signatureHtml]);
 
   // Initialize once for each compose, including replies with a preselected identity.
   useEffect(() => {
@@ -156,14 +156,7 @@ export function ComposeDialog() {
       const hash = computeHash();
       // Don't save if nothing changed (unless forced) or compose is empty
       if (!force && hash === lastSavedHashRef.current) return;
-      if (
-        !to.trim() &&
-        !cc.trim() &&
-        !bcc.trim() &&
-        !subject.trim() &&
-        !stripHtml(body).trim()
-      )
-        return;
+      if (!hasContent()) return;
 
       let currentDraftId = useComposeStore.getState().draftId;
       if (!currentDraftId) {
@@ -195,6 +188,7 @@ export function ComposeDialog() {
     },
     [
       computeHash,
+      hasContent,
       to,
       cc,
       bcc,
