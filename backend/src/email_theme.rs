@@ -1,5 +1,4 @@
 use regex::Regex;
-use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -115,24 +114,6 @@ pub enum EmailTheme {
 impl EmailTheme {
     pub fn as_i32(self) -> i32 {
         self as i32
-    }
-}
-
-impl FromSql for EmailTheme {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        match value.as_i64()? {
-            0 => Ok(EmailTheme::Light),
-            1 => Ok(EmailTheme::Dark),
-            2 => Ok(EmailTheme::Transparent),
-            3 => Ok(EmailTheme::Adaptive),
-            _ => Err(rusqlite::types::FromSqlError::InvalidType),
-        }
-    }
-}
-
-impl ToSql for EmailTheme {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(*self as i32))
     }
 }
 

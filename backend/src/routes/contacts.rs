@@ -113,15 +113,23 @@ pub async fn list_contacts_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Query(params): Query<ListContactsParams>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let query = params.q.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
+    let query = params
+        .q
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
     let contacts = match query {
         Some(q) => db::contacts::search_contacts(&conn, q, params.limit)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?,
         None => db::contacts::list_contacts(&conn, None, params.limit, params.offset)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?,
     };
 
@@ -146,12 +154,12 @@ pub async fn create_contact_handler(
         return Err(AppError::BadRequest("Email is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let now: String = conn
-        .query_row("SELECT datetime('now')", [], |row| row.get(0))
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    let now = db::pool::now();
     let id = body.id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let contact = Contact {
@@ -177,6 +185,7 @@ pub async fn create_contact_handler(
     };
 
     db::contacts::upsert_contact(&conn, &contact)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(contact).into_response())
@@ -207,11 +216,14 @@ pub async fn autocomplete_handler(
         }
     };
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Search contacts first
     let contacts = db::contacts::search_contacts(&conn, query, params.limit)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Build suggestions from contacts with deduplication by email (lowercase)
@@ -234,6 +246,7 @@ pub async fn autocomplete_handler(
         let remaining = params.limit as usize - suggestions.len();
         #[allow(dead_code)]
         let known = db::contacts::search_known_addresses(&conn, query, remaining as u32)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         for k in known {
@@ -262,13 +275,17 @@ pub async fn autocomplete_all_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let contacts = db::contacts::list_contacts(&conn, None, 50000, 0)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let known = db::contacts::search_known_addresses(&conn, "", 50000)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let mut seen_emails = std::collections::HashSet::new();
@@ -307,10 +324,13 @@ pub async fn get_contact_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let contact = db::contacts::get_contact(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     match contact {
@@ -327,10 +347,13 @@ pub async fn delete_contact_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let deleted = db::contacts::delete_contact(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if deleted {
@@ -492,10 +515,13 @@ pub async fn export_contacts_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let contacts = db::contacts::list_contacts(&conn, None, 10000, 0)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let vcf: String = contacts
@@ -522,10 +548,13 @@ pub async fn export_single_contact_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let contact = db::contacts::get_contact(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     match contact {
@@ -583,20 +612,20 @@ pub async fn import_contacts_handler(
             .bytes()
             .await
             .map_err(|e| AppError::BadRequest(format!("Failed to read field: {e}")))?;
-        vcf_content =
-            String::from_utf8(data.to_vec()).map_err(|_| AppError::BadRequest("Invalid UTF-8 in vCard file".to_string()))?;
+        vcf_content = String::from_utf8(data.to_vec())
+            .map_err(|_| AppError::BadRequest("Invalid UTF-8 in vCard file".to_string()))?;
     }
 
     if vcf_content.is_empty() {
         return Err(AppError::BadRequest("No file uploaded".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let now: String = conn
-        .query_row("SELECT datetime('now')", [], |row| row.get(0))
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    let now = db::pool::now();
 
     let parsed = parse_vcards(&vcf_content);
 
@@ -611,6 +640,7 @@ pub async fn import_contacts_handler(
         }
 
         let existing = db::contacts::get_contact_by_email(&conn, &entry.email)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         match existing {
@@ -632,6 +662,7 @@ pub async fn import_contacts_handler(
                 if changed {
                     c.updated_at = now.clone();
                     db::contacts::upsert_contact(&conn, &c)
+                        .await
                         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
                     updated += 1;
                 } else {
@@ -653,6 +684,7 @@ pub async fn import_contacts_handler(
                     updated_at: now.clone(),
                 };
                 db::contacts::upsert_contact(&conn, &contact)
+                    .await
                     .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
                 created += 1;
             }

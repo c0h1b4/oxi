@@ -30,7 +30,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Load configuration via figment (serde defaults + env vars).
-    let config = Arc::new(AppConfig::load()?);
+    let mut config = AppConfig::load()?;
+    config.initialize_database().await?;
+    let config = Arc::new(config);
 
     // Create the in-memory session store with the configured timeout.
     let store = Arc::new(SessionStore::new(Duration::from_secs(
@@ -89,7 +91,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
+    if let Some(database) = &config.database {
+        database.close().await;
+    }
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut signal) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            signal.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! { _ = interrupt => {}, _ = terminate => {} }
 }

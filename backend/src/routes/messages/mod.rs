@@ -97,37 +97,29 @@ pub async fn list_messages(
 ) -> Result<Response, AppError> {
     let mut syncing = false;
 
-    let database = db::pool::UserDb::new(&config.data_dir, &session.user_hash);
-    let cached_folder_name = folder.clone();
-    let (folder_fresh, cached_uid_validity, cached_count, folder_invalidated, mut header_sync) = database
-        .run(move |conn| {
-            let header_sync = HeaderSync::capture(conn)?;
-            let fresh =
-                db::folders::is_folder_fresh(conn, &cached_folder_name, FOLDER_MESSAGES_TTL_SECS)?;
-            let cached = db::folders::get_folder(conn, &cached_folder_name)?;
-            let validity = cached.as_ref().map(|f| f.uid_validity).unwrap_or(0);
-            if cached.is_none() {
-                db::folders::upsert_folder(
-                    conn,
-                    &cached_folder_name,
-                    None,
-                    None,
-                    "",
-                    true,
-                    0,
-                    0,
-                    0,
-                    0,
-                )?;
-            }
-            Ok((
-                fresh,
-                validity,
-                db::messages::count_messages(conn, &cached_folder_name)?,
-                db::folders::is_folder_messages_invalidated(conn, &cached_folder_name)?,
-                header_sync,
-            ))
-        })
+    let database = config
+        .user_db(&session.user_hash)
+        .await
+        .map_err(AppError::InternalError)?;
+    let mut header_sync = HeaderSync::capture(&database)
+        .await
+        .map_err(AppError::InternalError)?;
+    let folder_fresh = db::folders::is_folder_fresh(&database, &folder, FOLDER_MESSAGES_TTL_SECS)
+        .await
+        .map_err(AppError::InternalError)?;
+    let cached = db::folders::get_folder(&database, &folder)
+        .await
+        .map_err(AppError::InternalError)?;
+    let cached_uid_validity = cached.as_ref().map(|f| f.uid_validity).unwrap_or(0);
+    if cached.is_none() {
+        db::folders::upsert_folder(&database, &folder, None, None, "", true, 0, 0, 0, 0)
+            .await
+            .map_err(AppError::InternalError)?;
+    }
+    let cached_count = db::messages::count_messages(&database, &folder)
+        .await
+        .map_err(AppError::InternalError)?;
+    let folder_invalidated = db::folders::is_folder_messages_invalidated(&database, &folder)
         .await
         .map_err(AppError::InternalError)?;
 
@@ -154,19 +146,30 @@ pub async fn list_messages(
 
         if needs_full_sync {
             tracing::info!(folder = %folder, "UIDVALIDITY changed, clearing cache");
-            let name = folder.clone();
-            header_sync = database
-                .run(move |conn| {
-                    let transaction = header_sync.begin_write(conn)?;
-                    db::messages::delete_folder_messages(conn, &name)?;
-                    db::header_sync::invalidate(&transaction)?;
-                    db::folders::update_folder_sync_status(
-                        conn, &name, status.uid_validity, status.exists, 0,
-                    )?;
-                    let next = HeaderSync::capture(conn)?;
-                    transaction.commit().map_err(|e| e.to_string())?;
-                    Ok(next)
-                })
+            let transaction = header_sync
+                .begin_write(&database)
+                .await
+                .map_err(AppError::InternalError)?;
+            db::messages::delete_folder_messages(&transaction, &folder)
+                .await
+                .map_err(AppError::InternalError)?;
+            db::header_sync::invalidate(&transaction)
+                .await
+                .map_err(AppError::InternalError)?;
+            db::folders::update_folder_sync_status(
+                &transaction,
+                &folder,
+                status.uid_validity,
+                status.exists,
+                0,
+            )
+            .await
+            .map_err(AppError::InternalError)?;
+            header_sync = HeaderSync::capture(&transaction)
+                .await
+                .map_err(AppError::InternalError)?;
+            transaction
+                .commit()
                 .await
                 .map_err(AppError::InternalError)?;
         }
@@ -192,20 +195,31 @@ pub async fn list_messages(
 
                 tracing::info!(folder = %folder, fetched = headers.len(), "Partial sync: fetched recent headers");
 
-                let name = folder.clone();
-                let engine = search_engine.clone();
-                let hash = session.user_hash.clone();
-                let validity = status.uid_validity;
-                let exists = status.exists;
-                database
-                    .run(move |conn| {
-                        let transaction = header_sync.begin_write(conn)?;
-                        upsert_and_index_headers(&transaction, &name, &headers, &engine, &hash)
-                            .map_err(|e| e.to_string())?;
-                        db::folders::update_folder_status(conn, &name, validity, exists)?;
-                        db::folders::refresh_unread_count(conn, &name)?;
-                        transaction.commit().map_err(|e| e.to_string())
-                    })
+                let transaction = header_sync
+                    .begin_write(&database)
+                    .await
+                    .map_err(AppError::InternalError)?;
+                upsert_and_index_headers(
+                    &transaction,
+                    &folder,
+                    &headers,
+                    &search_engine,
+                    &session.user_hash,
+                )
+                .await?;
+                db::folders::update_folder_status(
+                    &transaction,
+                    &folder,
+                    status.uid_validity,
+                    status.exists,
+                )
+                .await
+                .map_err(AppError::InternalError)?;
+                db::folders::refresh_unread_count(&transaction, &folder)
+                    .await
+                    .map_err(AppError::InternalError)?;
+                transaction
+                    .commit()
                     .await
                     .map_err(AppError::InternalError)?;
 
@@ -248,35 +262,36 @@ pub async fn list_messages(
                 syncing = true;
             }
         } else {
-            let name = folder.clone();
-            database
-                .run(move |conn| {
-                    let transaction = header_sync.begin_write(conn)?;
-                    db::folders::update_folder_status(
-                        conn,
-                        &name,
-                        status.uid_validity,
-                        status.exists,
-                    )?;
-                    transaction.commit().map_err(|e| e.to_string())
-                })
+            let transaction = header_sync
+                .begin_write(&database)
+                .await
+                .map_err(AppError::InternalError)?;
+            db::folders::update_folder_status(
+                &transaction,
+                &folder,
+                status.uid_validity,
+                status.exists,
+            )
+            .await
+            .map_err(AppError::InternalError)?;
+            transaction
+                .commit()
                 .await
                 .map_err(AppError::InternalError)?;
         }
     }
 
-    let name = folder.clone();
-    let (messages, total_count, tags_map) = database
-        .run(move |conn| {
-            let messages = db::messages::get_messages(conn, &name, query.page, query.per_page)?;
-            let total = db::messages::count_messages(conn, &name)?;
-            let refs: Vec<_> = messages
-                .iter()
-                .map(|m| (m.uid, m.folder.as_str()))
-                .collect();
-            let tags = db::tags::get_tags_for_messages(conn, &refs)?;
-            Ok((messages, total, tags))
-        })
+    let messages = db::messages::get_messages(&database, &folder, query.page, query.per_page)
+        .await
+        .map_err(AppError::InternalError)?;
+    let total_count = db::messages::count_messages(&database, &folder)
+        .await
+        .map_err(AppError::InternalError)?;
+    let refs: Vec<_> = messages
+        .iter()
+        .map(|m| (m.uid, m.folder.as_str()))
+        .collect();
+    let tags_map = db::tags::get_tags_for_messages(&database, &refs)
         .await
         .map_err(AppError::InternalError)?;
 
@@ -329,8 +344,8 @@ pub async fn list_messages(
 // ---------------------------------------------------------------------------
 
 /// Upsert fetched headers into the database and index them for search.
-fn upsert_and_index_headers(
-    conn: &rusqlite::Transaction<'_>,
+async fn upsert_and_index_headers(
+    conn: &db::pool::UserDb,
     folder: &str,
     headers: &[crate::imap::types::ImapMessageHeader],
     search_engine: &Arc<SearchEngine>,
@@ -373,18 +388,17 @@ fn upsert_and_index_headers(
             "",
             header.reaction.as_deref(),
         )
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
         // Populate denormalized known_addresses table.
         db::contacts::populate_known_addresses(conn, from_address, from_name, &to_json, &cc_json)
+            .await
             .map_err(|e| AppError::InternalError(format!("Known addresses error: {e}")))?;
     }
 
     // Index for search (skip Spam/Junk/Trash).
-    if !headers.is_empty()
-        && !UserIndex::is_excluded_folder(folder)
-        && let Ok(user_index) = search_engine.open_user_index(user_hash)
-    {
+    if !headers.is_empty() && !UserIndex::is_excluded_folder(folder) {
         let indexable: Vec<IndexableMessage> = headers
             .iter()
             .map(|h| {
@@ -406,7 +420,14 @@ fn upsert_and_index_headers(
                 }
             })
             .collect();
-        let _ = user_index.index_messages_batch(&indexable);
+        let engine = search_engine.clone();
+        let user_hash = user_hash.to_owned();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(user_index) = engine.open_user_index(&user_hash) {
+                let _ = user_index.index_messages_batch(&indexable);
+            }
+        })
+        .await;
     }
 
     Ok(())
@@ -455,7 +476,7 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
         exists,
     } = params;
     let result: Result<(), String> = crate::imap::pool::background(async {
-        let database = db::pool::UserDb::new(&config.data_dir, &user_hash);
+        let database = config.user_db(&user_hash).await?;
         let mut uids = if uid_range.0 <= uid_range.1 {
             imap_client
                 .fetch_uids_and_flags(&creds, &folder)
@@ -468,15 +489,11 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
         } else {
             Vec::new()
         };
-        let name = folder.clone();
-        let cached_uids = database
-            .run(move |conn| {
-                Ok(db::messages::get_all_uids_and_flags(conn, &name)?
-                    .into_iter()
-                    .map(|(uid, _)| uid)
-                    .collect::<std::collections::HashSet<_>>())
-            })
-            .await?;
+        let cached_uids = db::messages::get_all_uids_and_flags(&database, &folder)
+            .await?
+            .into_iter()
+            .map(|(uid, _)| uid)
+            .collect::<std::collections::HashSet<_>>();
         uids.retain(|uid| !cached_uids.contains(uid));
         uids.sort_unstable();
         uids.dedup();
@@ -485,27 +502,16 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
                 .fetch_headers(&creds, &folder, &uid_set)
                 .await
                 .map_err(|e| format!("IMAP error: {e}"))?;
-            let name = folder.clone();
-            let engine = search_engine.clone();
-            let hash = user_hash.clone();
-            database
-                .run(move |conn| {
-                    let transaction = header_sync.begin_write(conn)?;
-                    upsert_and_index_headers(&transaction, &name, &headers, &engine, &hash)
-                        .map_err(|e| e.to_string())?;
-                    transaction.commit().map_err(|e| e.to_string())
-                })
-                .await?;
+            let transaction = header_sync.begin_write(&database).await?;
+            upsert_and_index_headers(&transaction, &folder, &headers, &search_engine, &user_hash)
+                .await
+                .map_err(|e| e.to_string())?;
+            transaction.commit().await?;
         }
-        let name = folder.clone();
-        database
-            .run(move |conn| {
-                let transaction = header_sync.begin_write(conn)?;
-                db::folders::update_folder_status(conn, &name, uid_validity, exists)?;
-                db::folders::refresh_unread_count(conn, &name)?;
-                transaction.commit().map_err(|e| e.to_string())
-            })
-            .await
+        let transaction = header_sync.begin_write(&database).await?;
+        db::folders::update_folder_status(&transaction, &folder, uid_validity, exists).await?;
+        db::folders::refresh_unread_count(&transaction, &folder).await?;
+        transaction.commit().await
     })
     .await;
 
@@ -518,18 +524,20 @@ async fn sync_remaining_headers(params: BackgroundSyncParams) {
         }
         Err(e) => {
             tracing::warn!(folder = %folder, error = %e, "Background sync: failed (will retry on next request)");
-            let database = db::pool::UserDb::new(&config.data_dir, &user_hash);
-            let name = folder.clone();
-            let superseded = database.run(move |conn| {
-                let superseded = HeaderSync::capture(conn)? != header_sync;
-                db::folders::invalidate_folder_freshness(conn, &name)?;
+            let superseded: Result<bool, String> = async {
+                let database = config.user_db(&user_hash).await?;
+                let superseded = HeaderSync::capture(&database).await? != header_sync;
+                db::folders::invalidate_folder_freshness(&database, &folder).await?;
                 Ok(superseded)
-            }).await;
+            }
+            .await;
             // A completed mutation may invalidate a backfill in another folder.
             // Wake the client to retry missing UIDs with fresh IMAP reads, not
             // the rejected headers. Network errors wait for the next request.
             if matches!(superseded, Ok(true)) {
-                event_bus.publish(&user_hash, MailEvent::FolderUpdated).await;
+                event_bus
+                    .publish(&user_hash, MailEvent::FolderUpdated)
+                    .await;
             }
         }
     }
@@ -549,11 +557,14 @@ pub async fn get_message(
     let creds = build_creds(&session, &config)?;
 
     // Open the per-user database.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Check SQLite cache first.
     let cached_body = db::messages::get_cached_body(&conn, &folder, uid)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Treat a cache hit with missing attachments_json as stale (pre-V006 cache).
@@ -561,52 +572,63 @@ pub async fn get_message(
     let usable_cache = cached_body.filter(|c| c.attachments_json.is_some());
     let fetched_body = usable_cache.is_none();
 
-    let (body_html, body_text, attachments, raw_headers, email_theme) = if let Some(cached) = usable_cache {
+    let (body_html, body_text, attachments, raw_headers, email_theme) = if let Some(cached) =
+        usable_cache
+    {
         let attachments: Vec<AttachmentMeta> = cached
             .attachments_json
             .as_deref()
             .and_then(|j| serde_json::from_str(j).ok())
             .unwrap_or_default();
         let theme = cached.email_theme;
-        if theme.is_none() && let Some(ref html) = cached.html {
-            let detected = email_theme::detect_email_theme(html)
-                .map(|t| t.as_i32());
+        if theme.is_none()
+            && let Some(ref html) = cached.html
+        {
+            let detected = email_theme::detect_email_theme(html).map(|t| t.as_i32());
             if let Some(t) = detected {
-                let _ = db::messages::update_email_theme(&conn, &folder, uid, t);
+                let _ = db::messages::update_email_theme(&conn, &folder, uid, t).await;
             }
-            (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default(), detected)
+            (
+                cached.html,
+                cached.text,
+                attachments,
+                cached.raw_headers.unwrap_or_default(),
+                detected,
+            )
         } else {
-            (cached.html, cached.text, attachments, cached.raw_headers.unwrap_or_default(), theme)
+            (
+                cached.html,
+                cached.text,
+                attachments,
+                cached.raw_headers.unwrap_or_default(),
+                theme,
+            )
         }
     } else {
         // Fetch from IMAP.
-        let body = imap_client
-            .fetch_body(&creds, &folder, uid)
-            .await
-            .map_err(|e| match e {
-                crate::imap::client::ImapError::MessageNotFound { .. } => {
-                    // Message exists in local DB but not on IMAP server —
-                    // remove the stale cache entry, search index entry, and
-                    // invalidate the folder so the list refreshes.
-                    let _ = db::messages::delete_message(&conn, &folder, uid);
-                    let _ = db::folders::invalidate_folder_freshness(&conn, &folder);
-                    if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
-                        let _ = user_index.delete_message(uid, &folder);
+        let body = match imap_client.fetch_body(&creds, &folder, uid).await {
+            Ok(body) => body,
+            Err(error) => {
+                // A missing or unreachable message cannot be served without a cached body.
+                let _ = db::messages::delete_message(&conn, &folder, uid).await;
+                let _ = db::folders::invalidate_folder_freshness(&conn, &folder).await;
+                let engine = search_engine.clone();
+                let user_hash = session.user_hash.clone();
+                let index_folder = folder.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Ok(user_index) = engine.open_user_index(&user_hash) {
+                        let _ = user_index.delete_message(uid, &index_folder);
                     }
-                    AppError::NotFound(format!("Message UID {uid} not found in folder {folder}"))
-                }
-                other => {
-                    // No cached body and IMAP is unreachable — this message
-                    // can't be served. Remove the stale DB entry so it
-                    // disappears from the message list.
-                    let _ = db::messages::delete_message(&conn, &folder, uid);
-                    let _ = db::folders::invalidate_folder_freshness(&conn, &folder);
-                    if let Ok(user_index) = search_engine.open_user_index(&session.user_hash) {
-                        let _ = user_index.delete_message(uid, &folder);
-                    }
-                    AppError::ServiceUnavailable(format!("IMAP error: {other}"))
-                }
-            })?;
+                })
+                .await;
+                return Err(match error {
+                    crate::imap::client::ImapError::MessageNotFound { .. } => AppError::NotFound(
+                        format!("Message UID {uid} not found in folder {folder}"),
+                    ),
+                    other => AppError::ServiceUnavailable(format!("IMAP error: {other}")),
+                });
+            }
+        };
 
         // Use HTML directly (frontend sandbox handles security).
         let sanitized_html = body.text_html.clone();
@@ -660,15 +682,23 @@ pub async fn get_message(
             Some(&body.raw_headers),
             detected_theme,
         )
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-        (resolved_html, body.text_plain, attachment_meta, body.raw_headers, detected_theme)
+        (
+            resolved_html,
+            body.text_plain,
+            attachment_meta,
+            body.raw_headers,
+            detected_theme,
+        )
     };
 
     // Get the message header from cache (use efficient single-message lookup).
     // If the header hasn't been synced yet (e.g. DB was cleared and sync is
     // still running), fall back to parsing the raw headers we already fetched.
     let msg = db::messages::get_single_message(&conn, &folder, uid)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let msg = match msg {
@@ -677,34 +707,64 @@ pub async fn get_message(
             // Parse header fields from raw_headers so we can still return a
             // useful response even when the message list hasn't been synced.
             let parsed = mail_parser::MessageParser::default().parse(raw_headers.as_bytes());
-            let subject = parsed.as_ref().and_then(|p| p.subject().map(|s| s.to_string())).unwrap_or_default();
-            let (from_address, from_name) = parsed.as_ref()
+            let subject = parsed
+                .as_ref()
+                .and_then(|p| p.subject().map(|s| s.to_string()))
+                .unwrap_or_default();
+            let (from_address, from_name) = parsed
+                .as_ref()
                 .and_then(|p| p.from())
                 .and_then(|addr| match addr {
                     mail_parser::Address::List(addrs) => addrs.first().map(|a| {
                         (
-                            a.address.as_ref().map(|s| s.to_string()).unwrap_or_default(),
+                            a.address
+                                .as_ref()
+                                .map(|s| s.to_string())
+                                .unwrap_or_default(),
                             a.name.as_ref().map(|s| s.to_string()).unwrap_or_default(),
                         )
                     }),
                     _ => None,
                 })
                 .unwrap_or_default();
-            let date = parsed.as_ref().and_then(|p| p.date()).map(|d| {
-                let sign = if d.tz_before_gmt { '-' } else { '+' };
-                format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
-                    d.year, d.month, d.day, d.hour, d.minute, d.second, sign, d.tz_hour, d.tz_minute)
-            }).unwrap_or_default();
+            let date = parsed
+                .as_ref()
+                .and_then(|p| p.date())
+                .map(|d| {
+                    let sign = if d.tz_before_gmt { '-' } else { '+' };
+                    format!(
+                        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
+                        d.year,
+                        d.month,
+                        d.day,
+                        d.hour,
+                        d.minute,
+                        d.second,
+                        sign,
+                        d.tz_hour,
+                        d.tz_minute
+                    )
+                })
+                .unwrap_or_default();
 
             db::messages::CachedMessage {
                 uid,
                 folder: folder.clone(),
-                message_id: parsed.as_ref().and_then(|p| p.message_id().map(|s| format!("<{s}>"))),
-                in_reply_to: parsed.as_ref().and_then(|p| p.in_reply_to().as_text().map(|s| format!("<{s}>"))),
+                message_id: parsed
+                    .as_ref()
+                    .and_then(|p| p.message_id().map(|s| format!("<{s}>"))),
+                in_reply_to: parsed
+                    .as_ref()
+                    .and_then(|p| p.in_reply_to().as_text().map(|s| format!("<{s}>"))),
                 references_header: parsed.as_ref().and_then(|p| {
                     let val = p.references();
                     val.as_text_list()
-                        .map(|list| list.iter().map(|s| format!("<{s}>")).collect::<Vec<_>>().join(" "))
+                        .map(|list| {
+                            list.iter()
+                                .map(|s| format!("<{s}>"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
                         .or_else(|| val.as_text().map(|s| format!("<{s}>")))
                 }),
                 subject,
@@ -751,6 +811,7 @@ pub async fn get_message(
     // Build thread using full References chain.
     let thread_messages = if let Some(ref message_id) = msg.message_id {
         db::messages::get_full_thread(&conn, message_id, msg.references_header.as_deref())
+            .await
             .unwrap_or_default()
     } else {
         vec![]
@@ -833,21 +894,24 @@ pub async fn update_flags(
     }
 
     // Update SQLite cache: read current flags, add/remove, write back.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let current_flags_csv: String = conn
-        .query_row(
-            "SELECT flags FROM messages WHERE folder = ?1 AND uid = ?2",
-            rusqlite::params![&folder, uid],
-            |row| row.get(0),
-        )
+    let current_flags_csv = db::messages::get_single_message(&conn, &folder, uid)
+        .await
+        .map_err(AppError::InternalError)?
+        .map(|message| message.flags)
         .unwrap_or_default();
 
     let mut current_flags: Vec<String> = if current_flags_csv.is_empty() {
         vec![]
     } else {
-        current_flags_csv.split(',').map(|s| s.to_string()).collect()
+        current_flags_csv
+            .split(',')
+            .map(|s| s.to_string())
+            .collect()
     };
 
     if body.add {
@@ -862,10 +926,12 @@ pub async fn update_flags(
 
     let new_flags_csv = current_flags.join(",");
     db::messages::update_message_flags(&conn, &folder, uid, &new_flags_csv)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Refresh unread count after flag change.
     db::folders::refresh_unread_count(&conn, &folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -890,12 +956,15 @@ pub async fn move_message_handler(
         .await
         .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Check if the message was unread before removing it from the source cache,
     // so we can adjust the destination folder's unread count.
     let was_unread = db::messages::get_single_message(&conn, &body.from_folder, body.uid)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
         .map(|m| !m.flags.contains("\\Seen"))
         .unwrap_or(false);
@@ -904,6 +973,7 @@ pub async fn move_message_handler(
     // because the UID changes after an IMAP MOVE, and a stale UID would cause
     // 404s when trying to fetch the message body.
     db::messages::remove_after_mutation(&conn, &body.from_folder, body.uid)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Remove the old folder/UID pair from search too. Destination UIDs are
@@ -914,25 +984,32 @@ pub async fn move_message_handler(
     let search_result = tokio::task::spawn_blocking(move || {
         let index = search_engine.open_user_index(&user_hash)?;
         index.delete_message(uid, &from_folder)
-    }).await;
+    })
+    .await;
     if !matches!(search_result, Ok(Ok(()))) {
         // The IMAP move already succeeded: do not trigger a false client rollback.
-        tracing::warn!(?search_result, "Failed to remove moved message from search index");
+        tracing::warn!(
+            ?search_result,
+            "Failed to remove moved message from search index"
+        );
     }
 
     // Refresh source folder unread count (now accurate since the row is gone).
     db::folders::refresh_unread_count(&conn, &body.from_folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Bump destination folder unread count if the moved message was unread.
     if was_unread {
         db::folders::adjust_unread_count(&conn, &body.to_folder, 1)
+            .await
             .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     }
 
     // Invalidate destination folder cache so the next list request forces an
     // IMAP resync and picks up the moved message with its new UID.
     db::folders::invalidate_folder_freshness(&conn, &body.to_folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -966,15 +1043,11 @@ pub async fn download_attachment(
         })?;
 
     // Find the attachment by index.
-    let attachment = body
-        .attachments
-        .into_iter()
-        .nth(index)
-        .ok_or_else(|| {
-            AppError::NotFound(format!(
-                "Attachment {attachment_id} not found on message UID {uid}"
-            ))
-        })?;
+    let attachment = body.attachments.into_iter().nth(index).ok_or_else(|| {
+        AppError::NotFound(format!(
+            "Attachment {attachment_id} not found on message UID {uid}"
+        ))
+    })?;
 
     // Build the response with appropriate headers.
     let raw_filename = attachment
@@ -996,7 +1069,8 @@ pub async fn download_attachment(
     } else {
         filename
     };
-    let content_type = preview_content_type(&attachment.content_type, Some(&filename), &attachment.data);
+    let content_type =
+        preview_content_type(&attachment.content_type, Some(&filename), &attachment.data);
 
     // Use inline disposition for types the browser can display natively
     // (PDF, images) so the preview works; use attachment for everything else.
@@ -1035,7 +1109,17 @@ mod preview_tests {
 
     #[test]
     fn accepts_common_system_flags_and_keywords() {
-        for flag in ["\\Seen", "\\Answered", "\\Flagged", "\\Deleted", "\\Draft", "Junk", "$Forwarded", "$MDNSent", "custom_tag-1.0+"] {
+        for flag in [
+            "\\Seen",
+            "\\Answered",
+            "\\Flagged",
+            "\\Deleted",
+            "\\Draft",
+            "Junk",
+            "$Forwarded",
+            "$MDNSent",
+            "custom_tag-1.0+",
+        ] {
             assert!(is_valid_flag(flag), "rejected {flag:?}");
         }
         assert!(validate_flags(&[]).is_ok());
@@ -1044,7 +1128,18 @@ mod preview_tests {
 
     #[test]
     fn rejects_unsafe_flags_and_enforces_length_limit() {
-        for flag in ["", "\\", "two flags", "tag\r\nSTORE", "tag\0", "tag\t", "(tag)", "tag{1}", "tag\\Seen", "étiquette"] {
+        for flag in [
+            "",
+            "\\",
+            "two flags",
+            "tag\r\nSTORE",
+            "tag\0",
+            "tag\t",
+            "(tag)",
+            "tag{1}",
+            "tag\\Seen",
+            "étiquette",
+        ] {
             assert!(!is_valid_flag(flag), "accepted {flag:?}");
         }
         assert!(!is_valid_flag(&"a".repeat(65)));
@@ -1053,13 +1148,22 @@ mod preview_tests {
 
     #[test]
     fn normalizes_pdf_media_types() {
-        assert_eq!(preview_content_type("Application/PDF; name=test.pdf", None, b""), "application/pdf");
-        assert_eq!(preview_content_type("application/octet-stream", Some("TEST.PDF"), b"%PDF-1.7"), "application/pdf");
+        assert_eq!(
+            preview_content_type("Application/PDF; name=test.pdf", None, b""),
+            "application/pdf"
+        );
+        assert_eq!(
+            preview_content_type("application/octet-stream", Some("TEST.PDF"), b"%PDF-1.7"),
+            "application/pdf"
+        );
     }
 
     #[test]
     fn does_not_trust_filename_alone() {
-        assert_eq!(preview_content_type("application/octet-stream", Some("test.pdf"), b"not a pdf"), "application/octet-stream");
+        assert_eq!(
+            preview_content_type("application/octet-stream", Some("test.pdf"), b"not a pdf"),
+            "application/octet-stream"
+        );
     }
 }
 
@@ -1081,13 +1185,17 @@ pub async fn delete_message_handler(
         .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
 
     // Delete from SQLite cache.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
     db::messages::remove_after_mutation(&conn, &folder, uid)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Refresh unread count for folder.
     db::folders::refresh_unread_count(&conn, &folder)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -1130,13 +1238,15 @@ mod sync_tests {
         let data_dir = tempfile::tempdir().unwrap();
         let path = data_dir.path().to_str().unwrap();
         let user_hash = "header-race";
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
         for folder in ["INBOX", "Archive"] {
-            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1, 1, 1, 0).unwrap();
+            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1, 1, 1, 0)
+                .await
+                .unwrap();
         }
         let search_engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
-        let header_sync = HeaderSync::capture(&conn).unwrap();
-        let transaction = header_sync.begin_write(&conn).unwrap();
+        let header_sync = HeaderSync::capture(&conn).await.unwrap();
+        let transaction = header_sync.begin_write(&conn).await.unwrap();
         upsert_and_index_headers(
             &transaction,
             "INBOX",
@@ -1144,8 +1254,9 @@ mod sync_tests {
             &search_engine,
             user_hash,
         )
+        .await
         .unwrap();
-        transaction.commit().unwrap();
+        transaction.commit().await.unwrap();
         drop(conn);
 
         let creds = ImapCredentials {
@@ -1226,15 +1337,22 @@ mod sync_tests {
         gate.1.notify_one();
         sync.await.unwrap();
 
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 7)
+                .await
                 .unwrap()
                 .is_none()
         );
-        assert!(db::folders::is_folder_messages_invalidated(&conn, "INBOX").unwrap());
-        assert!(matches!(events.try_recv().unwrap(), MailEvent::FolderUpdated),
-            "superseded sync must request fresh missing-UID reconciliation");
+        assert!(
+            db::folders::is_folder_messages_invalidated(&conn, "INBOX")
+                .await
+                .unwrap()
+        );
+        assert!(
+            matches!(events.try_recv().unwrap(), MailEvent::FolderUpdated),
+            "superseded sync must request fresh missing-UID reconciliation"
+        );
         assert!(events.try_recv().is_err());
         // A move's index deletion also must not be undone by rejected headers.
         if move_message {
@@ -1254,8 +1372,8 @@ mod sync_tests {
 
         // New destination UIDs (even the same numeric UID in another folder)
         // remain valid, as do future arrivals in the source folder.
-        let next_sync = HeaderSync::capture(&conn).unwrap();
-        let transaction = next_sync.begin_write(&conn).unwrap();
+        let next_sync = HeaderSync::capture(&conn).await.unwrap();
+        let transaction = next_sync.begin_write(&conn).await.unwrap();
         upsert_and_index_headers(
             &transaction,
             "Archive",
@@ -1263,6 +1381,7 @@ mod sync_tests {
             &search_engine,
             user_hash,
         )
+        .await
         .unwrap();
         upsert_and_index_headers(
             &transaction,
@@ -1271,11 +1390,18 @@ mod sync_tests {
             &search_engine,
             user_hash,
         )
+        .await
         .unwrap();
-        transaction.commit().unwrap();
-        assert_eq!(db::messages::count_messages(&conn, "Archive").unwrap(), 2);
+        transaction.commit().await.unwrap();
+        assert_eq!(
+            db::messages::count_messages(&conn, "Archive")
+                .await
+                .unwrap(),
+            2
+        );
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 8)
+                .await
                 .unwrap()
                 .is_some()
         );
@@ -1295,13 +1421,15 @@ mod sync_tests {
         let data_dir = tempfile::tempdir().unwrap();
         let path = data_dir.path().to_str().unwrap();
         let user_hash = "backfill-recovery";
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
         for folder in ["INBOX", "Archive"] {
-            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1000, 0, 1, 0).unwrap();
+            db::folders::upsert_folder(&conn, folder, None, None, "", true, 1000, 0, 1, 0)
+                .await
+                .unwrap();
         }
         let engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
-        let header_sync = HeaderSync::capture(&conn).unwrap();
-        let transaction = header_sync.begin_write(&conn).unwrap();
+        let header_sync = HeaderSync::capture(&conn).await.unwrap();
+        let transaction = header_sync.begin_write(&conn).await.unwrap();
         upsert_and_index_headers(
             &transaction,
             "INBOX",
@@ -1309,6 +1437,7 @@ mod sync_tests {
             &engine,
             user_hash,
         )
+        .await
         .unwrap();
         upsert_and_index_headers(
             &transaction,
@@ -1317,9 +1446,12 @@ mod sync_tests {
             &engine,
             user_hash,
         )
+        .await
         .unwrap();
-        db::folders::update_folder_status(&conn, "INBOX", 1, 1000).unwrap();
-        transaction.commit().unwrap();
+        db::folders::update_folder_status(&transaction, "INBOX", 1, 1000)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
         drop(conn);
         let creds = ImapCredentials {
             host: "localhost".into(),
@@ -1378,10 +1510,15 @@ mod sync_tests {
         .unwrap();
         gate.1.notify_one();
         sync.await.unwrap();
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
-        assert!(db::folders::is_folder_messages_invalidated(&conn, "INBOX").unwrap());
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
+        assert!(
+            db::folders::is_folder_messages_invalidated(&conn, "INBOX")
+                .await
+                .unwrap()
+        );
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 1)
+                .await
                 .unwrap()
                 .is_none()
         );
@@ -1414,27 +1551,34 @@ mod sync_tests {
         .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         events.recv().await.unwrap();
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
         assert_eq!(
-            db::messages::count_messages(&conn, "INBOX").unwrap(),
+            db::messages::count_messages(&conn, "INBOX").await.unwrap(),
             if other_folder { 1000 } else { 999 }
         );
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 1)
+                .await
                 .unwrap()
                 .is_some()
         );
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 900)
+                .await
                 .unwrap()
                 .is_some()
         );
         assert!(
             db::messages::get_single_message(&conn, folder, 950)
+                .await
                 .unwrap()
                 .is_none()
         );
-        assert!(db::folders::is_folder_fresh(&conn, "INBOX", 30).unwrap());
+        assert!(
+            db::folders::is_folder_fresh(&conn, "INBOX", 30)
+                .await
+                .unwrap()
+        );
         let requests = fresh_client.header_requests.lock().unwrap();
         assert_eq!(requests.len(), 4);
         assert!(requests.iter().all(|(_, uids)| {
@@ -1455,34 +1599,45 @@ mod sync_tests {
         assert!(results.iter().any(|message| message.uid == 1));
     }
 
-    #[test]
-    fn uidvalidity_reset_rejects_old_batch_but_allows_reused_uid() {
+    #[tokio::test]
+    async fn uidvalidity_reset_rejects_old_batch_but_allows_reused_uid() {
         let data_dir = tempfile::tempdir().unwrap();
-        let conn = db::pool::open_test_db();
-        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 1, 1, 1, 0).unwrap();
-        let engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
-        let stale = HeaderSync::capture(&conn).unwrap();
-        db::messages::remove_after_mutation(&conn, "INBOX", 7).unwrap();
-        let before_reset = HeaderSync::capture(&conn).unwrap();
-        let transaction = before_reset.begin_write(&conn).unwrap();
-        db::messages::delete_folder_messages(&conn, "INBOX").unwrap();
-        db::header_sync::invalidate(&transaction).unwrap();
-        db::folders::update_folder_sync_status(&conn, "INBOX", 2, 1, 0).unwrap();
-        let new_namespace = HeaderSync::capture(&conn).unwrap();
-        transaction.commit().unwrap();
-        assert!(stale.begin_write(&conn).is_err());
-        assert!(before_reset.begin_write(&conn).is_err());
-        let transaction = new_namespace.begin_write(&conn).unwrap();
-        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(7)], &engine, "test")
+        let conn = db::pool::open_test_db().await;
+        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 1, 1, 1, 0)
+            .await
             .unwrap();
-        transaction.commit().unwrap();
+        let engine = Arc::new(SearchEngine::new(data_dir.path().to_path_buf()));
+        let stale = HeaderSync::capture(&conn).await.unwrap();
+        db::messages::remove_after_mutation(&conn, "INBOX", 7)
+            .await
+            .unwrap();
+        let before_reset = HeaderSync::capture(&conn).await.unwrap();
+        let transaction = before_reset.begin_write(&conn).await.unwrap();
+        db::messages::delete_folder_messages(&transaction, "INBOX")
+            .await
+            .unwrap();
+        db::header_sync::invalidate(&transaction).await.unwrap();
+        db::folders::update_folder_sync_status(&transaction, "INBOX", 2, 1, 0)
+            .await
+            .unwrap();
+        let new_namespace = HeaderSync::capture(&transaction).await.unwrap();
+        transaction.commit().await.unwrap();
+        assert!(stale.begin_write(&conn).await.is_err());
+        assert!(before_reset.begin_write(&conn).await.is_err());
+        let transaction = new_namespace.begin_write(&conn).await.unwrap();
+        upsert_and_index_headers(&transaction, "INBOX", &[sync_header(7)], &engine, "test")
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 7)
+                .await
                 .unwrap()
                 .is_some()
         );
         assert_eq!(
             db::folders::get_folder(&conn, "INBOX")
+                .await
                 .unwrap()
                 .unwrap()
                 .uid_validity,
@@ -1519,12 +1674,19 @@ mod sync_tests {
             let data_dir = tempfile::tempdir().unwrap();
             let path = data_dir.path().to_str().unwrap();
             let user_hash = "empty-sync";
-            let conn = db::pool::open_user_db(path, user_hash).unwrap();
+            let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
             db::folders::upsert_folder(&conn, "Sent", None, None, "", true, 99, 7, 1, 0)
+                .await
                 .unwrap();
-            db::folders::invalidate_folder_freshness(&conn, "Sent").unwrap();
-            assert!(!db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
-            let header_sync = HeaderSync::capture(&conn).unwrap();
+            db::folders::invalidate_folder_freshness(&conn, "Sent")
+                .await
+                .unwrap();
+            assert!(
+                !db::folders::is_folder_fresh(&conn, "Sent", 30)
+                    .await
+                    .unwrap()
+            );
+            let header_sync = HeaderSync::capture(&conn).await.unwrap();
             drop(conn);
 
             let client = Arc::new(MockImapClient::new());
@@ -1556,13 +1718,24 @@ mod sync_tests {
             })
             .await;
 
-            let conn = db::pool::open_user_db(path, user_hash).unwrap();
-            let folder = db::folders::get_folder(&conn, "Sent").unwrap().unwrap();
+            let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
+            let folder = db::folders::get_folder(&conn, "Sent")
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(folder.uid_validity, 42);
             assert_eq!(folder.total_count, 0);
             assert_eq!(folder.unread_count, 0);
-            assert!(db::folders::is_folder_fresh(&conn, "Sent", 30).unwrap());
-            assert!(!db::folders::is_folder_messages_invalidated(&conn, "Sent").unwrap());
+            assert!(
+                db::folders::is_folder_fresh(&conn, "Sent", 30)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !db::folders::is_folder_messages_invalidated(&conn, "Sent")
+                    .await
+                    .unwrap()
+            );
             assert!(client.header_requests.lock().unwrap().is_empty());
             assert!(matches!(
                 events.try_recv().unwrap(),
@@ -1577,9 +1750,11 @@ mod sync_tests {
         let data_dir = tempfile::tempdir().unwrap();
         let path = data_dir.path().to_str().unwrap();
         let user_hash = "sparse-sync";
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
-        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 1, 0).unwrap();
-        let header_sync = HeaderSync::capture(&conn).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
+        db::folders::upsert_folder(&conn, "INBOX", None, None, "", true, 0, 0, 1, 0)
+            .await
+            .unwrap();
+        let header_sync = HeaderSync::capture(&conn).await.unwrap();
         drop(conn);
         let headers = [1, 9_999_899, 10_000_000].map(|uid| crate::imap::types::ImapMessageHeader {
             uid,
@@ -1633,14 +1808,16 @@ mod sync_tests {
             events.try_recv().unwrap(),
             MailEvent::FolderUpdated
         ));
-        let conn = db::pool::open_user_db(path, user_hash).unwrap();
+        let conn = db::pool::open_user_db(path, user_hash).await.unwrap();
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 1)
+                .await
                 .unwrap()
                 .is_some()
         );
         assert!(
             db::messages::get_single_message(&conn, "INBOX", 9_999_899)
+                .await
                 .unwrap()
                 .is_some()
         );

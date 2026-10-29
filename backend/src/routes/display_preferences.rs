@@ -27,10 +27,13 @@ pub async fn get_display_preferences(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let prefs = db::display_preferences::get_preferences(&conn)
+        .await
         .map_err(AppError::InternalError)?;
 
     Ok(Json(prefs).into_response())
@@ -42,10 +45,13 @@ pub async fn update_display_preferences(
     Extension(config): Extension<Arc<AppConfig>>,
     Json(data): Json<UpdateDisplayPreferences>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let prefs = db::display_preferences::update_preferences(&conn, &data)
+        .await
         .map_err(map_update_error)?;
 
     Ok(Json(prefs).into_response())
@@ -56,8 +62,8 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    use axum::http::StatusCode;
     use axum::Extension;
+    use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use serde_json::json;
     use tempfile::TempDir;
@@ -79,6 +85,7 @@ mod tests {
             serve_static: true,
             cors_origin: None,
             trusted_proxies: None,
+            ..serde_json::from_str::<AppConfig>("{}").unwrap()
         })
     }
 
@@ -199,9 +206,6 @@ mod tests {
         let parsed: UpdateDisplayPreferences =
             serde_json::from_value(payload).expect("payload should deserialize");
 
-        assert_eq!(
-            parsed.animation_mode,
-            Some(Some("medium".to_string()))
-        );
+        assert_eq!(parsed.animation_mode, Some(Some("medium".to_string())));
     }
 }

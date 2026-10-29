@@ -15,10 +15,13 @@ pub async fn list_identities_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let identities = db::identities::list_identities(&conn)
+        .await
         .map_err(AppError::InternalError)?;
 
     Ok(Json(serde_json::json!({ "identities": identities })).into_response())
@@ -30,10 +33,13 @@ pub async fn get_identity_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let identity = db::identities::get_identity(&conn, id)
+        .await
         .map_err(AppError::InternalError)?;
 
     match identity {
@@ -52,10 +58,13 @@ pub async fn create_identity_handler(
         return Err(AppError::BadRequest("Email is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let identity = db::identities::create_identity(&conn, &data)
+        .await
         .map_err(AppError::InternalError)?;
 
     Ok((axum::http::StatusCode::CREATED, Json(identity)).into_response())
@@ -68,10 +77,13 @@ pub async fn update_identity_handler(
     Path(id): Path<i64>,
     Json(data): Json<UpdateIdentity>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     match db::identities::update_identity(&conn, id, &data)
+        .await
         .map_err(AppError::InternalError)?
     {
         Some(identity) => Ok(Json(identity).into_response()),
@@ -85,10 +97,13 @@ pub async fn delete_identity_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     if db::identities::delete_identity(&conn, id)
+        .await
         .map_err(AppError::InternalError)?
     {
         Ok(Json(serde_json::json!({ "status": "deleted" })).into_response())

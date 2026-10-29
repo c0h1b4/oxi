@@ -1,4 +1,6 @@
-use rusqlite::Connection;
+use sqlx::Row;
+
+use crate::db::pool::{UserDb, now};
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,29 +35,29 @@ where
     Ok(Some(value))
 }
 
-/// Retrieve the singleton display preferences row.
-/// Returns sensible defaults if the row does not yet exist.
-pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> {
-    let result = conn.query_row(
-        "SELECT density, theme, language, compose_format, deep_index, animation_mode, updated_at FROM display_preferences WHERE id = 1",
-        [],
-        |row| {
-            let deep_index_int: i32 = row.get(4)?;
-            Ok(DisplayPreferences {
-                density: row.get(0)?,
-                theme: row.get(1)?,
-                language: row.get(2)?,
-                compose_format: row.get(3)?,
-                deep_index: deep_index_int != 0,
-                animation_mode: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
-        },
-    );
+/// Retrieve the display preferences for this user, falling back to defaults.
+pub async fn get_preferences(db: &UserDb) -> Result<DisplayPreferences, String> {
+    let mut conn = db.acquire().await?;
+    let row = sqlx::query(
+        "SELECT density, theme, language, compose_format, CAST(deep_index AS BIGINT), animation_mode, updated_at
+         FROM display_preferences WHERE user_hash = $1",
+    )
+    .bind(db.user_hash())
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|e| format!("Failed to get display preferences: {e}"))?;
 
-    match result {
-        Ok(prefs) => Ok(prefs),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(DisplayPreferences {
+    match row {
+        Some(row) => Ok(DisplayPreferences {
+            density: row.try_get(0).map_err(|e| e.to_string())?,
+            theme: row.try_get(1).map_err(|e| e.to_string())?,
+            language: row.try_get(2).map_err(|e| e.to_string())?,
+            compose_format: row.try_get(3).map_err(|e| e.to_string())?,
+            deep_index: row.try_get::<i64, _>(4).map_err(|e| e.to_string())? != 0,
+            animation_mode: row.try_get(5).map_err(|e| e.to_string())?,
+            updated_at: row.try_get(6).map_err(|e| e.to_string())?,
+        }),
+        None => Ok(DisplayPreferences {
             density: "comfortable".to_string(),
             theme: "system".to_string(),
             language: "en".to_string(),
@@ -64,90 +66,90 @@ pub fn get_preferences(conn: &Connection) -> Result<DisplayPreferences, String> 
             animation_mode: None,
             updated_at: String::new(),
         }),
-        Err(e) => Err(format!("Failed to get display preferences: {e}")),
     }
 }
 
-/// Update the singleton display preferences row.
-/// Only provided fields are changed. Returns the updated preferences.
-pub fn update_preferences(
-    conn: &Connection,
+/// Change only the supplied fields of this user's preferences.
+pub async fn update_preferences(
+    db: &UserDb,
     data: &UpdateDisplayPreferences,
 ) -> Result<DisplayPreferences, String> {
-    // Ensure the row exists.
-    conn.execute(
-        "INSERT OR IGNORE INTO display_preferences (id) VALUES (1)",
-        [],
+    if let Some(ref density) = data.density
+        && density != "compact"
+        && density != "comfortable"
+    {
+        return Err(format!("Invalid density: {density}"));
+    }
+    if let Some(ref theme) = data.theme
+        && theme != "light"
+        && theme != "dark"
+        && theme != "system"
+    {
+        return Err(format!("Invalid theme: {theme}"));
+    }
+    if let Some(ref compose_format) = data.compose_format
+        && compose_format != "html"
+        && compose_format != "text"
+    {
+        return Err(format!("Invalid compose_format: {compose_format}"));
+    }
+    if let Some(Some(ref value)) = data.animation_mode
+        && value != "rich"
+        && value != "medium"
+        && value != "subtle"
+        && value != "off"
+    {
+        return Err(format!("Invalid animation_mode: {value}"));
+    }
+
+    let mut conn = db.acquire().await?;
+    sqlx::query(
+        "INSERT INTO display_preferences (user_hash, id, updated_at) VALUES ($1, 1, $2)
+         ON CONFLICT (user_hash) DO NOTHING",
     )
+    .bind(db.user_hash())
+    .bind(now())
+    .execute(&mut *conn)
+    .await
     .map_err(|e| format!("Failed to ensure preferences row: {e}"))?;
 
-    let mut sets = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1;
-
-    if let Some(ref density) = data.density {
-        if density != "compact" && density != "comfortable" {
-            return Err(format!("Invalid density: {density}"));
-        }
-        sets.push(format!("density = ?{idx}"));
-        values.push(Box::new(density.clone()));
-        idx += 1;
-    }
-    if let Some(ref theme) = data.theme {
-        if theme != "light" && theme != "dark" && theme != "system" {
-            return Err(format!("Invalid theme: {theme}"));
-        }
-        sets.push(format!("theme = ?{idx}"));
-        values.push(Box::new(theme.clone()));
-        idx += 1;
-    }
-    if let Some(ref language) = data.language {
-        sets.push(format!("language = ?{idx}"));
-        values.push(Box::new(language.clone()));
-        idx += 1;
-    }
-    if let Some(ref compose_format) = data.compose_format {
-        if compose_format != "html" && compose_format != "text" {
-            return Err(format!("Invalid compose_format: {compose_format}"));
-        }
-        sets.push(format!("compose_format = ?{idx}"));
-        values.push(Box::new(compose_format.clone()));
-        idx += 1;
-    }
-    if let Some(deep_index) = data.deep_index {
-        sets.push(format!("deep_index = ?{idx}"));
-        values.push(Box::new(deep_index as i32));
-        idx += 1;
-    }
-    if let Some(ref animation_mode) = data.animation_mode {
-        if let Some(value) = animation_mode
-            && value != "rich"
-            && value != "medium"
-            && value != "subtle"
-            && value != "off"
-        {
-            return Err(format!("Invalid animation_mode: {value}"));
-        }
-        sets.push(format!("animation_mode = ?{idx}"));
-        values.push(Box::new(animation_mode.clone()));
-        idx += 1;
-    }
-
-    if sets.is_empty() {
-        return get_preferences(conn);
-    }
-
-    sets.push("updated_at = datetime('now')".to_string());
-    let set_clause = sets.join(", ");
-    let sql = format!("UPDATE display_preferences SET {set_clause} WHERE id = ?{idx}");
-    values.push(Box::new(1_i32));
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-
-    conn.execute(&sql, params_refs.as_slice())
+    if data.density.is_some()
+        || data.theme.is_some()
+        || data.language.is_some()
+        || data.compose_format.is_some()
+        || data.deep_index.is_some()
+        || data.animation_mode.is_some()
+    {
+        sqlx::query(
+            "UPDATE display_preferences SET
+                 density = COALESCE($1, density),
+                 theme = COALESCE($2, theme),
+                 language = COALESCE($3, language),
+                 compose_format = COALESCE($4, compose_format),
+                 deep_index = COALESCE($5, deep_index),
+                 animation_mode = CASE WHEN $6 = 1 THEN $7 ELSE animation_mode END,
+                 updated_at = $8
+             WHERE user_hash = $9",
+        )
+        .bind(data.density.as_deref())
+        .bind(data.theme.as_deref())
+        .bind(data.language.as_deref())
+        .bind(data.compose_format.as_deref())
+        .bind(data.deep_index.map(i64::from))
+        .bind(i64::from(data.animation_mode.is_some()))
+        .bind(
+            data.animation_mode
+                .as_ref()
+                .and_then(|value| value.as_deref()),
+        )
+        .bind(now())
+        .bind(db.user_hash())
+        .execute(&mut *conn)
+        .await
         .map_err(|e| format!("Failed to update display preferences: {e}"))?;
-
-    get_preferences(conn)
+    }
+    drop(conn);
+    get_preferences(db).await
 }
 
 #[cfg(test)]
@@ -155,10 +157,10 @@ mod tests {
     use super::*;
     use crate::db::pool::open_test_db;
 
-    #[test]
-    fn test_get_default_preferences() {
-        let conn = open_test_db();
-        let prefs = get_preferences(&conn).unwrap();
+    #[tokio::test]
+    async fn test_get_default_preferences() {
+        let conn = open_test_db().await;
+        let prefs = get_preferences(&conn).await.unwrap();
 
         assert_eq!(prefs.density, "comfortable");
         assert_eq!(prefs.theme, "system");
@@ -166,9 +168,9 @@ mod tests {
         assert_eq!(prefs.compose_format, "html");
     }
 
-    #[test]
-    fn test_update_density() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_density() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -181,6 +183,7 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.density, "compact");
@@ -188,9 +191,9 @@ mod tests {
         assert_eq!(prefs.language, "en");
     }
 
-    #[test]
-    fn test_update_theme() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_theme() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -203,15 +206,16 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.density, "comfortable");
         assert_eq!(prefs.theme, "dark");
     }
 
-    #[test]
-    fn test_update_all_fields() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_all_fields() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -224,6 +228,7 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.density, "compact");
@@ -231,9 +236,9 @@ mod tests {
         assert_eq!(prefs.language, "en");
     }
 
-    #[test]
-    fn test_invalid_density_rejected() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_invalid_density_rejected() {
+        let conn = open_test_db().await;
 
         let result = update_preferences(
             &conn,
@@ -245,15 +250,16 @@ mod tests {
                 deep_index: None,
                 animation_mode: None,
             },
-        );
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid density"));
     }
 
-    #[test]
-    fn test_invalid_theme_rejected() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_invalid_theme_rejected() {
+        let conn = open_test_db().await;
 
         let result = update_preferences(
             &conn,
@@ -265,15 +271,16 @@ mod tests {
                 deep_index: None,
                 animation_mode: None,
             },
-        );
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid theme"));
     }
 
-    #[test]
-    fn test_update_compose_format() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_compose_format() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -286,15 +293,16 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.compose_format, "text");
         assert_eq!(prefs.density, "comfortable");
     }
 
-    #[test]
-    fn test_invalid_compose_format_rejected() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_invalid_compose_format_rejected() {
+        let conn = open_test_db().await;
 
         let result = update_preferences(
             &conn,
@@ -306,15 +314,16 @@ mod tests {
                 deep_index: None,
                 animation_mode: None,
             },
-        );
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid compose_format"));
     }
 
-    #[test]
-    fn test_empty_update_returns_defaults() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_empty_update_returns_defaults() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -327,23 +336,24 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.density, "comfortable");
         assert_eq!(prefs.theme, "system");
     }
 
-    #[test]
-    fn test_read_defaults_animation_mode_none() {
-        let conn = open_test_db();
-        let prefs = get_preferences(&conn).unwrap();
+    #[tokio::test]
+    async fn test_read_defaults_animation_mode_none() {
+        let conn = open_test_db().await;
+        let prefs = get_preferences(&conn).await.unwrap();
 
         assert_eq!(prefs.animation_mode, None);
     }
 
-    #[test]
-    fn test_update_animation_mode_valid() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_animation_mode_valid() {
+        let conn = open_test_db().await;
 
         let prefs = update_preferences(
             &conn,
@@ -356,14 +366,15 @@ mod tests {
                 animation_mode: Some(Some("medium".to_string())),
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(prefs.animation_mode.as_deref(), Some("medium"));
     }
 
-    #[test]
-    fn test_update_animation_mode_invalid() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_animation_mode_invalid() {
+        let conn = open_test_db().await;
 
         let result = update_preferences(
             &conn,
@@ -375,15 +386,16 @@ mod tests {
                 deep_index: None,
                 animation_mode: Some(Some("ultra".to_string())),
             },
-        );
+        )
+        .await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid animation_mode"));
     }
 
-    #[test]
-    fn test_update_animation_mode_null_clears_value() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_animation_mode_null_clears_value() {
+        let conn = open_test_db().await;
 
         let set_prefs = update_preferences(
             &conn,
@@ -396,6 +408,7 @@ mod tests {
                 animation_mode: Some(Some("medium".to_string())),
             },
         )
+        .await
         .unwrap();
         assert_eq!(set_prefs.animation_mode.as_deref(), Some("medium"));
 
@@ -410,14 +423,15 @@ mod tests {
                 animation_mode: Some(None),
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(cleared_prefs.animation_mode, None);
     }
 
-    #[test]
-    fn test_update_animation_mode_omitted_keeps_existing_value() {
-        let conn = open_test_db();
+    #[tokio::test]
+    async fn test_update_animation_mode_omitted_keeps_existing_value() {
+        let conn = open_test_db().await;
 
         let set_prefs = update_preferences(
             &conn,
@@ -430,6 +444,7 @@ mod tests {
                 animation_mode: Some(Some("subtle".to_string())),
             },
         )
+        .await
         .unwrap();
         assert_eq!(set_prefs.animation_mode.as_deref(), Some("subtle"));
 
@@ -444,6 +459,7 @@ mod tests {
                 animation_mode: None,
             },
         )
+        .await
         .unwrap();
 
         assert_eq!(updated_prefs.density, "compact");

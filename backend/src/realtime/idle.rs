@@ -185,10 +185,8 @@ async fn run_idle_session(
                         // BEFORE publishing. This ensures the DB is up-to-date
                         // when the frontend refetches.
                         let result;
-                        (session, result) = fetch_new_after_idle(
-                            session, user_hash, folder, config,
-                        )
-                        .await;
+                        (session, result) =
+                            fetch_new_after_idle(session, user_hash, folder, config).await;
 
                         // Publish the correct event based on what changed.
                         if result.new_count > 0 {
@@ -282,20 +280,22 @@ async fn fetch_new_after_idle(
 ) -> (async_imap::Session<ImapStream>, ReconcileResult) {
     // Read cached folder state from DB.
     let (cached_modseq, max_cached_uid, cached_count, cached_uid_validity, header_sync) =
-        match db::pool::open_user_db(&config.data_dir, user_hash) {
+        match config.user_db(user_hash).await {
             Ok(conn) => {
-                let header_sync = match db::header_sync::HeaderSync::capture(&conn) {
+                let header_sync = match db::header_sync::HeaderSync::capture(&conn).await {
                     Ok(sync) => sync,
                     Err(e) => {
                         tracing::warn!(error = %e, "IDLE fetch: failed to read header generation");
                         return (session, ReconcileResult::empty());
                     }
                 };
-                let cached = db::folders::get_folder(&conn, folder).ok().flatten();
+                let cached = db::folders::get_folder(&conn, folder).await.ok().flatten();
                 let modseq = cached.as_ref().map(|f| f.highest_modseq).unwrap_or(0);
                 let validity = cached.as_ref().map(|f| f.uid_validity).unwrap_or(0);
-                let max_uid = db::messages::max_uid(&conn, folder).unwrap_or(0);
-                let count = db::messages::count_messages(&conn, folder).unwrap_or(0);
+                let max_uid = db::messages::max_uid(&conn, folder).await.unwrap_or(0);
+                let count = db::messages::count_messages(&conn, folder)
+                    .await
+                    .unwrap_or(0);
                 (modseq, max_uid, count, validity, header_sync)
             }
             Err(e) => {
@@ -319,8 +319,8 @@ async fn fetch_new_after_idle(
 
     // Let list sync reset the namespace before IDLE writes any reused UIDs.
     if cached_uid_validity != 0 && cached_uid_validity != uid_validity {
-        if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
-            let _ = db::folders::invalidate_folder_freshness(&conn, folder);
+        if let Ok(conn) = config.user_db(user_hash).await {
+            let _ = db::folders::invalidate_folder_freshness(&conn, folder).await;
         }
         return (session, ReconcileResult::empty());
     }
@@ -388,13 +388,14 @@ async fn fetch_new_after_idle(
             // Apply flag changes to DB.
             let mut flags_updated = 0u32;
             if !flag_changes.is_empty()
-                && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+                && let Ok(conn) = config.user_db(user_hash).await
             {
                 for (uid, flags) in &flag_changes {
                     let mut sorted = flags.clone();
                     sorted.sort();
                     let flags_csv = sorted.join(",");
                     if db::messages::update_message_flags(&conn, folder, *uid, &flags_csv)
+                        .await
                         .is_ok()
                     {
                         flags_updated += 1;
@@ -407,7 +408,13 @@ async fn fetch_new_after_idle(
             if has_new {
                 let uid_range = format!("{}:*", max_cached_uid + 1);
                 new_count = fetch_and_store_headers(
-                    &mut session, user_hash, folder, config, &uid_range, max_cached_uid, header_sync,
+                    &mut session,
+                    user_hash,
+                    folder,
+                    config,
+                    &uid_range,
+                    max_cached_uid,
+                    header_sync,
                 )
                 .await;
             }
@@ -421,20 +428,25 @@ async fn fetch_new_after_idle(
 
             // Look up the latest message's sender/subject if new messages arrived.
             let (latest_sender, latest_subject) = if new_count > 0 {
-                lookup_latest_message(config, user_hash, folder)
+                lookup_latest_message(config, user_hash, folder).await
             } else {
                 (None, None)
             };
 
             // Update folder sync status with new modseq.
-            if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
-                && let Ok(transaction) = header_sync.begin_write(&conn)
+            if let Ok(conn) = config.user_db(user_hash).await
+                && let Ok(transaction) = header_sync.begin_write(&conn).await
             {
                 let _ = db::folders::update_folder_sync_status(
-                    &conn, folder, uid_validity, server_exists, server_modseq,
-                );
-                let _ = db::folders::refresh_unread_count(&conn, folder);
-                let _ = transaction.commit();
+                    &transaction,
+                    folder,
+                    uid_validity,
+                    server_exists,
+                    server_modseq,
+                )
+                .await;
+                let _ = db::folders::refresh_unread_count(&transaction, folder).await;
+                let _ = transaction.commit().await;
             }
 
             if flags_updated > 0 || new_count > 0 || deleted_count > 0 {
@@ -448,30 +460,33 @@ async fn fetch_new_after_idle(
                 );
             }
 
-            return (session, ReconcileResult {
-                new_count,
-                flags_updated,
-                deleted_count,
-                latest_sender,
-                latest_subject,
-            });
+            return (
+                session,
+                ReconcileResult {
+                    new_count,
+                    flags_updated,
+                    deleted_count,
+                    latest_sender,
+                    latest_subject,
+                },
+            );
         }
         // CHANGEDSINCE fetch failed — fall through to full scan below.
     }
 
     // ── Fallback: full UID scan (no CONDSTORE) ───────────────────────
-    let cached_uids: std::collections::HashSet<u32> =
-        match db::pool::open_user_db(&config.data_dir, user_hash) {
-            Ok(conn) => {
-                let uids_flags =
-                    db::messages::get_all_uids_and_flags(&conn, folder).unwrap_or_default();
-                uids_flags.iter().map(|(uid, _)| *uid).collect()
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "IDLE fetch: failed to open DB for fallback");
-                return (session, ReconcileResult::empty());
-            }
-        };
+    let cached_uids: std::collections::HashSet<u32> = match config.user_db(user_hash).await {
+        Ok(conn) => {
+            let uids_flags = db::messages::get_all_uids_and_flags(&conn, folder)
+                .await
+                .unwrap_or_default();
+            uids_flags.iter().map(|(uid, _)| *uid).collect()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "IDLE fetch: failed to open DB for fallback");
+            return (session, ReconcileResult::empty());
+        }
+    };
 
     // Fetch all UIDs from server.
     let imap_uids: Option<std::collections::HashSet<u32>> =
@@ -510,7 +525,13 @@ async fn fetch_new_after_idle(
     if has_new {
         let uid_range = format!("{}:*", max_cached_uid + 1);
         new_count = fetch_and_store_headers(
-            &mut session, user_hash, folder, config, &uid_range, max_cached_uid, header_sync,
+            &mut session,
+            user_hash,
+            folder,
+            config,
+            &uid_range,
+            max_cached_uid,
+            header_sync,
         )
         .await;
     }
@@ -523,29 +544,37 @@ async fn fetch_new_after_idle(
         .filter(|uid| !imap_uids.contains(uid))
         .collect();
     if !deleted_uids.is_empty()
-        && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+        && let Ok(conn) = config.user_db(user_hash).await
     {
         for uid in &deleted_uids {
-            if db::messages::delete_message(&conn, folder, *uid).is_ok() {
+            if db::messages::delete_message(&conn, folder, *uid)
+                .await
+                .is_ok()
+            {
                 deleted_count += 1;
             }
         }
     }
 
     // Update folder sync status.
-    if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
-        && let Ok(transaction) = header_sync.begin_write(&conn)
+    if let Ok(conn) = config.user_db(user_hash).await
+        && let Ok(transaction) = header_sync.begin_write(&conn).await
     {
         let _ = db::folders::update_folder_sync_status(
-            &conn, folder, uid_validity, server_exists, server_modseq,
-        );
-        let _ = db::folders::refresh_unread_count(&conn, folder);
-        let _ = transaction.commit();
+            &transaction,
+            folder,
+            uid_validity,
+            server_exists,
+            server_modseq,
+        )
+        .await;
+        let _ = db::folders::refresh_unread_count(&transaction, folder).await;
+        let _ = transaction.commit().await;
     }
 
     // Look up the latest message's sender/subject if new messages arrived.
     let (latest_sender, latest_subject) = if new_count > 0 {
-        lookup_latest_message(config, user_hash, folder)
+        lookup_latest_message(config, user_hash, folder).await
     } else {
         (None, None)
     };
@@ -560,29 +589,32 @@ async fn fetch_new_after_idle(
         );
     }
 
-    (session, ReconcileResult {
-        new_count,
-        flags_updated: 0,
-        deleted_count,
-        latest_sender,
-        latest_subject,
-    })
+    (
+        session,
+        ReconcileResult {
+            new_count,
+            flags_updated: 0,
+            deleted_count,
+            latest_sender,
+            latest_subject,
+        },
+    )
 }
 
 /// Look up the most recent message in the DB for sender/subject details.
-fn lookup_latest_message(
+async fn lookup_latest_message(
     config: &AppConfig,
     user_hash: &str,
     folder: &str,
 ) -> (Option<String>, Option<String>) {
-    let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) else {
+    let Ok(conn) = config.user_db(user_hash).await else {
         return (None, None);
     };
-    let max_uid = db::messages::max_uid(&conn, folder).unwrap_or(0);
+    let max_uid = db::messages::max_uid(&conn, folder).await.unwrap_or(0);
     if max_uid == 0 {
         return (None, None);
     }
-    match db::messages::get_single_message(&conn, folder, max_uid) {
+    match db::messages::get_single_message(&conn, folder, max_uid).await {
         Ok(Some(msg)) => {
             let sender = if !msg.from_name.is_empty() {
                 Some(msg.from_name)
@@ -643,9 +675,9 @@ async fn fetch_and_store_headers(
 
     let mut new_count = 0u32;
     if let Some(fetches) = fetches
-        && let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash)
+        && let Ok(conn) = config.user_db(user_hash).await
     {
-        let transaction = match header_sync.begin_write(&conn) {
+        let transaction = match header_sync.begin_write(&conn).await {
             Ok(transaction) => transaction,
             Err(e) => {
                 tracing::debug!(error = %e, "IDLE fetch: discarded stale headers");
@@ -661,8 +693,8 @@ async fn fetch_and_store_headers(
 
             // Parse threading headers.
             let raw_header_bytes = fetch.header();
-            let parsed_threading = raw_header_bytes
-                .and_then(|raw| mail_parser::MessageParser::default().parse(raw));
+            let parsed_threading =
+                raw_header_bytes.and_then(|raw| mail_parser::MessageParser::default().parse(raw));
 
             let (subject, from, to, cc, date) = if let Some(env) = fetch.envelope() {
                 let subject = env
@@ -757,7 +789,7 @@ async fn fetch_and_store_headers(
             let flags_csv = flags.join(",");
 
             if let Err(e) = db::messages::upsert_message(
-                &conn,
+                &transaction,
                 folder,
                 uid,
                 message_id.as_deref(),
@@ -774,19 +806,27 @@ async fn fetch_and_store_headers(
                 has_attach,
                 "",
                 reaction.as_deref(),
-            ) {
+            )
+            .await
+            {
                 tracing::warn!(uid = uid, error = %e, "IDLE fetch: failed to upsert message");
             } else {
                 // Populate denormalized known_addresses table.
                 if let Err(e) = db::contacts::populate_known_addresses(
-                    &conn, from_address, from_name, &to_json, &cc_json,
-                ) {
+                    &transaction,
+                    from_address,
+                    from_name,
+                    &to_json,
+                    &cc_json,
+                )
+                .await
+                {
                     tracing::warn!(uid = uid, error = %e, "IDLE fetch: failed to populate known addresses");
                 }
                 new_count += 1;
             }
         }
-        if let Err(e) = transaction.commit() {
+        if let Err(e) = transaction.commit().await {
             tracing::warn!(error = %e, "IDLE fetch: failed to commit headers");
             return 0;
         }
@@ -841,11 +881,15 @@ async fn fetch_uids_and_remove_deleted(
     };
 
     let mut deleted_count = 0u32;
-    if let Ok(conn) = db::pool::open_user_db(&config.data_dir, user_hash) {
-        let cached = db::messages::get_all_uids_and_flags(&conn, folder).unwrap_or_default();
+    if let Ok(conn) = config.user_db(user_hash).await {
+        let cached = db::messages::get_all_uids_and_flags(&conn, folder)
+            .await
+            .unwrap_or_default();
         for (uid, _) in &cached {
             if !imap_uids.contains(uid)
-                && db::messages::delete_message(&conn, folder, *uid).is_ok()
+                && db::messages::delete_message(&conn, folder, *uid)
+                    .await
+                    .is_ok()
             {
                 deleted_count += 1;
             }

@@ -1,0 +1,83 @@
+# Create oxi-database Secret separately, with a DATABASE_URL key. Do not commit credentials.
+# Example URL (use your host/CA): postgres://oxi:password@postgres.example/oxi?sslmode=verify-full&sslrootcert=/etc/postgres-ca/ca.crt
+# Mount a CA Secret at /etc/postgres-ca when using a private CA.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oxi-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oxi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: oxi
+  template:
+    metadata:
+      labels:
+        app: oxi
+    spec:
+      containers:
+        - name: oxi
+          # Build/publish a version containing PostgreSQL support before deploying.
+          image: oxi-postgres:local
+          ports:
+            - containerPort: 3001
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oxi-database
+                  key: DATABASE_URL
+            - name: IMAP_HOST
+              value: mail.example.com
+            - name: SMTP_HOST
+              value: mail.example.com
+            - name: ENVIRONMENT
+              value: production
+            - name: DATA_DIR
+              value: /data
+            - name: DATABASE_MAX_CONNECTIONS
+              value: "10"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: 3001
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+          startupProbe:
+            httpGet:
+              path: /api/ready
+              port: 3001
+            failureThreshold: 60
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: oxi-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oxi
+spec:
+  selector:
+    app: oxi
+  ports:
+    - port: 3001
+      targetPort: 3001

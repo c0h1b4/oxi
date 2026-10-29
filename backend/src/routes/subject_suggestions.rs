@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::session::SessionState;
 use crate::config::AppConfig;
-use crate::db::{messages, pool::UserDb};
+use crate::db::messages;
 use crate::error::AppError;
 
 #[derive(Deserialize)]
@@ -25,10 +25,15 @@ pub async fn suggest_subjects(
     Query(params): Query<SubjectSuggestionsParams>,
 ) -> Result<Json<SubjectSuggestionsResponse>, AppError> {
     if params.q.trim().chars().count() < 2 {
-        return Ok(Json(SubjectSuggestionsResponse { suggestions: vec![] }));
+        return Ok(Json(SubjectSuggestionsResponse {
+            suggestions: vec![],
+        }));
     }
-    let suggestions = UserDb::new(&config.data_dir, &session.user_hash)
-        .run(move |conn| messages::suggest_subjects(conn, &params.q))
+    let database = config
+        .user_db(&session.user_hash)
+        .await
+        .map_err(AppError::InternalError)?;
+    let suggestions = messages::suggest_subjects(&database, &params.q)
         .await
         .map_err(AppError::InternalError)?;
     Ok(Json(SubjectSuggestionsResponse { suggestions }))
