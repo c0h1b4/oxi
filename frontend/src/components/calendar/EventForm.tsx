@@ -189,7 +189,7 @@ export function EventForm() {
 
   return createPortal(
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       <AnimatedDiv
         data-testid="calendar-event-form-overlay-transition"
         variants={overlayMotionProps}
@@ -206,7 +206,7 @@ export function EventForm() {
         initial={contentMotionProps.initial}
         animate={contentMotionProps.animate}
         exit={contentMotionProps.exit}
-        className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-xl"
+        className="relative z-10 w-full min-w-0 max-w-lg max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-lg border border-border bg-background p-4 shadow-xl sm:max-h-[90dvh] sm:p-6"
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">
@@ -216,6 +216,7 @@ export function EventForm() {
             variant="ghost"
             size="icon-sm"
             onClick={closeEventForm}
+            aria-label="Close event form"
             className="text-muted-foreground"
           >
             <X className="size-4" />
@@ -253,7 +254,7 @@ export function EventForm() {
           </div>
 
           {/* Date/time inputs */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="event-start">Start</Label>
               <Input
@@ -328,7 +329,7 @@ export function EventForm() {
           {/* Color */}
           <div className="space-y-1.5">
             <Label>Color</Label>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {EVENT_COLORS.map((c) => (
                 <button
                   key={c.value}

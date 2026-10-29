@@ -86,10 +86,12 @@ export default function MailPage() {
   return (
     <WsContext.Provider value={wsContextValue}>
       <PreferencesLoader />
-      {showBanner && <NotificationBanner onEnable={requestPermission} onDismiss={dismissBanner} />}
-      <div className="flex h-dvh w-full overflow-hidden">
-        <NavRail />
-        <div className="relative min-w-0 flex-1">{content}</div>
+      <div className="flex h-dvh w-full flex-col overflow-hidden">
+        {showBanner && <NotificationBanner onEnable={requestPermission} onDismiss={dismissBanner} />}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <NavRail />
+          <div className="relative min-h-0 min-w-0 flex-1">{content}</div>
+        </div>
       </div>
       <KeyboardShortcuts />
       <CommandPalette />

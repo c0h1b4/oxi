@@ -238,7 +238,7 @@ function RecipientModal({
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
+                  className="fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-1rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg sm:rounded-lg"
                 >
                   <div className="flex flex-col space-y-1.5 text-center sm:text-left">
                     <Dialog.Title className="text-lg font-semibold leading-none tracking-tight">

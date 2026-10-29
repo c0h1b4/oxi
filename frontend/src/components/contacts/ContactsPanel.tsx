@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { useState, useCallback, useMemo, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
+  ArrowLeft,
   Search,
   UserPlus,
   Users,
@@ -159,12 +160,12 @@ export function ContactsPanel() {
       initial={panelTransition.initial}
       animate={panelTransition.animate}
       exit={panelTransition.exit}
-      className="flex h-full min-w-0 flex-1"
+      className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden"
     >
       {/* Contact list */}
-      <div className="flex w-[360px] shrink-0 flex-col border-r border-border">
+      <div className={`min-h-0 w-full min-w-0 flex-col border-border md:flex md:w-80 md:shrink-0 md:border-r lg:w-[360px] ${selectedContact ? "hidden" : "flex"}`}>
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-3 md:px-4">
           <div className="flex items-center gap-2">
             <Users className="size-5 text-primary" />
             <h1 className="text-base font-semibold text-foreground">
@@ -246,13 +247,13 @@ export function ContactsPanel() {
               All
             </button>
             {groups.map((g) => (
-              <div key={g.id} className="group relative flex items-center">
+              <div key={g.id} className="group relative flex max-w-full items-center">
                 <button
                   type="button"
                   onClick={() =>
                     setActiveGroupId(activeGroupId === g.id ? null : g.id)
                   }
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  className={`min-w-0 [overflow-wrap:anywhere] rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
                     activeGroupId === g.id
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-accent"
@@ -261,7 +262,7 @@ export function ContactsPanel() {
                   {g.name}{" "}
                   <span className="opacity-60">({g.member_count})</span>
                 </button>
-                <div className="ml-0.5 hidden items-center gap-0.5 group-hover:flex">
+                <div className="ml-0.5 flex shrink-0 items-center gap-0.5 md:hidden md:group-hover:flex md:group-focus-within:flex">
                   <button
                     type="button"
                     onClick={(e) => {
@@ -306,7 +307,7 @@ export function ContactsPanel() {
         </div>
 
         {/* Contact list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {isLoading && (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -378,7 +379,15 @@ export function ContactsPanel() {
       </div>
 
       {/* Detail pane */}
-      <div className="flex min-w-0 flex-1 items-center justify-center">
+      <div className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:flex ${selectedContact ? "flex" : "hidden"}`}>
+        {selectedContact && (
+          <div className="sticky top-0 z-10 border-b border-border bg-background p-2 md:hidden">
+            <Button variant="ghost" onClick={() => setSelectedContact(null)}>
+              <ArrowLeft className="size-4" />
+              Back to contacts
+            </Button>
+          </div>
+        )}
         <AnimatePresence mode="wait" initial={false}>
           {selectedContact ? (
             <AnimatedDiv
@@ -388,7 +397,7 @@ export function ContactsPanel() {
               initial={panelTransition.initial}
               animate={panelTransition.animate}
               exit={panelTransition.exit}
-              className="w-full max-w-lg p-6"
+              className="mx-auto my-auto w-full max-w-lg shrink-0 p-3 md:p-6"
             >
               <ContactCard
                 contact={selectedContact}
@@ -405,7 +414,7 @@ export function ContactsPanel() {
               initial={panelTransition.initial}
               animate={panelTransition.animate}
               exit={panelTransition.exit}
-              className="flex flex-col items-center gap-2"
+              className="m-auto flex flex-col items-center gap-2 p-4 text-center"
             >
               <Users className="size-12 text-muted-foreground/30" />
               <p className="text-sm text-muted-foreground">

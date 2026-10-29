@@ -51,8 +51,8 @@ export function CalendarHeader() {
   ];
 
   return (
-    <div className="flex items-center justify-between border-b border-border px-4 py-3">
-      <div className="flex items-center gap-3">
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-3 sm:px-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex items-center gap-2">
           <Calendar className="size-5 text-primary" />
           <h1 className="text-base font-semibold text-foreground">Calendar</h1>
@@ -62,10 +62,10 @@ export function CalendarHeader() {
           <Button variant="outline" size="sm" onClick={goToday}>
             Today
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={goPrev}>
+          <Button variant="ghost" size="icon-sm" onClick={goPrev} aria-label="Previous period">
             <ChevronLeft className="size-4" />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={goNext}>
+          <Button variant="ghost" size="icon-sm" onClick={goNext} aria-label="Next period">
             <ChevronRight className="size-4" />
           </Button>
         </div>
@@ -81,6 +81,7 @@ export function CalendarHeader() {
               key={m.value}
               type="button"
               onClick={() => setViewMode(m.value)}
+              aria-pressed={viewMode === m.value}
               className={cn(
                 "px-3 py-1 text-xs font-medium transition-colors first:rounded-l-md last:rounded-r-md",
                 viewMode === m.value

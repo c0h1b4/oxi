@@ -241,7 +241,7 @@ export const MessageListItem = memo(function MessageListItem({
         </button>
 
         {/* Sender */}
-        <span className={cn("w-32 shrink-0 truncate font-normal", isFlagged ? "text-primary" : "text-muted-foreground")}>{sender}</span>
+        <span className={cn("w-16 shrink-0 truncate font-normal sm:w-24 xl:w-32", isFlagged ? "text-primary" : "text-muted-foreground")}>{sender}</span>
 
         {/* Dash separator */}
         <span className="shrink-0 text-muted-foreground">&mdash;</span>

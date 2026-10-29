@@ -77,7 +77,7 @@ export function CreateFolderDialog({ open, onClose }: CreateFolderDialogProps) {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-6 shadow-lg"
+                className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-1rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-6 shadow-lg"
               >
                 <Dialog.Title className="mb-4 text-base font-semibold text-foreground">
                   Create new folder

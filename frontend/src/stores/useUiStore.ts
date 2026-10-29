@@ -57,6 +57,7 @@ export interface UiState {
   sidebarWidth: number;
   messageListWidth: number;
   readingPaneVisible: boolean;
+  sidebarOpen: boolean;
   density: "compact" | "comfortable";
   theme: ThemeMode;
   searchQuery: string;
@@ -80,6 +81,7 @@ export interface UiState {
   setSidebarWidth: (width: number) => void;
   setMessageListWidth: (width: number) => void;
   setReadingPaneVisible: (visible: boolean) => void;
+  setSidebarOpen: (open: boolean) => void;
   setDensity: (density: "compact" | "comfortable") => void;
   setTheme: (theme: ThemeMode) => void;
   setSearchQuery: (query: string) => void;
@@ -108,6 +110,7 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   sidebarWidth: initial.sidebarWidth,
   messageListWidth: initial.messageListWidth,
   readingPaneVisible: true,
+  sidebarOpen: false,
   density: "comfortable",
   theme: "system",
   searchQuery: "",
@@ -126,9 +129,9 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
   searchResultCount: null,
 
   setActiveTag: (tagId) =>
-    set({ activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
+    set({ sidebarOpen: false, activeTagId: tagId, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   setActiveFolder: (folder) =>
-    set({ activeFolder: folder, activeTagId: null, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
+    set({ sidebarOpen: false, activeFolder: folder, activeTagId: null, selectedMessageUid: null, selectedMessageUids: [], bulkSelectMode: false }),
   selectMessage: (uid) => set({ selectedMessageUid: uid }),
   setSidebarWidth: (width) => {
     saveSettings({ sidebarWidth: width });
@@ -139,12 +142,13 @@ export const useUiStore: UseBoundStore<StoreApi<UiState>> = create<UiState>((set
     set({ messageListWidth: width });
   },
   setReadingPaneVisible: (visible) => set({ readingPaneVisible: visible }),
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setDensity: (density) => set({ density }),
   setTheme: (theme) => set({ theme }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setSearchActive: (active) => set({ searchActive: active }),
   clearSearch: () => set({ searchQuery: "", searchActive: false, searchResultCount: null }),
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) => set({ viewMode: mode, sidebarOpen: false }),
   toggleBulkSelect: (uid) =>
     set((state) => {
       const exists = state.selectedMessageUids.includes(uid);

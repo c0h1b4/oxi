@@ -93,7 +93,8 @@ export function WeekView({ weekStartsOn, timeFormat }: WeekViewProps) {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto">
+      <div className="flex min-h-0 min-w-[640px] flex-1 flex-col overflow-hidden">
       {/* Day headers */}
       <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border">
         <div className="border-r border-border" />
@@ -238,6 +239,7 @@ export function WeekView({ weekStartsOn, timeFormat }: WeekViewProps) {
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );

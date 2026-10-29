@@ -26,13 +26,14 @@ function Toggle({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border p-4">
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-4">
       <div>
         <div className="text-sm font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
       <button
         role="switch"
+        aria-label={label}
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         disabled={disabled}
@@ -145,9 +146,9 @@ export function NotificationSettings() {
                   checked={isChecked}
                   onChange={(e) => handleFolderToggle(folder.name, e.target.checked)}
                   disabled={!prefs.enabled}
-                  className="size-4 rounded border-border"
+                  className="size-4 shrink-0 rounded border-border"
                 />
-                {folder.name}
+                <span className="min-w-0 [overflow-wrap:anywhere]">{folder.name}</span>
               </label>
             );
           })}

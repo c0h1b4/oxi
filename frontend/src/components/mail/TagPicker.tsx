@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { Popover } from "radix-ui";
+
+import { useState } from "react";
 import { Tag, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useClickOutside } from "@/hooks/useClickOutside";
 import {
   useTags,
   useMessageTags,
@@ -18,7 +19,6 @@ interface TagPickerProps {
 
 export function TagPicker({ folder, uid }: TagPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const { data: tagsData } = useTags();
   const { data: messageTagsData } = useMessageTags(folder, uid);
@@ -30,8 +30,6 @@ export function TagPicker({ folder, uid }: TagPickerProps) {
     (messageTagsData?.tags ?? []).map((t) => t.id),
   );
 
-  const closeMenu = useCallback(() => setIsOpen(false), []);
-  useClickOutside(menuRef, closeMenu, isOpen);
 
   const handleToggle = (tagId: string) => {
     if (appliedTagIds.has(tagId)) {
@@ -42,10 +40,12 @@ export function TagPicker({ folder, uid }: TagPickerProps) {
   };
 
   return (
-    <div className="relative" ref={menuRef}>
+    <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
+      <div className="relative">
+      <Popover.Trigger asChild>
       <button
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
+        aria-label="Tags"
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
           "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -55,9 +55,10 @@ export function TagPicker({ folder, uid }: TagPickerProps) {
         <Tag className="size-4" />
         <span className="hidden xl:inline">Tags</span>
       </button>
+      </Popover.Trigger>
 
       {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-md border border-border bg-popover py-1 shadow-md">
+        <Popover.Portal><Popover.Content sideOffset={4} collisionPadding={8} className="z-50 max-h-[var(--radix-popover-content-available-height)] w-48 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-md">
           {allTags.length === 0 && (
             <span className="block px-3 py-1.5 text-sm text-muted-foreground">
               No tags yet
@@ -83,8 +84,9 @@ export function TagPicker({ folder, uid }: TagPickerProps) {
               </button>
             );
           })}
-        </div>
+        </Popover.Content></Popover.Portal>
       )}
-    </div>
+      </div>
+    </Popover.Root>
   );
 }

@@ -153,10 +153,10 @@ export function ReadingPane() {
 
   const paneContent = (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full min-w-0 w-full flex-col overflow-y-auto"
     >
       {/* Header area */}
-      <div className="shrink-0 space-y-1 overflow-x-hidden border-b border-border p-4">
+      <div className="shrink-0 space-y-1 border-b border-border p-3 [overflow-wrap:anywhere] sm:p-4">
         <h2 className="text-lg font-bold leading-tight">{data.subject}</h2>
 
         <div className="text-sm text-foreground">
@@ -196,7 +196,7 @@ export function ReadingPane() {
         )}
 
         {/* View toggle buttons */}
-        <div className="flex gap-1 pt-1">
+        <div className="flex flex-wrap gap-1 pt-1">
           {/* Plain text / HTML toggle */}
           <button
             type="button"
@@ -300,7 +300,7 @@ export function ReadingPane() {
 
       {/* Remote resources banner */}
       {showRemoteBanner && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-4 py-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-4 py-2">
           <ShieldAlert className="size-4 shrink-0 text-muted-foreground" />
           <span className="flex-1 text-xs text-muted-foreground">
             To protect your privacy, remote resources have been blocked.
@@ -320,7 +320,7 @@ export function ReadingPane() {
       )}
 
       {/* Body area — fills remaining space */}
-      <div className="min-h-0 flex-1" key={data.uid}>
+      <div className="min-h-48 flex-1" key={data.uid}>
         {showHeaders ? (
           <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-foreground">
             {data.raw_headers || "No headers available"}
