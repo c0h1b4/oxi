@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
+import { Dialog } from "radix-ui";
+import { ArrowLeft, Menu, X } from "lucide-react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/useUiStore";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
 import { SearchBar } from "@/components/mail/SearchBar";
@@ -106,6 +110,12 @@ export function ThreePanelLayout({
   readingPane,
 }: ThreePanelLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const splitView = useMediaQuery("(min-width: 1024px)");
+  const persistentSidebar = useMediaQuery("(min-width: 1280px)");
+  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
+  const selectMessage = useUiStore((s) => s.selectMessage);
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const messageListWidth = useUiStore((s) => s.messageListWidth);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
@@ -117,6 +127,13 @@ export function ThreePanelLayout({
   const hasValidCommittedSearch = isValidCommittedSearch(searchQuery);
   const showSearchResults = searchActive && hasValidCommittedSearch;
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const showReadingPane = splitView ? readingPaneVisible : selectedMessageUid !== null;
+  const showMessageList = splitView || selectedMessageUid === null;
+  const effectiveSidebarWidth = persistentSidebar ? sidebarWidth : 0;
+
+  useEffect(() => {
+    if (persistentSidebar) setSidebarOpen(false);
+  }, [persistentSidebar, setSidebarOpen]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -146,7 +163,7 @@ export function ThreePanelLayout({
 
     const remaining = Math.floor(
       containerWidth -
-      sidebarWidth -
+      effectiveSidebarWidth -
       RESIZE_HANDLE_BUDGET -
       MIN_READING_PANE_WIDTH,
     );
@@ -155,7 +172,7 @@ export function ThreePanelLayout({
       MIN_MESSAGE_LIST_WIDTH,
       Math.min(MAX_MESSAGE_LIST_WIDTH, remaining),
     );
-  }, [containerWidth, readingPaneVisible, sidebarWidth]);
+  }, [containerWidth, readingPaneVisible, effectiveSidebarWidth]);
 
   const resolvedMessageListWidth = readingPaneVisible
     ? Math.max(MIN_MESSAGE_LIST_WIDTH, Math.min(messageListWidth, maxMessageListWidth))
@@ -180,28 +197,54 @@ export function ThreePanelLayout({
   );
 
   return (
-    <div ref={containerRef} className="flex h-full min-h-0 w-full overflow-hidden">
-      {/* Folder sidebar */}
-      <aside
-        className="shrink-0 overflow-y-auto bg-sidebar"
-        style={{ width: sidebarWidth }}
-      >
-        {sidebar}
-      </aside>
-
-      {/* Resize handle: sidebar | message list */}
-      <ResizeHandle onDrag={handleSidebarDrag} />
+    <div ref={containerRef} className="relative flex h-full min-h-0 w-full overflow-hidden">
+      {persistentSidebar ? (
+        <>
+          <aside aria-label="Folders" className="shrink-0 overflow-y-auto bg-sidebar" style={{ width: sidebarWidth }}>
+            {sidebar}
+          </aside>
+          <ResizeHandle onDrag={handleSidebarDrag} />
+        </>
+      ) : (
+        <Dialog.Root open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <Dialog.Trigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute left-2 top-1 z-10"
+              aria-label="Open folders"
+            >
+              <Menu className="size-5" />
+            </Button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
+            <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-80 max-w-[calc(100%-2rem)] flex-col bg-sidebar shadow-xl">
+              <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+                <Dialog.Title className="font-semibold">Folders</Dialog.Title>
+                <Dialog.Description className="sr-only">Choose an account, folder, or tag.</Dialog.Description>
+                <Dialog.Close asChild>
+                  <Button variant="ghost" size="icon" aria-label="Close folders"><X className="size-5" /></Button>
+                </Dialog.Close>
+              </div>
+              <div className="min-h-0 flex-1">{sidebar}</div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
 
       {/* Center panel — search bar + message list or search results */}
       <main
-        className={
-          readingPaneVisible
-            ? "flex shrink-0 flex-col overflow-hidden border-x border-border"
-            : "flex min-w-0 flex-1 flex-col overflow-hidden border-l border-border"
-        }
-        style={readingPaneVisible ? { width: resolvedMessageListWidth ?? messageListWidth } : undefined}
+        ref={listRef}
+        tabIndex={-1}
+        aria-label="Messages"
+        hidden={!showMessageList}
+        className={!showMessageList ? "hidden" : splitView && readingPaneVisible
+          ? "flex min-w-0 shrink-0 flex-col overflow-hidden border-x border-border"
+          : "flex min-w-0 flex-1 flex-col overflow-hidden border-l border-border"}
+        style={splitView && readingPaneVisible ? { width: resolvedMessageListWidth ?? messageListWidth } : undefined}
       >
-        <SearchBar />
+        <div className={persistentSidebar ? "shrink-0" : "shrink-0 pl-12"}><SearchBar /></div>
         <AnimatePresence mode="wait" initial={false}>
           {showSearchResults ? (
             <AnimatedDiv
@@ -223,7 +266,7 @@ export function ThreePanelLayout({
               initial={centerTransition.initial}
               animate={centerTransition.animate}
               exit={centerTransition.exit}
-              className="flex-1 overflow-y-auto"
+              className="min-h-0 flex-1 overflow-y-auto"
             >
               {messageList}
             </AnimatedDiv>
@@ -233,7 +276,7 @@ export function ThreePanelLayout({
 
       {/* Resize handle: message list | reading pane */}
       <AnimatePresence initial={false}>
-        {readingPaneVisible && (
+        {showReadingPane && (
           <AnimatedDiv
             key="reading-pane"
             data-testid="three-panel-reading-pane-transition"
@@ -243,11 +286,22 @@ export function ThreePanelLayout({
             exit={readingPaneTransition.exit}
             className="flex min-h-0 min-w-0 flex-1"
           >
-            <ResizeHandle onDrag={handleMessageListDrag} />
+            {splitView && <ResizeHandle onDrag={handleMessageListDrag} />}
             <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {!splitView && (
+                <div className="flex h-12 shrink-0 items-center border-b border-border pl-14">
+                  <Button variant="ghost" onClick={() => {
+                    selectMessage(null);
+                    requestAnimationFrame(() => listRef.current?.focus());
+                  }}>
+                    <ArrowLeft className="size-4" />
+                    {showSearchResults ? "Back to results" : "Back to messages"}
+                  </Button>
+                </div>
+              )}
               <MessageActionBar />
               {selectedMessageUid !== null ? (
-                <div className="flex min-h-0 flex-1">{readingPane}</div>
+                <div className="flex min-h-0 min-w-0 flex-1">{readingPane}</div>
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
                   <span className="text-2xl font-bold tracking-tight text-muted-foreground/40">

@@ -53,7 +53,7 @@ function ToolbarButton({
       disabled={disabled}
       title={title}
       className={cn(
-        "rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30",
+        "shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30",
         active && "bg-accent text-foreground",
       )}
     >
@@ -102,7 +102,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          `prose prose-sm dark:prose-invert max-w-none ${compact ? "min-h-[100px]" : "min-h-[200px]"} outline-none px-4 py-3`,
+          `prose prose-sm dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere] [&_img]:max-w-full ${compact ? "min-h-[100px]" : "min-h-[200px]"} outline-none px-4 py-3`,
       },
     },
   });
@@ -151,9 +151,9 @@ export function RichTextEditor({
   if (!editor) return null;
 
   return (
-    <div className={cn("flex flex-col", className)}>
+    <div className={cn("flex min-h-0 min-w-0 flex-col", className)}>
       {/* Toolbar */}
-      <div className={cn("flex items-center gap-0.5 border-b border-border/50 px-3", compact ? "py-1" : "py-1.5")}>
+      <div className={cn("flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border/50 px-3", compact ? "py-1" : "py-1.5")}>
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive("bold")}
@@ -242,7 +242,7 @@ export function RichTextEditor({
       )}
 
       {/* Editor */}
-      <div className="flex-1 overflow-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         <EditorContent editor={editor} />
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { Popover } from "radix-ui";
 import { AnimatePresence } from "framer-motion";
 import {
   Mail,
@@ -20,7 +21,6 @@ import {
   useDeleteMessage,
 } from "@/hooks/useMessages";
 import { useFolders } from "@/hooks/useFolders";
-import { useClickOutside } from "@/hooks/useClickOutside";
 import { useTags, useBulkAddTag } from "@/hooks/useTags";
 import { createFadeSlideVariants } from "@/lib/motion/variants";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
@@ -37,8 +37,6 @@ export function BulkActionBar() {
   const [isBusy, setIsBusy] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
-  const moveMenuRef = useRef<HTMLDivElement>(null);
-  const tagMenuRef = useRef<HTMLDivElement>(null);
 
   const { data: foldersData } = useFolders();
   const folders = foldersData?.folders ?? [];
@@ -48,10 +46,6 @@ export function BulkActionBar() {
   const allTags = tagsData?.tags ?? [];
   const bulkAddTag = useBulkAddTag();
 
-  const closeMoveMenu = useCallback(() => setMoveMenuOpen(false), []);
-  const closeTagMenu = useCallback(() => setTagMenuOpen(false), []);
-  useClickOutside(moveMenuRef, closeMoveMenu, moveMenuOpen);
-  useClickOutside(tagMenuRef, closeTagMenu, tagMenuOpen);
 
   const runBulkAction = useCallback(
     async (
@@ -201,12 +195,12 @@ export function BulkActionBar() {
       </button>
 
       {/* Move to folder */}
-      <div className="relative" ref={moveMenuRef}>
+      <Popover.Root open={moveMenuOpen} onOpenChange={setMoveMenuOpen}>
+        <Popover.Trigger asChild>
         <button
           type="button"
           title="Move to folder"
           disabled={isBusy}
-          onClick={() => setMoveMenuOpen((prev) => !prev)}
           className={cn(
             "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
@@ -215,9 +209,10 @@ export function BulkActionBar() {
         >
           <FolderInput className="size-4" />
         </button>
+        </Popover.Trigger>
 
         {moveMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] rounded-md border border-border bg-popover py-1 shadow-md">
+          <Popover.Portal><Popover.Content sideOffset={4} collisionPadding={8} className="z-50 max-h-[var(--radix-popover-content-available-height)] w-48 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-md [overflow-wrap:anywhere]">
             {folders
               .filter((f) => f.name !== activeFolder)
               .map((f) => (
@@ -235,17 +230,17 @@ export function BulkActionBar() {
                 No other folders
               </span>
             )}
-          </div>
+          </Popover.Content></Popover.Portal>
         )}
-      </div>
+      </Popover.Root>
 
       {/* Tag */}
-      <div className="relative" ref={tagMenuRef}>
+      <Popover.Root open={tagMenuOpen} onOpenChange={setTagMenuOpen}>
+        <Popover.Trigger asChild>
         <button
           type="button"
           title="Add tag"
           disabled={isBusy}
-          onClick={() => setTagMenuOpen((prev) => !prev)}
           className={cn(
             "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
@@ -254,9 +249,10 @@ export function BulkActionBar() {
         >
           <Tag className="size-4" />
         </button>
+        </Popover.Trigger>
 
         {tagMenuOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] rounded-md border border-border bg-popover py-1 shadow-md">
+          <Popover.Portal><Popover.Content sideOffset={4} collisionPadding={8} className="z-50 max-h-[var(--radix-popover-content-available-height)] w-48 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-md [overflow-wrap:anywhere]">
             {allTags.map((tag) => (
               <button
                 key={tag.id}
@@ -276,9 +272,9 @@ export function BulkActionBar() {
                 No tags
               </span>
             )}
-          </div>
+          </Popover.Content></Popover.Portal>
         )}
-      </div>
+      </Popover.Root>
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -305,7 +301,7 @@ export function BulkActionBar() {
           initial="initial"
           animate="animate"
           exit="exit"
-          className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5"
+          className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-muted/50 px-3 py-1.5 [@media(pointer:coarse)]:[&_button]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-w-11"
         >
           {actionContent}
         </AnimatedDiv>

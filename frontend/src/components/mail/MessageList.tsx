@@ -148,7 +148,7 @@ function DraftItems() {
                 e.stopPropagation();
                 deleteDraft.mutate(draft.id);
               }}
-              className="hidden shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:flex items-center justify-center"
+              className="flex shrink-0 items-center justify-center rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground md:invisible md:p-0.5 md:group-hover:visible md:group-focus-within:visible [@media(pointer:coarse)]:visible"
               title="Delete draft"
             >
               <X className="size-3" />
@@ -177,7 +177,7 @@ function ToggleReadingPaneButton() {
       aria-label={visible ? "Hide reading pane" : "Show reading pane"}
       onClick={() => setVisible(!visible)}
       className={cn(
-        "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent",
+        "hidden size-6 items-center justify-center rounded transition-colors hover:bg-accent lg:flex",
         !visible && "text-primary",
       )}
     >
@@ -369,10 +369,10 @@ export function MessageList() {
   }, [allSelected, allUids, clearBulkSelection, selectAllMessages]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Header bar */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {/* Select all checkbox */}
           {!isLoading && !isError && messages.length > 0 && (
             <button
@@ -401,11 +401,11 @@ export function MessageList() {
               )}
             </button>
           )}
-          <h2 className="text-sm font-semibold">
+          <h2 className="truncate text-sm font-semibold">
             {isTagView ? `Tag: ${activeTagName ?? "..."}` : formatFolderName(activeFolder)}
           </h2>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <span className="text-xs text-muted-foreground">
             {isLoading && !data ? "\u2026" : `${totalCount} messages`}
           </span>

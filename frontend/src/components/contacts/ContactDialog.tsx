@@ -77,7 +77,7 @@ export function ContactDialog({
   return createPortal(
     <AnimatePresence>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
           {/* Overlay */}
           <AnimatedDiv
             data-testid="contact-dialog-overlay-transition"
@@ -96,7 +96,7 @@ export function ContactDialog({
             initial={contentMotionProps.initial}
             animate={contentMotionProps.animate}
             exit={contentMotionProps.exit}
-            className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-xl"
+            className="relative z-10 max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-md overflow-y-auto overscroll-contain rounded-lg border border-border bg-background p-4 shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:p-6"
           >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">
@@ -159,7 +159,7 @@ export function ContactDialog({
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <Button
               type="button"
               variant="outline"

@@ -229,22 +229,22 @@ export function MessageActionBar() {
       initial="initial"
       animate="animate"
       exit="exit"
-      className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1"
+      className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-2 py-1 [@media(pointer:coarse)]:[&_button]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-w-11"
     >
       {/* Reply */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleReply} aria-label="Reply">
         <Reply className="size-4" />
         <span className="hidden xl:inline">Reply</span>
       </Button>
 
       {/* Reply All — disabled for 1-to-1 conversations */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || isDirectConversation} onClick={handleReplyAll}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || isDirectConversation} onClick={handleReplyAll} aria-label="Reply all">
         <ReplyAll className="size-4" />
         <span className="hidden xl:inline">Reply all</span>
       </Button>
 
       {/* Forward */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleForward}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleForward} aria-label="Forward">
         <Forward className="size-4" />
         <span className="hidden xl:inline">Forward</span>
       </Button>
@@ -252,7 +252,7 @@ export function MessageActionBar() {
       <div className="mx-0.5 h-5 w-px shrink-0 bg-border" />
 
       {/* Delete */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleDelete}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleDelete} aria-label="Delete">
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
@@ -279,7 +279,7 @@ export function MessageActionBar() {
       </Button>
 
       {/* Archive */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive} aria-label="Archive">
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
@@ -355,13 +355,13 @@ export function MessageActionBar() {
       )}
 
       {/* Junk */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk} aria-label="Junk">
         <AlertCircle className="size-4" />
         <span className="hidden xl:inline">Junk</span>
       </Button>
 
       {/* Star/Unstar */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleStar}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleStar} aria-label={isFlagged ? "Unstar" : "Star"}>
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
@@ -390,7 +390,7 @@ export function MessageActionBar() {
       </Button>
 
       {/* Mark read/unread */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleRead}>
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleToggleRead} aria-label={isSeen ? "Mark as unread" : "Mark as read"}>
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span

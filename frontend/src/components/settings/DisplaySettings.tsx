@@ -27,17 +27,18 @@ function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border p-4">
+    <div className="flex flex-col items-start justify-between gap-3 lg:flex-row lg:items-center rounded-lg border border-border p-4">
       <div>
         <div className="text-sm font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <div className="flex rounded-lg border border-border bg-muted/50 p-0.5">
+      <div className="flex max-w-full flex-wrap rounded-lg border border-border bg-muted/50 p-0.5 lg:shrink-0">
         {options.map((opt) => (
           <button
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
+            aria-pressed={value === opt.value}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
               value === opt.value
@@ -211,7 +212,7 @@ export function DisplaySettings() {
           }
         />
 
-        <div className="flex items-center justify-between rounded-lg border border-border p-4">
+        <div className="flex flex-col items-start justify-between gap-3 lg:flex-row lg:items-center rounded-lg border border-border p-4">
           <div>
             <div className="text-sm font-medium">Language</div>
             <p className="mt-0.5 text-xs text-muted-foreground">

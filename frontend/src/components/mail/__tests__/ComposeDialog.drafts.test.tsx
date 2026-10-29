@@ -37,3 +37,32 @@ it("sends a resumed draft with its saved ID and does not save another copy durin
   act(() => send.mock.calls[0][1].onSuccess());
   expect(useComposeStore.getState().draftId).toBeNull();
 });
+
+it("preserves a draft and footer actions when maximizing and restoring", () => {
+  useComposeStore.setState({
+    to: Array.from({ length: 12 }, (_, index) => `recipient${index}@example.com`).join(", "),
+    showCc: true,
+    showBcc: true,
+    attachments: Array.from({ length: 8 }, (_, index) => ({
+      id: `attachment-${index}`,
+      filename: `long-attachment-name-${index}.pdf`,
+      contentType: "application/pdf",
+      size: 1024,
+    })),
+  });
+  render(<ComposeDialog />);
+  const body = screen.getByPlaceholderText("Write your message...");
+  fireEvent.change(body, { target: { value: "Updated draft" } });
+
+  fireEvent.click(screen.getByTitle("Maximize"));
+  expect(screen.getByPlaceholderText("Write your message...")).toBe(body);
+  expect(useComposeStore.getState().body).toBe("Updated draft");
+  expect(screen.getAllByTitle("Remove attachment")).toHaveLength(8);
+  expect(screen.getByText("You are sending to more than 10 recipients.")).toBeTruthy();
+
+  fireEvent.click(screen.getByTitle("Minimize"));
+  fireEvent.click(screen.getByTitle("Save draft (Ctrl+S)"));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ textBody: "Updated draft" }), expect.anything());
+  fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
+});

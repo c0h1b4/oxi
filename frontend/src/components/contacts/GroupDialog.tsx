@@ -30,7 +30,7 @@ function GroupForm({
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
       <AnimatedDiv
         data-testid="group-dialog-overlay-transition"
         variants={overlayMotionProps}
@@ -46,9 +46,9 @@ function GroupForm({
         initial={contentMotionProps.initial}
         animate={contentMotionProps.animate}
         exit={contentMotionProps.exit}
-        className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg"
+        className="relative z-10 max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-sm overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-4 shadow-lg sm:max-h-[calc(100dvh-2rem)] sm:p-6"
       >
-        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        <h2 className="break-words text-lg font-semibold text-foreground">{title}</h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -75,7 +75,7 @@ function GroupForm({
               className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none dark:bg-input/30"
             />
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               type="button"
               variant="outline"

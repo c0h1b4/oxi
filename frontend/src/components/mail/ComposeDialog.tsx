@@ -545,10 +545,10 @@ export function ComposeDialog() {
                     animate="animate"
                     exit="exit"
                     className={cn(
-                      "fixed z-50 flex flex-col rounded-xl border border-border bg-background shadow-2xl",
+                      "fixed z-50 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl",
                       expanded
-                        ? "inset-4 sm:left-20"
-                        : "inset-x-4 bottom-4 top-auto mx-auto max-h-[80vh] w-full max-w-2xl sm:inset-x-auto sm:bottom-8 sm:ml-20"
+                        ? "inset-2 max-h-[calc(100dvh-1rem)] sm:inset-4 sm:left-20 sm:max-h-[calc(100dvh-2rem)]"
+                        : "inset-x-2 bottom-2 max-h-[calc(100dvh-1rem)] sm:inset-x-auto sm:bottom-8 sm:left-20 sm:max-h-[calc(100dvh-4rem)] sm:w-[calc(100%-6rem)] sm:max-w-2xl"
                     )}
                     onKeyDown={handleKeyDown}
                     onDragEnter={handleDragEnter}
@@ -570,7 +570,7 @@ export function ComposeDialog() {
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
               <Dialog.Title className="text-sm font-semibold">
                 New Message
               </Dialog.Title>
@@ -597,169 +597,171 @@ export function ComposeDialog() {
               </div>
             </div>
 
-            {/* Fields */}
-            <div className="flex flex-col border-b border-border">
-              {identities && identities.length > 1 && (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+              {/* Fields */}
+              <div className="flex shrink-0 flex-col border-b border-border">
+                {identities && identities.length > 1 && (
+                  <div className="flex items-center border-b border-border/50 px-4">
+                    <label className="w-12 shrink-0 text-xs text-muted-foreground">
+                      From
+                    </label>
+                    <select
+                      value={fromIdentityId ?? ""}
+                      onChange={(e) => {
+                        const newId = e.target.value ? Number(e.target.value) : null;
+                        setFromIdentityId(newId);
+                        const newIdentity = identities.find((i) => i.id === newId);
+                        const newSig = newIdentity?.signature_html || "";
+                        setSignatureHtml(newSig);
+                        if (signatureEnabled) {
+                          setField("body", replaceSignatureInBody(body, newSig, isHtml, signatureHtml));
+                        }
+                      }}
+                      className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none"
+                    >
+                      {identities.map((identity) => (
+                        <option key={identity.id} value={identity.id}>
+                          {identity.display_name
+                            ? `${identity.display_name} <${identity.email}>`
+                            : identity.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="flex items-center border-b border-border/50 px-4">
                   <label className="w-12 shrink-0 text-xs text-muted-foreground">
-                    From
+                    To
                   </label>
-                  <select
-                    value={fromIdentityId ?? ""}
-                    onChange={(e) => {
-                      const newId = e.target.value ? Number(e.target.value) : null;
-                      setFromIdentityId(newId);
-                      const newIdentity = identities.find((i) => i.id === newId);
-                      const newSig = newIdentity?.signature_html || "";
-                      setSignatureHtml(newSig);
-                      if (signatureEnabled) {
-                        setField("body", replaceSignatureInBody(body, newSig, isHtml, signatureHtml));
+                  <RecipientInput
+                    inputRef={toInputRef}
+                    value={to}
+                    onChange={(v) => setField("to", v)}
+                    placeholder="Recipients"
+                  />
+                  <button
+                    className="ml-2 shrink-0 whitespace-nowrap text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      if (!showCc && !showBcc) {
+                        setShowCc(true);
+                      } else {
+                        setShowCc(!showCc);
+                        setShowBcc(!showBcc);
                       }
                     }}
-                    className="flex-1 bg-transparent py-2 text-sm outline-none"
                   >
-                    {identities.map((identity) => (
-                      <option key={identity.id} value={identity.id}>
-                        {identity.display_name
-                          ? `${identity.display_name} <${identity.email}>`
-                          : identity.email}
-                      </option>
-                    ))}
-                  </select>
+                    {showCc || showBcc ? (
+                      <ChevronUp className="size-3.5" />
+                    ) : (
+                      <span>Cc Bcc</span>
+                    )}
+                  </button>
                 </div>
-              )}
-              <div className="flex items-center border-b border-border/50 px-4">
-                <label className="w-12 shrink-0 text-xs text-muted-foreground">
-                  To
-                </label>
-                <RecipientInput
-                  inputRef={toInputRef}
-                  value={to}
-                  onChange={(v) => setField("to", v)}
-                  placeholder="Recipients"
-                />
-                <button
-                  className="ml-2 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    if (!showCc && !showBcc) {
-                      setShowCc(true);
-                    } else {
-                      setShowCc(!showCc);
-                      setShowBcc(!showBcc);
-                    }
-                  }}
-                >
-                  {showCc || showBcc ? (
-                    <ChevronUp className="size-3.5" />
-                  ) : (
-                    <span>Cc Bcc</span>
-                  )}
-                </button>
-              </div>
 
-              {showCc && (
-                <div className="flex items-center border-b border-border/50 px-4">
+                {showCc && (
+                  <div className="flex items-center border-b border-border/50 px-4">
+                    <label className="w-12 shrink-0 text-xs text-muted-foreground">
+                      Cc
+                    </label>
+                    <RecipientInput
+                      value={cc}
+                      onChange={(v) => setField("cc", v)}
+                    />
+                  </div>
+                )}
+
+                {showBcc && (
+                  <div className="flex items-center border-b border-border/50 px-4">
+                    <label className="w-12 shrink-0 text-xs text-muted-foreground">
+                      Bcc
+                    </label>
+                    <RecipientInput
+                      value={bcc}
+                      onChange={(v) => setField("bcc", v)}
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-center px-4">
                   <label className="w-12 shrink-0 text-xs text-muted-foreground">
-                    Cc
+                    Subject
                   </label>
-                  <RecipientInput
-                    value={cc}
-                    onChange={(v) => setField("cc", v)}
+                  <SubjectInput
+                    value={subject}
+                    onChange={(value) => setField("subject", value)}
+                    enabled={!inReplyTo}
                   />
                 </div>
-              )}
+              </div>
 
-              {showBcc && (
-                <div className="flex items-center border-b border-border/50 px-4">
-                  <label className="w-12 shrink-0 text-xs text-muted-foreground">
-                    Bcc
-                  </label>
-                  <RecipientInput
-                    value={bcc}
-                    onChange={(v) => setField("bcc", v)}
-                  />
+              {/* Recipient count warning */}
+              {countRecipients(to, cc, bcc) > 10 && (
+                <div className="flex shrink-0 items-center gap-2 border-b border-yellow-300/50 bg-yellow-50 px-4 py-2 dark:border-yellow-700/50 dark:bg-yellow-950/30">
+                  <AlertTriangle className="size-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
+                  <span className="text-xs text-yellow-700 dark:text-yellow-400">
+                    You are sending to more than 10 recipients.
+                  </span>
                 </div>
               )}
 
-              <div className="flex items-center px-4">
-                <label className="w-12 shrink-0 text-xs text-muted-foreground">
-                  Subject
-                </label>
-                <SubjectInput
-                  value={subject}
-                  onChange={(value) => setField("subject", value)}
-                  enabled={!inReplyTo}
+              {/* Attachments */}
+              {attachments.length > 0 && (
+                <div className="flex shrink-0 flex-wrap gap-2 border-b border-border px-4 py-2">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-border bg-accent/50 px-2 py-1 text-xs"
+                    >
+                      <button
+                        onClick={() => setPreviewAttId(att.id)}
+                        className="flex min-w-0 items-center gap-1.5 hover:text-foreground"
+                        title="Preview"
+                      >
+                        <Paperclip className="size-3 shrink-0 text-muted-foreground" />
+                        <span
+                          className="max-w-[150px] truncate"
+                          title={att.filename}
+                        >
+                          {att.filename}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          ({formatFileSize(att.size)})
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => handleRemoveAttachment(att.id)}
+                        className="ml-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title="Remove attachment"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Body */}
+              {isHtml ? (
+                <RichTextEditor
+                  content={body}
+                  onChange={(html) => setField("body", html)}
+                  onImageUpload={handleImageUpload}
+                  placeholder="Write your message..."
+                  className="min-h-60 flex-1 shrink-0"
                 />
-              </div>
+              ) : (
+                <textarea
+                  value={body}
+                  onChange={(e) => setField("body", e.target.value)}
+                  placeholder="Write your message..."
+                  className="min-h-60 w-full min-w-0 flex-1 shrink-0 resize-none overflow-auto bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50"
+                />
+              )}
             </div>
 
-            {/* Recipient count warning */}
-            {countRecipients(to, cc, bcc) > 10 && (
-              <div className="flex items-center gap-2 border-b border-yellow-300/50 bg-yellow-50 px-4 py-2 dark:border-yellow-700/50 dark:bg-yellow-950/30">
-                <AlertTriangle className="size-4 shrink-0 text-yellow-600 dark:text-yellow-500" />
-                <span className="text-xs text-yellow-700 dark:text-yellow-400">
-                  You are sending to more than 10 recipients.
-                </span>
-              </div>
-            )}
-
-            {/* Attachments */}
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2">
-                {attachments.map((att) => (
-                  <div
-                    key={att.id}
-                    className="flex items-center gap-1.5 rounded-md border border-border bg-accent/50 px-2 py-1 text-xs"
-                  >
-                    <button
-                      onClick={() => setPreviewAttId(att.id)}
-                      className="flex items-center gap-1.5 hover:text-foreground"
-                      title="Preview"
-                    >
-                      <Paperclip className="size-3 shrink-0 text-muted-foreground" />
-                      <span
-                        className="max-w-[150px] truncate"
-                        title={att.filename}
-                      >
-                        {att.filename}
-                      </span>
-                      <span className="text-muted-foreground">
-                        ({formatFileSize(att.size)})
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => handleRemoveAttachment(att.id)}
-                      className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      title="Remove attachment"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Body */}
-            {isHtml ? (
-              <RichTextEditor
-                content={body}
-                onChange={(html) => setField("body", html)}
-                onImageUpload={handleImageUpload}
-                placeholder="Write your message..."
-                className="flex-1 overflow-auto"
-              />
-            ) : (
-              <textarea
-                value={body}
-                onChange={(e) => setField("body", e.target.value)}
-                placeholder="Write your message..."
-                className="flex-1 resize-none overflow-auto bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50"
-              />
-            )}
-
             {/* Footer */}
-            <div className="flex items-center justify-between border-t border-border px-4 py-3">
-              <div className="flex items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 sm:px-4 sm:py-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-2">
                 <button
                   onClick={handleSend}
                   disabled={

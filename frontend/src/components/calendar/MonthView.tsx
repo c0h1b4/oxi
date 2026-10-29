@@ -87,7 +87,7 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
   };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       {/* Day headers */}
       <div className="grid grid-cols-7 border-b border-border">
         {dayNames.map((name) => (
@@ -101,7 +101,7 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
       </div>
 
       {/* Day grid */}
-      <div className="grid flex-1 grid-cols-7 grid-rows-6">
+      <div className="grid min-h-[480px] flex-1 grid-cols-7 grid-rows-6">
         {days.map((day, idx) => {
           const dayKey = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
           const dayEvents = eventsByDay.get(dayKey) ?? [];
@@ -115,7 +115,7 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
               onClick={() => handleDayClick(day)}
               onDoubleClick={() => handleDayDoubleClick(day)}
               className={cn(
-                "min-h-0 cursor-pointer border-b border-r border-border p-1 transition-colors hover:bg-accent/50",
+                "min-h-0 min-w-0 cursor-pointer border-b border-r border-border p-1 transition-colors hover:bg-accent/50",
                 !isCurrentMonth && "bg-muted/30",
                 isSelected && "bg-accent",
               )}
@@ -123,6 +123,7 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
               <button
                 type="button"
                 onClick={(e) => handleDayLabelClick(e, day)}
+                aria-label={day.toLocaleDateString("en-US", { dateStyle: "full" })}
                 className={cn(
                   "mb-0.5 flex size-6 items-center justify-center rounded-full text-xs transition-colors hover:bg-primary hover:text-primary-foreground",
                   isTodayDate && "bg-primary text-primary-foreground font-bold",
@@ -149,7 +150,7 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
                       title={event.title}
                     >
                       {!event.all_day && (
-                        <span className="mr-0.5 opacity-80">
+                        <span className="mr-0.5 hidden opacity-80 sm:inline">
                           {formatTime(event.start_time, timeFormat)}
                         </span>
                       )}
@@ -158,9 +159,13 @@ export function MonthView({ weekStartsOn, timeFormat }: MonthViewProps) {
                   );
                 })}
                 {dayEvents.length > 3 && (
-                  <div className="text-[10px] text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={(e) => handleDayLabelClick(e, day)}
+                    className="block w-full truncate text-left text-[10px] text-muted-foreground"
+                  >
                     +{dayEvents.length - 3} more
-                  </div>
+                  </button>
                 )}
               </div>
             </div>

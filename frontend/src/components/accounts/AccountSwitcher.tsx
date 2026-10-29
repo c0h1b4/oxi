@@ -24,6 +24,7 @@ export function AccountSwitcher() {
   const router = useRouter();
   const [showAddModal, setShowAddModal] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [portalContainer, setPortalContainer] = useState<Element | null>(null);
   const [loggingOut, setLoggingOut] = useState<string | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
@@ -51,9 +52,10 @@ export function AccountSwitcher() {
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
+      const fitsBeside = rect.right + 16 + 288 <= window.innerWidth - 8;
       setDropdownPosition({
-        top: rect.top,
-        left: rect.right + 16,
+        top: fitsBeside ? rect.top : rect.bottom + 4,
+        left: fitsBeside ? rect.right + 16 : Math.max(8, Math.min(rect.left, window.innerWidth - 296)),
       });
     }
   }, [isOpen]);
@@ -127,7 +129,10 @@ export function AccountSwitcher() {
         <button
           ref={buttonRef}
           type="button"
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={(event) => {
+            setPortalContainer(event.currentTarget.closest('[role="dialog"]'));
+            setIsOpen(!isOpen);
+          }}
           className={cn(
             "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm transition-colors",
             "bg-primary/10 text-primary",
@@ -162,9 +167,10 @@ export function AccountSwitcher() {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="fixed w-72 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden"
+                  className="fixed w-72 max-w-[calc(100vw-1rem)] bg-popover border border-border rounded-lg shadow-xl z-50 overflow-y-auto"
                   style={{
                     top: dropdownPosition.top,
+                    maxHeight: `calc(100dvh - ${dropdownPosition.top + 8}px)`,
                     left: dropdownPosition.left,
                   }}
                 >
@@ -267,7 +273,7 @@ export function AccountSwitcher() {
                 </AnimatedDiv>
               ) : null}
             </AnimatePresence>,
-            document.body
+            portalContainer ?? document.body
           )}
 
         <AddAccountModal open={showAddModal} onClose={() => setShowAddModal(false)} />

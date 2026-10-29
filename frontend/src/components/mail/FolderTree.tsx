@@ -279,7 +279,7 @@ function FolderItem({
         }}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+          "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors [@media(pointer:coarse)]:min-h-11",
           isDragOver
             ? "bg-primary/10 font-semibold text-primary"
             : isActive

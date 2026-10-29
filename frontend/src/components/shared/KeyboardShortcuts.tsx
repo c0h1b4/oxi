@@ -49,7 +49,7 @@ export function KeyboardShortcuts() {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
+                  className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-1rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl"
                 >
                   <Dialog.Title className="mb-4 text-lg font-semibold">
                     Keyboard Shortcuts

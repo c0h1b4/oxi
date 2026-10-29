@@ -41,11 +41,11 @@ export function CalendarPanel() {
       initial={panelTransition.initial}
       animate={panelTransition.animate}
       exit={panelTransition.exit}
-      className="flex h-full min-w-0 flex-1 flex-col"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <CalendarHeader />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <AnimatePresence mode="wait" initial={false}>
           {viewMode === "month" && (
             <AnimatedDiv

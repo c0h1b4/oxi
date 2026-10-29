@@ -12,8 +12,9 @@ import {
   Sun,
   Keyboard,
   LogOut,
+  MoreHorizontal,
 } from "lucide-react";
-import { Tooltip } from "radix-ui";
+import { DropdownMenu, Tooltip } from "radix-ui";
 import { apiPost } from "@/lib/api";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
@@ -48,7 +49,7 @@ function NavButton({
           onClick={onClick}
           aria-label={tooltipLabel}
           className={cn(
-            "flex size-10 items-center justify-center rounded-lg transition-colors",
+            "flex size-11 shrink-0 md:size-10 items-center justify-center rounded-lg transition-colors",
             disabled
               ? "cursor-default text-sidebar-foreground/30"
               : "text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground",
@@ -116,14 +117,14 @@ export function NavRail() {
 
   return (
     <Tooltip.Provider delayDuration={400}>
-      <div className="relative flex h-full w-14 flex-col items-center border-r border-border bg-sidebar py-3">
+      <nav aria-label="Main navigation" className="relative flex w-full shrink-0 items-center justify-around border-b border-border bg-sidebar px-2 py-1 md:h-full md:w-14 md:flex-col md:justify-start md:overflow-y-auto md:border-b-0 md:border-r md:px-0 md:py-3">
         {/* Logo */}
-        <div className="mb-4 flex size-10 items-center justify-center">
+        <div className="mb-4 hidden size-10 shrink-0 items-center justify-center md:flex">
           <span className="text-lg font-bold text-primary">o.</span>
         </div>
 
         {/* Top actions */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex items-center gap-1 md:flex-col">
           <NavButton
             icon={<PenSquare className="size-5" />}
             label="Compose"
@@ -156,12 +157,12 @@ export function NavRail() {
         </div>
 
         {/* Spacer */}
-        <div className="flex-1" />
+        <div className="hidden flex-1 md:block" />
 
-        <ConnectionStatus status={wsStatus} failCount={wsFailCount} />
+        <div className="hidden md:block"><ConnectionStatus status={wsStatus} failCount={wsFailCount} /></div>
 
         {/* Bottom actions */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="hidden flex-col items-center gap-1 md:flex">
           <NavButton
             icon={
               resolvedTheme === "dark" ? (
@@ -185,7 +186,29 @@ export function NavRail() {
           />
         </div>
 
-      </div>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" aria-label="More options" className="flex size-11 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent md:hidden">
+              <MoreHorizontal className="size-5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-lg border border-border bg-popover p-1 shadow-lg">
+              <DropdownMenu.Item onClick={toggleTheme} className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-3 text-sm outline-none focus:bg-accent">
+                {resolvedTheme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+                {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => useUiStore.getState().setShortcutsOpen(true)} className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-3 text-sm outline-none focus:bg-accent">
+                <Keyboard className="size-4" /> Keyboard shortcuts
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={handleLogout} className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-3 text-sm outline-none focus:bg-accent">
+                <LogOut className="size-4" /> Logout
+              </DropdownMenu.Item>
+              <ConnectionStatus status={wsStatus} failCount={wsFailCount} />
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </nav>
     </Tooltip.Provider>
   );
 }

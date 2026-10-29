@@ -86,7 +86,7 @@ export function CommandPalette() {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="fixed left-1/2 top-[20%] z-50 w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+                  className="fixed left-1/2 top-4 sm:top-[20%] z-50 w-[calc(100%-1rem)] max-h-[calc(100dvh-2rem)] sm:max-h-[75dvh] overflow-y-auto max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
                 >
                   <Command className="flex flex-col" label="Command palette">
             <div className="flex items-center border-b border-border px-3">

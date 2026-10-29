@@ -63,7 +63,7 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+                  className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-border bg-background p-4 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:p-6"
                 >
                   <AddAccountForm onClose={onClose} />
                 </AnimatedDiv>
@@ -174,7 +174,7 @@ function AddAccountForm({ onClose }: Pick<AddAccountModalProps, "onClose">) {
       </Dialog.Close>
 
       {error && (
-        <div className="mb-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="mb-4 break-words rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -232,7 +232,7 @@ function AddAccountForm({ onClose }: Pick<AddAccountModalProps, "onClose">) {
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               IMAP Settings
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_6rem] gap-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="add-imapHost" className="text-xs">Host</Label>
                 <Input
@@ -273,7 +273,7 @@ function AddAccountForm({ onClose }: Pick<AddAccountModalProps, "onClose">) {
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">
               SMTP Settings
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_6rem] gap-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="add-smtpHost" className="text-xs">Host</Label>
                 <Input
@@ -313,7 +313,7 @@ function AddAccountForm({ onClose }: Pick<AddAccountModalProps, "onClose">) {
           </div>
         )}
 
-        <div className="flex justify-end gap-2 mt-2">
+        <div className="mt-2 flex flex-wrap justify-end gap-2">
           <Button
             type="button"
             variant="outline"
