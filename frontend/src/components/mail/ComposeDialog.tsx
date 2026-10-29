@@ -51,6 +51,7 @@ import {
   AttachmentPreviewDialog,
 } from "./ComposeDialog/index";
 import { RecipientInput } from "./ComposeDialog/RecipientInput";
+import { SubjectInput } from "./ComposeDialog/SubjectInput";
 import dynamic from "next/dynamic";
 
 const RichTextEditor = dynamic(
@@ -105,9 +106,10 @@ export function ComposeDialog() {
   const [previewAttId, setPreviewAttId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
-  const toInputRef = useRef<HTMLInputElement>(null);
+  const toInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastSavedHashRef = useRef<string>("");
+  const sendScheduledRef = useRef(false);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
@@ -150,6 +152,7 @@ export function ComposeDialog() {
   // Save draft function. When force=true, skip the hash guard (used for explicit save/close).
   const saveDraft = useCallback(
     (force = false) => {
+      if (sendScheduledRef.current) return;
       const hash = computeHash();
       // Don't save if nothing changed (unless forced) or compose is empty
       if (!force && hash === lastSavedHashRef.current) return;
@@ -162,7 +165,7 @@ export function ComposeDialog() {
       )
         return;
 
-      let currentDraftId = draftId;
+      let currentDraftId = useComposeStore.getState().draftId;
       if (!currentDraftId) {
         currentDraftId = generateId();
         setDraftId(currentDraftId);
@@ -198,7 +201,6 @@ export function ComposeDialog() {
       subject,
       body,
       isHtml,
-      draftId,
       setDraftId,
       inReplyTo,
       references,
@@ -222,13 +224,13 @@ export function ComposeDialog() {
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const doSend = useCallback(() => {
+  const doSend = useCallback((sendingDraftId: string | null) => {
     let plainText: string;
     let sendHtml: string | null;
     if (isHtml) {
       plainText = stripHtml(body);
       // Convert preview URLs back to cid: references for the email MIME body
-      sendHtml = inlineImagesToCid(body, draftId);
+      sendHtml = inlineImagesToCid(body, sendingDraftId);
     } else {
       plainText = body;
       sendHtml = null;
@@ -243,15 +245,18 @@ export function ComposeDialog() {
         htmlBody: sendHtml,
         inReplyTo,
         references,
-        draftId,
+        draftId: sendingDraftId,
         fromIdentityId,
       },
       {
         onSuccess: () => {
+          sendScheduledRef.current = false;
           toast.success("Message sent");
           reset();
         },
         onError: (error) => {
+          sendScheduledRef.current = false;
+          useComposeStore.setState({ isOpen: true });
           toast.error(`Failed to send: ${error.message}`);
         },
       }
@@ -265,20 +270,21 @@ export function ComposeDialog() {
     isHtml,
     inReplyTo,
     references,
-    draftId,
     fromIdentityId,
     sendMutation,
     reset,
   ]);
 
   const handleSend = useCallback(() => {
-    if (!to.trim() && !cc.trim() && !bcc.trim()) return;
+    if (sendScheduledRef.current || (!to.trim() && !cc.trim() && !bcc.trim())) return;
+    sendScheduledRef.current = true;
+    const sendingDraftId = useComposeStore.getState().draftId;
     closeCompose();
 
     // 5-second undo window via sonner
     const timer = setTimeout(() => {
       toast.dismiss("undo-send");
-      doSend();
+      doSend(sendingDraftId);
     }, 5000);
 
     toast("Sending message...", {
@@ -288,6 +294,7 @@ export function ComposeDialog() {
         label: "Undo",
         onClick: () => {
           clearTimeout(timer);
+          sendScheduledRef.current = false;
           useComposeStore.setState({ isOpen: true });
         },
       },
@@ -678,11 +685,10 @@ export function ComposeDialog() {
                 <label className="w-12 shrink-0 text-xs text-muted-foreground">
                   Subject
                 </label>
-                <input
-                  type="text"
+                <SubjectInput
                   value={subject}
-                  onChange={(e) => setField("subject", e.target.value)}
-                  className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
+                  onChange={(value) => setField("subject", value)}
+                  enabled={!inReplyTo}
                 />
               </div>
             </div>

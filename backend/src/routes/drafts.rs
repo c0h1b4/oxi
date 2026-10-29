@@ -12,6 +12,10 @@ use crate::db;
 use crate::error::AppError;
 use crate::imap::client::{ImapClient, ImapCredentials};
 
+#[cfg(test)]
+#[path = "drafts_tests.rs"]
+mod tests;
+
 // ---------------------------------------------------------------------------
 // Request / Response types
 // ---------------------------------------------------------------------------
@@ -67,6 +71,7 @@ struct AttachmentInfo {
 #[derive(Debug, Serialize)]
 struct DraftListItem {
     id: String,
+    imap_message_id: String,
     to: String,
     subject: String,
     updated_at: String,
@@ -105,28 +110,30 @@ pub async fn upsert_draft_handler(
     )
     .map_err(AppError::InternalError)?;
 
-    // Best-effort: append draft to IMAP Drafts folder so other clients can see it.
-    if let Some(imap_host) = config.imap_host.as_deref() {
-        let imap_creds = ImapCredentials {
-            host: imap_host.to_string(),
-            port: config.imap_port,
-            tls: config.tls_enabled,
-            email: session.email.clone(),
-            password: session.password.clone(),
-        };
-
-        // Resolve the actual Drafts folder name from the cached folder list.
-        let drafts_folder = db::folders::find_folder_by_attribute(&conn, "\\Drafts")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "Drafts".to_string());
-
-        if let Ok(rfc822_bytes) = build_draft_rfc822(&req, &session.email)
-            && let Err(e) = imap_client
-                .append_message(&imap_creds, &drafts_folder, &rfc822_bytes, &["\\Draft", "\\Seen"])
+    // Read the old UIDs before APPEND, and remove them only after the new copy
+    // exists. A failed append must never destroy the last server-side draft.
+    if let Some((creds, folder)) = draft_mailbox(&config, &session)? {
+        let message_id = draft_message_id(&req.id);
+        let sync_result = async {
+            let old_uids = draft_uids(imap_client.as_ref(), &creds, &folder, &message_id).await?;
+            let bytes = build_draft_rfc822(&req, &session.email)?;
+            imap_client
+                .append_message(&creds, &folder, &bytes, &["\\Draft", "\\Seen"])
                 .await
-        {
-            tracing::warn!(error = %e, folder = %drafts_folder, "Failed to append draft to IMAP Drafts folder");
+                .map_err(|e| e.to_string())?;
+            remove_draft_copies(
+                imap_client.as_ref(),
+                &creds,
+                &folder,
+                &old_uids,
+                &config,
+                &session,
+            )
+            .await
+        }
+        .await;
+        if let Err(e) = sync_result {
+            tracing::warn!(error = %e, "Failed to synchronize IMAP draft");
         }
     }
 
@@ -135,6 +142,95 @@ pub async fn upsert_draft_handler(
         status: "saved".to_string(),
     })
     .into_response())
+}
+
+/// Stable, header-safe identity shared by every saved revision of a draft.
+fn draft_message_id(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "<oxi-draft-{:x}@draft.oxi.local>",
+        Sha256::digest(id.as_bytes())
+    )
+}
+
+fn draft_mailbox(
+    config: &AppConfig,
+    session: &SessionState,
+) -> Result<Option<(ImapCredentials, String)>, AppError> {
+    let Some(host) = config.imap_host.as_ref() else {
+        return Ok(None);
+    };
+    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+        .map_err(|e| AppError::InternalError(e.to_string()))?;
+    let folder = db::folders::find_folder_by_attribute(&conn, "\\Drafts")
+        .map_err(AppError::InternalError)?
+        .unwrap_or_else(|| "Drafts".to_string());
+    Ok(Some((
+        ImapCredentials {
+            host: host.clone(),
+            port: config.imap_port,
+            tls: config.tls_enabled,
+            email: session.email.clone(),
+            password: session.password.clone(),
+        },
+        folder,
+    )))
+}
+
+async fn draft_uids(
+    client: &dyn ImapClient,
+    creds: &ImapCredentials,
+    folder: &str,
+    message_id: &str,
+) -> Result<Vec<u32>, String> {
+    Ok(client
+        .fetch_headers(creds, folder, "1:*")
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|header| header.message_id.as_deref() == Some(message_id))
+        .map(|header| header.uid)
+        .collect())
+}
+
+async fn remove_draft_copies(
+    client: &dyn ImapClient,
+    creds: &ImapCredentials,
+    folder: &str,
+    uids: &[u32],
+    config: &AppConfig,
+    session: &SessionState,
+) -> Result<(), String> {
+    for &uid in uids {
+        client
+            .expunge_message(creds, folder, uid)
+            .await
+            .map_err(|e| e.to_string())?;
+        let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+            .map_err(|e| e.to_string())?;
+        db::messages::remove_after_mutation(&conn, folder, uid)?;
+    }
+    let conn =
+        db::pool::open_user_db(&config.data_dir, &session.user_hash).map_err(|e| e.to_string())?;
+    db::folders::invalidate_folder_freshness(&conn, folder)?;
+    Ok(())
+}
+
+pub(super) async fn delete_imap_draft(
+    client: &dyn ImapClient,
+    config: &AppConfig,
+    session: &SessionState,
+    id: &str,
+) -> Result<(), AppError> {
+    if let Some((creds, folder)) = draft_mailbox(config, session)? {
+        let uids = draft_uids(client, &creds, &folder, &draft_message_id(id))
+            .await
+            .map_err(AppError::InternalError)?;
+        remove_draft_copies(client, &creds, &folder, &uids, config, session)
+            .await
+            .map_err(AppError::InternalError)?;
+    }
+    Ok(())
 }
 
 /// Build a minimal RFC822 message from draft fields for IMAP APPEND.
@@ -147,7 +243,8 @@ fn build_draft_rfc822(req: &UpsertDraftRequest, from_email: &str) -> Result<Vec<
 
     let mut builder = lettre::Message::builder()
         .from(from_mailbox)
-        .subject(&req.subject);
+        .subject(&req.subject)
+        .message_id(Some(draft_message_id(&req.id)));
 
     // Parse comma-separated address lists.
     for addr in req.to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -205,6 +302,7 @@ pub async fn list_drafts_handler(
     let items: Vec<DraftListItem> = drafts
         .into_iter()
         .map(|d| DraftListItem {
+            imap_message_id: draft_message_id(&d.id),
             id: d.id,
             to: d.to_addresses,
             subject: d.subject,
@@ -262,10 +360,13 @@ pub async fn get_draft_handler(
 pub async fn delete_draft_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(imap_client): Extension<Arc<dyn ImapClient>>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Response, AppError> {
     let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
+
+    delete_imap_draft(imap_client.as_ref(), &config, &session, &id).await?;
 
     let deleted =
         db::drafts::delete_draft(&conn, &id).map_err(AppError::InternalError)?;

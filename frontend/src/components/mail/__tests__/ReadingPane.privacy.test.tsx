@@ -124,6 +124,15 @@ describe("ReadingPane sender privacy", () => {
 });
 
 describe("ReadingPane sender details", () => {
+  it("shows sent-mail recipients without expanding sender details", () => {
+    useUiStore.setState({ activeFolder: "Sent" });
+    setMessage({ from_address: "one@example.com" });
+    render(<ReadingPane />);
+    expect(screen.getByText("To:")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Recipient" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Sender details" })).toBeNull();
+  });
+
   it("starts closed and only opens from the sender-name button, not header clicks or focus", () => {
     render(<ReadingPane />);
     const sender = screen.getByRole("button", { name: "Sender Name" });
@@ -139,7 +148,7 @@ describe("ReadingPane sender details", () => {
     const details = screen.getByRole("region", { name: "Sender details" });
     expect(within(details).getByRole("button", { name: "Sender Name" })).toBeTruthy();
     expect(within(details).getByText("<sender@example.com>")).toBeTruthy();
-    expect(within(details).getByRole("button", { name: "Recipient" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Recipient" })).toBeTruthy();
     expect(within(details).getByRole("button", { name: "CC Recipient" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(sender);

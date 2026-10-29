@@ -53,6 +53,7 @@ interface SaveDraftResponse {
 
 interface DraftListItem {
   id: string;
+  imap_message_id: string;
   to: string;
   subject: string;
   updated_at: string;
@@ -92,6 +93,7 @@ function parseRecipients(raw: string): string[] {
 export function useSendMessage() {
   const queryClient = useQueryClient();
   return useMutation({
+    scope: { id: "draft-lifecycle" },
     mutationFn: (params: SendParams) =>
       apiPost<SendResponse>("/messages/send", {
         to: parseRecipients(params.to),
@@ -105,9 +107,19 @@ export function useSendMessage() {
         draft_id: params.draftId,
         from_identity_id: params.fromIdentityId,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+    onSuccess: async (_data, params) => {
+      await queryClient.cancelQueries({ queryKey: ["drafts"] });
+      if (params.draftId) {
+        queryClient.removeQueries({ queryKey: ["drafts", params.draftId], exact: true });
+        queryClient.setQueryData<DraftListResponse>(["drafts"], (data) => data && ({
+          drafts: data.drafts.filter((draft) => draft.id !== params.draftId),
+        }));
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["drafts"] }),
+        queryClient.invalidateQueries({ queryKey: ["messages"] }),
+        queryClient.invalidateQueries({ queryKey: ["folders"] }),
+      ]);
     },
   });
 }
@@ -151,6 +163,7 @@ export function useDeleteAttachment() {
 export function useSaveDraft() {
   const queryClient = useQueryClient();
   return useMutation({
+    scope: { id: "draft-lifecycle" },
     mutationFn: (params: SaveDraftParams) =>
       apiPost<SaveDraftResponse>("/drafts", {
         id: params.id,
@@ -163,8 +176,12 @@ export function useSaveDraft() {
         in_reply_to: params.inReplyTo,
         references: params.references,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["drafts"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["drafts"] }),
+        queryClient.invalidateQueries({ queryKey: ["messages"] }),
+        queryClient.invalidateQueries({ queryKey: ["folders"] }),
+      ]);
     },
   });
 }
@@ -188,10 +205,15 @@ export function useGetDraft(id: string | null) {
 export function useDeleteDraft() {
   const queryClient = useQueryClient();
   return useMutation({
+    scope: { id: "draft-lifecycle" },
     mutationFn: (id: string) =>
       apiDelete<{ status: string }>(`/drafts/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["drafts"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["drafts"] }),
+        queryClient.invalidateQueries({ queryKey: ["messages"] }),
+        queryClient.invalidateQueries({ queryKey: ["folders"] }),
+      ]);
     },
   });
 }
