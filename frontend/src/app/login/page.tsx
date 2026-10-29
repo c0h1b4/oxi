@@ -124,15 +124,15 @@ export default function Home() {
 
   if (checking) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-dvh items-center justify-center bg-background">
         <div className="size-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm">
+    <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+      <div className="w-full min-w-0 max-w-sm">
         {/* Branding */}
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
@@ -153,7 +153,7 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             {error && (
-              <div className="mb-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <div className="mb-4 rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive [overflow-wrap:anywhere]">
                 {error}
               </div>
             )}
@@ -209,8 +209,8 @@ export default function Home() {
                   <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                     IMAP Settings
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
+                    <div className="flex min-w-0 flex-col gap-1">
                       <Label htmlFor="imapHost" className="text-xs">Host</Label>
                       <Input
                         id="imapHost"
@@ -250,8 +250,8 @@ export default function Home() {
                   <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mt-1">
                     SMTP Settings
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
+                    <div className="flex min-w-0 flex-col gap-1">
                       <Label htmlFor="smtpHost" className="text-xs">Host</Label>
                       <Input
                         id="smtpHost"

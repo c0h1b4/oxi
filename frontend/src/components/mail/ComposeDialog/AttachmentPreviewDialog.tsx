@@ -54,17 +54,17 @@ export function AttachmentPreviewDialog({
               initial="initial"
               animate="animate"
               exit="exit"
-              className="fixed inset-4 z-[60] flex flex-col rounded-xl border border-border bg-background shadow-2xl"
+              className="fixed inset-2 z-[60] flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl sm:inset-4 border border-border bg-background shadow-2xl"
             >
-              <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                <Dialog.Title className="flex items-center gap-2 text-sm font-semibold">
-                  <Paperclip className="size-4 text-muted-foreground" />
-                  <span className="max-w-[400px] truncate">{attachment.filename}</span>
-                  <span className="text-xs font-normal text-muted-foreground">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-3 sm:px-4">
+                <Dialog.Title className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                  <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 max-w-[400px] truncate">{attachment.filename}</span>
+                  <span className="shrink-0 text-xs font-normal text-muted-foreground">
                     ({formatFileSize(attachment.size)})
                   </span>
                 </Dialog.Title>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   <ApiDownloadLink
                     href={previewUrl}
                     download={attachment.filename}
@@ -83,7 +83,7 @@ export function AttachmentPreviewDialog({
                   </Dialog.Close>
                 </div>
               </div>
-              <div className="flex flex-1 items-center justify-center overflow-auto p-4">
+              <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto p-4">
                 {attachment.contentType.startsWith("image/") ? (
                   // eslint-disable-next-line @next/next/no-img-element -- data URL from local attachment, not optimizable
                   <img

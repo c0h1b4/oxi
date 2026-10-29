@@ -101,7 +101,7 @@ function IdentityForm({
               Preview
             </label>
             <div
-              className="rounded-md border border-border bg-background px-3 py-2 prose prose-sm dark:prose-invert max-w-none text-xs"
+              className="overflow-x-auto rounded-md border border-border bg-background px-3 py-2 prose prose-sm dark:prose-invert max-w-none text-xs"
               dangerouslySetInnerHTML={{ __html: form.signature_html }}
             />
           </div>
@@ -226,7 +226,7 @@ export function IdentitySettings() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Sender Identities</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
@@ -271,9 +271,9 @@ export function IdentitySettings() {
           ) : (
             <div
               key={identity.id}
-              className="flex items-center justify-between rounded-lg border border-border p-4"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border p-4"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3 [overflow-wrap:anywhere]">
                 {identity.is_default && (
                   <Star className="size-4 shrink-0 fill-primary text-primary" />
                 )}
@@ -290,7 +290,7 @@ export function IdentitySettings() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 <button
                   onClick={() => setEditingId(identity.id)}
                   className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
