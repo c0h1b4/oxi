@@ -16,7 +16,9 @@ vi.mock("@/hooks/useCompose", () => ({
 vi.mock("@/hooks/useIdentities", () => ({ useIdentities: () => identityQuery }));
 vi.mock("../ComposeDialog/SubjectInput", () => ({ SubjectInput: () => <input aria-label="Subject" /> }));
 vi.mock("../ComposeDialog/RecipientInput", () => ({ RecipientInput: () => <textarea aria-label="Recipients" /> }));
-vi.mock("next/dynamic", () => ({ default: () => () => <div /> }));
+vi.mock("next/dynamic", () => ({ default: () => RichTextEditor }));
+import { RichTextEditor } from "../RichTextEditor";
+import type { Editor } from "@tiptap/react";
 import { ComposeDialog } from "../ComposeDialog";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useUiStore } from "@/stores/useUiStore";
@@ -78,6 +80,7 @@ it.each([
   { isHtml: true, signature: "", body: "<p><br></p><p>&nbsp;</p>" },
   { isHtml: false, signature: "", body: " \n\t" },
   { isHtml: true, signature: "<p>My signature</p>", body: "<p><br></p>" },
+  { isHtml: true, signature: "<p>My signature</p>", body: "" },
   { isHtml: false, signature: "<p>My signature</p>", body: "" },
 ])("does not save an empty compose (HTML=$isHtml, signature=$signature)", ({ isHtml, signature, body }) => {
   identityQuery.data = [{ id: 1, email: "me@example.com", display_name: "Me", signature_html: signature, is_default: true, created_at: "", updated_at: "" }];
@@ -126,4 +129,30 @@ it("saves user text along with the automatic signature", () => {
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ htmlBody: body }), expect.anything());
   expect(body).toContain("My message");
   expect(body).toContain("My signature");
+});
+
+it.each(["close", "manual save", "autosave", "discard"])("preserves text typed inside the initialized signature on %s", (action) => {
+  identityQuery.data = [{ id: 1, email: "me@example.com", display_name: "Me", signature_html: "<p>My signature</p>", is_default: true, created_at: "", updated_at: "" }];
+  useComposeStore.getState().openCompose();
+  useComposeStore.setState({ isHtml: true });
+  const { container } = render(<ComposeDialog />);
+  const editor = (container.ownerDocument.querySelector(".tiptap") as HTMLElement & { editor: Editor }).editor;
+  expect(editor.getHTML()).toContain('data-signature="true"');
+  act(() => {
+    editor.commands.setTextSelection(2);
+    editor.view.dispatch(editor.state.tr.insertText("My important message"));
+  });
+  const body = useComposeStore.getState().body;
+  expect(new DOMParser().parseFromString(body, "text/html").querySelector('[data-signature="true"]')?.textContent).toContain("My important message");
+
+  if (action === "discard") {
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(useComposeStore.getState().body).toBe(body);
+  } else {
+    if (action === "close") fireEvent.click(screen.getByTitle("Close"));
+    if (action === "manual save") fireEvent.click(screen.getByTitle("Save draft (Ctrl+S)"));
+    if (action === "autosave") act(() => vi.advanceTimersByTime(30000));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ htmlBody: body }), expect.anything());
+  }
 });
