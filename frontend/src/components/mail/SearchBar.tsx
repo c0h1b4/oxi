@@ -202,8 +202,8 @@ export function SearchBar() {
 
   return (
     <div className="flex shrink-0 flex-col border-b border-border">
-      <div className="flex items-center gap-2 px-3 py-1.5">
-        <div className="relative flex flex-1 items-center">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
+        <div className="relative flex min-w-0 flex-1 basis-40 items-center">
           <Search className="pointer-events-none absolute left-2 size-4 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -313,7 +313,7 @@ export function SearchBar() {
           {parsed.filters.map((filter, idx) => (
             <span
               key={`${filter.operator}-${idx}`}
-              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary [overflow-wrap:anywhere]"
             >
               {getFilterLabel(filter)}
               <button

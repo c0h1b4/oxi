@@ -73,14 +73,14 @@ export function DayView({ timeFormat }: DayViewProps) {
   const showIndicator = isToday(selectedDate);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* All-day events */}
       {allDayEvents.length > 0 && (
         <div className="flex border-b border-border">
           <div className="w-[60px] shrink-0 border-r border-border px-1 py-1 text-[10px] text-muted-foreground">
             All day
           </div>
-          <div className="flex-1 p-1 space-y-0.5">
+          <div className="min-w-0 flex-1 p-1 space-y-0.5">
             {allDayEvents.map((ev) => {
               const colors = getEventColorClasses(ev.color);
               return (
@@ -123,7 +123,7 @@ export function DayView({ timeFormat }: DayViewProps) {
           </div>
 
           {/* Event area */}
-          <div className="relative flex-1">
+          <div className="relative min-w-0 flex-1">
             {/* Hour slots */}
             {hours.map((hour) => (
               <div

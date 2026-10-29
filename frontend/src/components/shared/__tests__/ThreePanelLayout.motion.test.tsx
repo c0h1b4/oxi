@@ -10,10 +10,13 @@ const { mockUiState } = vi.hoisted(() => ({
     searchQuery: "",
     readingPaneVisible: true,
     effectiveAnimationMode: "medium" as "rich" | "medium" | "subtle" | "off",
+    setSidebarOpen: vi.fn(),
     setSidebarWidth: vi.fn(),
     setMessageListWidth: vi.fn(),
   },
 }));
+
+vi.mock("@/hooks/useMediaQuery", () => ({ useMediaQuery: () => true }));
 
 vi.mock("@/stores/useUiStore", () => {
   const useUiStore = (selector: (state: typeof mockUiState) => unknown) => selector(mockUiState);

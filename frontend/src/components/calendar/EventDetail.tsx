@@ -103,7 +103,7 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
 
   return createPortal(
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       <AnimatedDiv
         data-testid="calendar-event-detail-overlay-transition"
         variants={overlayMotionProps}
@@ -120,7 +120,7 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
         initial={contentMotionProps.initial}
         animate={contentMotionProps.animate}
         exit={contentMotionProps.exit}
-        className="relative z-10 w-full max-w-md rounded-lg border border-border bg-background shadow-xl"
+        className="relative z-10 max-h-[calc(100dvh-1.5rem)] w-full min-w-0 max-w-md overflow-y-auto rounded-lg border border-border bg-background shadow-xl [overflow-wrap:anywhere] sm:max-h-[90dvh]"
       >
         {/* Color bar at top */}
         <div className={cn("h-2 rounded-t-lg", colors.bg)} />
@@ -128,13 +128,14 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
         <div className="p-5">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
-            <h2 className="text-lg font-semibold text-foreground pr-8">
+            <h2 className="min-w-0 text-lg font-semibold text-foreground pr-3">
               {event.title}
             </h2>
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={() => selectEvent(null)}
+              aria-label="Close event details"
               className="shrink-0 text-muted-foreground"
             >
               <X className="size-4" />
@@ -145,7 +146,7 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
           <div className="space-y-3">
             {/* Time */}
             <div className="flex items-center gap-2 text-sm text-foreground">
-              <Clock className="size-4 text-muted-foreground" />
+              <Clock className="size-4 shrink-0 text-muted-foreground" />
               <span>{formatDateRange()}</span>
               {event.all_day && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
@@ -157,7 +158,7 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
             {/* Location */}
             {event.location && (
               <div className="flex items-center gap-2 text-sm text-foreground">
-                <MapPin className="size-4 text-muted-foreground" />
+                <MapPin className="size-4 shrink-0 text-muted-foreground" />
                 <span>{event.location}</span>
               </div>
             )}

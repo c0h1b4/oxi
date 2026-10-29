@@ -103,7 +103,7 @@ function SearchResultRow({
         )}>
           {sender}
         </span>
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <span className="max-w-20 shrink-0 truncate rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           {result.folder}
         </span>
         <span className={cn("shrink-0 text-xs", isFlagged ? "text-primary" : "text-muted-foreground")}>

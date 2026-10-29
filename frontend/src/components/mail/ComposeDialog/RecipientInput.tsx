@@ -156,7 +156,7 @@ export function RecipientInput({
         className="block max-h-40 w-full resize-none overflow-x-hidden overflow-y-auto break-words bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/50"
       />
       {showDropdown && results.length > 0 && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
           {isLoading && (
             <div className="px-3 py-2 text-xs text-muted-foreground">
               Searching...
@@ -166,7 +166,7 @@ export function RecipientInput({
             <button
               key={`${result.item.email}-${result.item.source}`}
               type="button"
-              className={`flex w-full flex-col px-3 py-2 text-left text-sm transition-colors ${
+              className={`flex w-full min-w-0 flex-col break-all px-3 py-2 text-left text-sm transition-colors ${
                 i === selectedIndex
                   ? "bg-accent text-accent-foreground"
                   : "text-popover-foreground hover:bg-accent/50"
