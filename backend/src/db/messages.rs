@@ -235,6 +235,27 @@ fn parse_iso8601_to_epoch(s: &str) -> Result<i64, ()> {
     Ok(datetime_to_epoch(&dt))
 }
 
+/// Suggest distinct cached subjects, newest first. Search text is literal, not a LIKE pattern.
+pub fn suggest_subjects(conn: &Connection, query: &str) -> Result<Vec<String>, String> {
+    let query = query.trim();
+    if query.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT subject FROM messages
+             WHERE trim(subject) != '' AND instr(lower(subject), lower(?1)) > 0
+             GROUP BY subject COLLATE NOCASE
+             ORDER BY MAX(date_epoch) DESC, subject COLLATE NOCASE
+             LIMIT 8",
+        )
+        .map_err(|e| format!("Failed to prepare subject suggestions: {e}"))?;
+    stmt.query_map(params![query], |row| row.get(0))
+        .map_err(|e| format!("Failed to query subject suggestions: {e}"))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| format!("Failed to read subject suggestions: {e}"))
+}
+
 /// Return a page of messages for a folder, ordered by date descending.
 /// `page` is 0-indexed.
 pub fn get_messages(
@@ -708,6 +729,28 @@ mod tests {
             None,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn subject_suggestions_match_literal_text_deduplicate_and_limit() {
+        let conn = open_test_db();
+        ensure_folder(&conn, "INBOX");
+        ensure_folder(&conn, "Archive");
+        for uid in 1..=12 {
+            insert_sample(&conn, "INBOX", uid, &format!("2024-01-{uid:02}T10:00:00Z"));
+        }
+        insert_sample(&conn, "Archive", 12, "2024-01-12T10:00:00Z");
+        let suggestions = suggest_subjects(&conn, "  SUBJECT  ").unwrap();
+        assert_eq!(suggestions.len(), 8);
+        assert_eq!(suggestions[0], "Subject 12");
+        assert_eq!(suggestions[7], "Subject 5");
+        assert!(suggest_subjects(&conn, " ").unwrap().is_empty());
+        assert!(suggest_subjects(&conn, "s").unwrap().is_empty());
+        assert!(suggest_subjects(&conn, "%_").unwrap().is_empty());
+        conn.execute("UPDATE messages SET subject = '100%_done' WHERE uid = 1", []).unwrap();
+        assert_eq!(suggest_subjects(&conn, "%_").unwrap(), vec!["100%_done"]);
+        let other_account = open_test_db();
+        assert!(suggest_subjects(&other_account, "Subject").unwrap().is_empty());
     }
 
     #[test]

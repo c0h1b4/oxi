@@ -14,6 +14,7 @@ pub struct MockImapClient {
     folder_status_ext: Mutex<Option<FolderStatusExtended>>,
     should_fail: Mutex<Option<ImapError>>,
     pub appended: Mutex<Vec<(String, Vec<u8>)>>,
+    pub expunged: Mutex<Vec<(String, u32)>>,
     pub header_requests: Mutex<Vec<(String, String)>>,
     /// One-shot gate after taking a header snapshot, before returning it.
     pub header_fetch_gate: Option<(tokio::sync::Notify, tokio::sync::Notify)>,
@@ -30,6 +31,7 @@ impl MockImapClient {
             folder_status_ext: Mutex::new(None),
             should_fail: Mutex::new(None),
             appended: Mutex::new(Vec::new()),
+            expunged: Mutex::new(Vec::new()),
             header_requests: Mutex::new(Vec::new()),
             header_fetch_gate: None,
         }
@@ -228,6 +230,8 @@ impl ImapClient for MockImapClient {
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }
+        self.expunged.lock().unwrap().push((_folder.to_string(), _uid));
+        self.headers.lock().unwrap().retain(|header| header.uid != _uid);
         Ok(())
     }
 

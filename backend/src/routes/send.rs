@@ -161,6 +161,10 @@ pub async fn send_message_handler(
 
     // Clean up draft and attachment files after successful send.
     if let Some(ref draft_id) = req.draft_id {
+        if let Err(e) = super::drafts::delete_imap_draft(imap_client.as_ref(), &config, &session, draft_id).await {
+            // SMTP already accepted the message: do not invite an accidental resend.
+            tracing::warn!(error = %e, "Failed to remove IMAP draft after send");
+        }
         cleanup_draft(&config.data_dir, &session.user_hash, draft_id).await;
     }
 

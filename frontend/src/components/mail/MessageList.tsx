@@ -203,6 +203,7 @@ export function MessageList() {
   const shouldAnimateRows = effectiveAnimationMode !== "off";
 
   const folderQuery = useMessages(activeFolder);
+  const { data: localDrafts } = useListDrafts(showDrafts);
   const tagQuery = useTagMessages(activeTagId);
   const { data: tagsData } = useTags();
 
@@ -220,7 +221,13 @@ export function MessageList() {
   // Flatten all pages into a single array of messages.
   const folderMessages = data?.pages.flatMap((page) => page.messages) ?? [];
   const tagMessages = isTagView ? (tagQuery.data?.messages ?? []) : [];
-  const messages = isTagView ? tagMessages : folderMessages;
+  const localDraftMessageIds = new Set(
+    showDrafts ? localDrafts?.drafts.map((draft) => draft.imap_message_id) : [],
+  );
+  const visibleFolderMessages = folderMessages.filter(
+    (message) => !message.message_id || !localDraftMessageIds.has(message.message_id),
+  );
+  const messages = isTagView ? tagMessages : visibleFolderMessages;
   const totalCount = isTagView
     ? (tagQuery.data?.total_count ?? 0)
     : (data?.pages[0]?.total_count ?? 0);
