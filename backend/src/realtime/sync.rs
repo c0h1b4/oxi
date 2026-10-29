@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config::AppConfig;
 use crate::db;
+use crate::db::header_sync::HeaderSync;
 use crate::email_theme;
 use crate::imap::client::{ImapClient, ImapCredentials};
 use crate::realtime::events::{EventBus, MailEvent};
@@ -62,6 +63,7 @@ async fn run_sync(
     search_engine: Arc<SearchEngine>,
 ) -> Result<(), String> {
     let database = config.user_db(user_hash).await?;
+    let header_sync = HeaderSync::capture(&database).await?;
     let folder_snapshots = db::folders::get_all_folders(&database)
         .await?
         .into_iter()
@@ -130,6 +132,7 @@ async fn run_sync(
                 cached_modseq,
                 &status,
                 event_bus,
+                header_sync,
             )
             .await?;
             if folder_changed {
@@ -147,6 +150,7 @@ async fn run_sync(
             folder_name,
             &status,
             event_bus,
+            header_sync,
         )
         .await?;
         if folder_changed {
@@ -270,6 +274,7 @@ async fn sync_condstore(
     cached_modseq: u64,
     status: &crate::imap::types::FolderStatusExtended,
     event_bus: &EventBus,
+    header_sync: HeaderSync,
 ) -> Result<bool, String> {
     // Fetch only messages whose flags changed since our cached modseq.
     let (changed, new_modseq) = match imap_client
@@ -291,6 +296,7 @@ async fn sync_condstore(
                 folder_name,
                 status,
                 event_bus,
+                header_sync,
             )
             .await;
         }
@@ -311,7 +317,7 @@ async fn sync_condstore(
     } else {
         None
     };
-    let transaction = database.begin_write().await?;
+    let transaction = header_sync.begin_write(&database).await?;
     let mut folder_changed = !changed.is_empty();
     for (uid, mut flags) in changed {
         flags.sort();
@@ -375,6 +381,7 @@ async fn sync_condstore(
 }
 
 /// Full fetch fallback: fetch all UIDs+FLAGS and reconcile (original behavior).
+#[allow(clippy::too_many_arguments)]
 async fn sync_full(
     config: &AppConfig,
     user_hash: &str,
@@ -383,18 +390,21 @@ async fn sync_full(
     folder_name: &str,
     status: &crate::imap::types::FolderStatusExtended,
     event_bus: &EventBus,
+    header_sync: HeaderSync,
 ) -> Result<bool, String> {
     let database = config.user_db(user_hash).await?;
     let cached = db::messages::get_all_uids_and_flags(&database, folder_name).await?;
     if cached.is_empty() {
+        let transaction = header_sync.begin_write(&database).await?;
         db::folders::update_folder_sync_status(
-            &database,
+            &transaction,
             folder_name,
             status.uid_validity,
             status.exists,
             status.highest_modseq,
         )
         .await?;
+        transaction.commit().await?;
         return Ok(false);
     }
 
@@ -410,7 +420,7 @@ async fn sync_full(
         }
     };
 
-    let transaction = database.begin_write().await?;
+    let transaction = header_sync.begin_write(&database).await?;
     let imap_map: HashMap<u32, String> = imap_state
         .into_iter()
         .map(|(uid, flags)| {
@@ -474,4 +484,154 @@ async fn sync_full(
     }
 
     Ok(folder_changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::imap::{
+        client::mock::MockImapClient,
+        types::{FolderStatusExtended, ImapMessageHeader},
+    };
+
+    #[tokio::test]
+    async fn full_sync_rejects_flags_fetched_before_uidvalidity_reset() {
+        stale_reconciliation(false).await;
+    }
+
+    #[tokio::test]
+    async fn condstore_rejects_flags_fetched_before_uidvalidity_reset() {
+        stale_reconciliation(true).await;
+    }
+
+    async fn stale_reconciliation(condstore: bool) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config: AppConfig = serde_json::from_str("{}").unwrap();
+        config.data_dir = directory.path().to_str().unwrap().into();
+        config.database_url = std::env::var("OXI_TEST_DATABASE_URL").ok();
+        config.initialize_database().await.unwrap();
+        let hash = format!("sync-race-{}", uuid::Uuid::new_v4());
+        let database = config.user_db(&hash).await.unwrap();
+        db::folders::upsert_folder(&database, "INBOX", None, None, "", true, 1, 1, 1, 1)
+            .await
+            .unwrap();
+        db::messages::upsert_message(
+            &database, "INBOX", 7, None, None, None, "Old", "", "", "[]", "[]", "", "", 1, false,
+            "", None,
+        )
+        .await
+        .unwrap();
+        let header_sync = HeaderSync::capture(&database).await.unwrap();
+        let mut client = MockImapClient::new().with_headers(vec![ImapMessageHeader {
+            uid: 7,
+            flags: vec!["\\Seen".into()],
+            subject: None,
+            from: vec![],
+            to: vec![],
+            cc: vec![],
+            date: None,
+            has_attachments: false,
+            size: 1,
+            message_id: None,
+            in_reply_to: None,
+            references: None,
+            reaction: None,
+        }]);
+        client.flag_fetch_gate = Some((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
+        let client = Arc::new(client);
+        let creds = ImapCredentials {
+            host: "unused".into(),
+            port: 993,
+            tls: true,
+            email: "test@test".into(),
+            password: "unused".into(),
+        };
+        let config = Arc::new(config);
+        let task_config = config.clone();
+        let task_client = client.clone();
+        let task_hash = hash.clone();
+        let task = tokio::spawn(async move {
+            let status = FolderStatusExtended {
+                uid_validity: 1,
+                exists: 1,
+                uid_next: 8,
+                unseen: 0,
+                highest_modseq: 2,
+            };
+            let events = EventBus::new();
+            if condstore {
+                sync_condstore(
+                    &task_config,
+                    &task_hash,
+                    &creds,
+                    task_client.as_ref(),
+                    "INBOX",
+                    1,
+                    &status,
+                    &events,
+                    header_sync,
+                )
+                .await
+            } else {
+                sync_full(
+                    &task_config,
+                    &task_hash,
+                    &creds,
+                    task_client.as_ref(),
+                    "INBOX",
+                    &status,
+                    &events,
+                    header_sync,
+                )
+                .await
+            }
+        });
+        let gate = client.flag_fetch_gate.as_ref().unwrap();
+        gate.0.notified().await;
+        let transaction = database.begin_write().await.unwrap();
+        db::messages::delete_folder_messages(&transaction, "INBOX")
+            .await
+            .unwrap();
+        db::header_sync::invalidate(&transaction).await.unwrap();
+        db::folders::update_folder_sync_status(&transaction, "INBOX", 2, 1, 99)
+            .await
+            .unwrap();
+        db::messages::upsert_message(
+            &transaction,
+            "INBOX",
+            7,
+            None,
+            None,
+            None,
+            "New namespace",
+            "",
+            "",
+            "[]",
+            "[]",
+            "",
+            "",
+            1,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+        gate.1.notify_one();
+        assert!(task.await.unwrap().unwrap_err().contains("superseded"));
+        let folder = db::folders::get_folder(&database, "INBOX")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(folder.uid_validity, 2);
+        assert_eq!(folder.highest_modseq, 99);
+        let message = db::messages::get_single_message(&database, "INBOX", 7)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(message.subject, "New namespace");
+        assert!(message.flags.is_empty());
+        config.database.as_ref().unwrap().close().await;
+    }
 }

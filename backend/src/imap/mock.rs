@@ -18,6 +18,8 @@ pub struct MockImapClient {
     pub header_requests: Mutex<Vec<(String, String)>>,
     /// One-shot gate after taking a header snapshot, before returning it.
     pub header_fetch_gate: Option<(tokio::sync::Notify, tokio::sync::Notify)>,
+    /// Gate flag snapshots to exercise reconciliation races.
+    pub flag_fetch_gate: Option<(tokio::sync::Notify, tokio::sync::Notify)>,
 }
 
 impl MockImapClient {
@@ -34,6 +36,7 @@ impl MockImapClient {
             expunged: Mutex::new(Vec::new()),
             header_requests: Mutex::new(Vec::new()),
             header_fetch_gate: None,
+            flag_fetch_gate: None,
         }
     }
 
@@ -230,8 +233,14 @@ impl ImapClient for MockImapClient {
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }
-        self.expunged.lock().unwrap().push((_folder.to_string(), _uid));
-        self.headers.lock().unwrap().retain(|header| header.uid != _uid);
+        self.expunged
+            .lock()
+            .unwrap()
+            .push((_folder.to_string(), _uid));
+        self.headers
+            .lock()
+            .unwrap()
+            .retain(|header| header.uid != _uid);
         Ok(())
     }
 
@@ -306,8 +315,18 @@ impl ImapClient for MockImapClient {
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }
-        let headers = self.headers.lock().unwrap();
-        Ok(headers.iter().map(|h| (h.uid, h.flags.clone())).collect())
+        let items = self
+            .headers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|h| (h.uid, h.flags.clone()))
+            .collect();
+        if let Some((fetched, resume)) = &self.flag_fetch_gate {
+            fetched.notify_one();
+            resume.notified().await;
+        }
+        Ok(items)
     }
 
     async fn folder_status_extended(
@@ -350,9 +369,17 @@ impl ImapClient for MockImapClient {
             return Err(clone_error(err));
         }
         // In mock, return all headers as "changed" with modseq 0.
-        let headers = self.headers.lock().unwrap();
-        let items: Vec<(u32, Vec<String>)> =
-            headers.iter().map(|h| (h.uid, h.flags.clone())).collect();
+        let items = self
+            .headers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|h| (h.uid, h.flags.clone()))
+            .collect();
+        if let Some((fetched, resume)) = &self.flag_fetch_gate {
+            fetched.notify_one();
+            resume.notified().await;
+        }
         Ok((items, 0))
     }
 

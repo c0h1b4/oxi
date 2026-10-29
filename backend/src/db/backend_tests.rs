@@ -387,6 +387,32 @@ async fn postgres_api_round_trip_uses_no_sqlite_and_survives_reconnect() {
             response.into_body().collect().await.unwrap().to_bytes()
         );
     }
+    messages::upsert_message(
+        &database, "INBOX", 77, None, None, None, "Flags", "", "", "[]", "[]", "", "", 1, false,
+        "", None,
+    )
+    .await
+    .unwrap();
+    let seen = app.clone().oneshot(request(
+        "PATCH",
+        "/api/messages/INBOX/77/flags",
+        r#"{"flags":["\\Seen"],"add":true}"#,
+    ));
+    let flagged = app.clone().oneshot(request(
+        "PATCH",
+        "/api/messages/INBOX/77/flags",
+        r#"{"flags":["\\Flagged"],"add":true}"#,
+    ));
+    let (seen, flagged) = tokio::join!(seen, flagged);
+    assert_eq!(seen.unwrap().status(), StatusCode::OK);
+    assert_eq!(flagged.unwrap().status(), StatusCode::OK);
+    let flags = messages::get_single_message(&database, "INBOX", 77)
+        .await
+        .unwrap()
+        .unwrap()
+        .flags;
+    assert!(flags.contains("\\Seen"));
+    assert!(flags.contains("\\Flagged"));
     let response = app
         .clone()
         .oneshot(request("GET", "/api/contacts", ""))

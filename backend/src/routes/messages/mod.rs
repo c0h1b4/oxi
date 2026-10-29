@@ -899,7 +899,8 @@ pub async fn update_flags(
         .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let current_flags_csv = db::messages::get_single_message(&conn, &folder, uid)
+    let transaction = conn.begin_write().await.map_err(AppError::InternalError)?;
+    let current_flags_csv = db::messages::get_single_message(&transaction, &folder, uid)
         .await
         .map_err(AppError::InternalError)?
         .map(|message| message.flags)
@@ -925,15 +926,19 @@ pub async fn update_flags(
     }
 
     let new_flags_csv = current_flags.join(",");
-    db::messages::update_message_flags(&conn, &folder, uid, &new_flags_csv)
+    db::messages::update_message_flags(&transaction, &folder, uid, &new_flags_csv)
         .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     // Refresh unread count after flag change.
-    db::folders::refresh_unread_count(&conn, &folder)
+    db::folders::refresh_unread_count(&transaction, &folder)
         .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
+    transaction
+        .commit()
+        .await
+        .map_err(AppError::InternalError)?;
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
 }
 
