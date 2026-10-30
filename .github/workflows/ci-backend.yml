@@ -1,0 +1,41 @@
+name: Backend
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+jobs:
+  check:
+    name: Rust (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [clippy, test]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: ci-${{ matrix.check }}
+          cache-on-failure: true
+      - name: Clippy
+        if: matrix.check == 'clippy'
+        run: cargo clippy --locked -- -D warnings
+      - name: Tests
+        if: matrix.check == 'test'
+        run: cargo test --locked
