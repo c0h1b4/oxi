@@ -64,6 +64,6 @@ jobs:
         id: plan
         run: |
           BASE_SHA=$(cat release-context/release-base.txt)
-          # Only accept a Git object ID or the manual-dispatch HEAD parent.
-          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}(\^)?$ ]]
+          # CI records a full push boundary or a validated manual recovery SHA.
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           python3 .github/scripts/version.py plan --base "$BASE_SHA"

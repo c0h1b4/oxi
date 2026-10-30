@@ -2,6 +2,8 @@
 import contextlib
 import io
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -106,6 +108,48 @@ class RepositoryTests(RepositoryFixture, unittest.TestCase):
         self.commit()
         self.assertEqual(self.plan(failed)['publish'], 'false')
         self.assertEqual(self.plan(self.base)['publish'], 'true')
+
+    def test_manual_recovery_preserves_multi_commit_push_boundary(self):
+        version.bump('patch')
+        self.commit()
+        post_bump = self.git('rev-parse', 'HEAD')
+        (self.root / 'README.md').write_text('same push, after the bump')
+        self.commit()
+        self.assertEqual(self.plan(post_bump)['publish'], 'false')
+        with self.assertRaisesRegex(ValueError, 'precede the version bump'):
+            version.recovery_base(post_bump)
+
+        # Exercise the CLI-to-artifact path used by manually dispatched CI.
+        script = self.root / '.github/scripts/version.py'
+        script.parent.mkdir(parents=True)
+        script.write_text(Path(version.__file__).read_text())
+        result = subprocess.run(
+            [sys.executable, str(script), 'recovery-base', '--base', self.base],
+            text=True, capture_output=True, check=True,
+        )
+        artifact = self.root / 'release-base.txt'
+        artifact.write_text(result.stdout)
+        self.assertEqual(artifact.read_text().strip(), self.base)
+        self.assertEqual(self.plan(artifact.read_text().strip())['publish'], 'true')
+
+    def test_recovery_rejects_missing_or_symbolic_boundary(self):
+        for base in ('', 'HEAD^', self.base[:12], '--all'):
+            with self.subTest(base=base), self.assertRaisesRegex(ValueError, 'full original'):
+                version.recovery_base(base)
+
+    def test_recovery_rejects_head_and_non_ancestor(self):
+        version.bump('patch')
+        self.commit()
+        head = self.git('rev-parse', 'HEAD')
+        with self.assertRaisesRegex(ValueError, 'strict ancestor'):
+            version.recovery_base(head)
+        self.git('checkout', '--orphan', 'unrelated')
+        (self.root / 'README.md').write_text('unrelated history')
+        self.commit()
+        unrelated = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '--detach', head)
+        with self.assertRaisesRegex(ValueError, 'strict ancestor'):
+            version.recovery_base(unrelated)
 
     def test_new_release_and_same_commit_retry(self):
         version.bump('patch')

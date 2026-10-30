@@ -2,6 +2,10 @@ name: Version policy
 
 on:
   workflow_call:
+    inputs:
+      recovery-base:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,8 +37,15 @@ jobs:
       - name: Record release boundary
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.before || format('{0}^', github.sha) }}
-        run: printf '%s\n' "$BASE_SHA" > release-base.txt
+          BASE_SHA: ${{ github.event.before }}
+          RECOVERY_BASE: ${{ inputs.recovery-base }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == 'workflow_dispatch' ]]; then
+            python3 .github/scripts/version.py recovery-base --base "$RECOVERY_BASE" > release-base.txt
+          else
+            printf '%s\n' "$BASE_SHA" > release-base.txt
+          fi
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:

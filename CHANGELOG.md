@@ -14,7 +14,9 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 - Move container builds and GHCR/Docker Hub publication into a separate CD gate
   that releases the exact commit validated by main CI.
 - Add a manual full Nix build workflow outside the fast required CI budget.
-
+- Validate explicit pre-push boundaries for manual release recovery, including
+  version bumps earlier in multi-commit pushes.
+- Keep README deployment examples pinned to the published release.
 - Release version bumps on `main` automatically after CI passes, with generated
   GitHub release notes and versioned Docker images.
 - Require a version bump per main PR, with a `no-release` exception for maintenance.
