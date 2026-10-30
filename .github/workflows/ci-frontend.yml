@@ -1,0 +1,49 @@
+name: Frontend
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  check:
+    name: Frontend (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [quality, build]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun downloads and Next compiler
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            frontend/.next/cache
+          key: frontend-${{ runner.os }}-${{ matrix.check }}-${{ hashFiles('frontend/bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            frontend-${{ runner.os }}-${{ matrix.check }}-${{ hashFiles('frontend/bun.lock') }}-
+            frontend-${{ runner.os }}-${{ matrix.check }}-
+      - run: bun install --frozen-lockfile
+      - name: Lint, tests and types
+        if: matrix.check == 'quality'
+        run: |
+          bun run lint
+          bun run test
+          bun run typecheck
+      - name: Static export
+        if: matrix.check == 'build'
+        run: bun run build

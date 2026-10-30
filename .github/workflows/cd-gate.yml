@@ -1,0 +1,59 @@
+name: CD Gate
+
+on:
+  workflow_run:
+    workflows: [CI Gate]
+    branches: [main]
+    types: [completed]
+
+# Keep all image aliases ordered; CI can cancel obsolete work independently.
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    uses: ./.github/workflows/cd-version.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+      ci-run-id: ${{ github.event.workflow_run.id }}
+
+  docker:
+    needs: version
+    if: needs.version.outputs.current == 'true'
+    uses: ./.github/workflows/cd-docker.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+      version: ${{ needs.version.outputs.version }}
+      tag: ${{ needs.version.outputs.tag }}
+      publish: ${{ needs.version.outputs.publish == 'true' }}
+      prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  release:
+    needs: [version, docker]
+    if: needs.version.outputs.publish == 'true'
+    uses: ./.github/workflows/cd-release.yml
+    permissions:
+      contents: write
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+
+  # A future cd-nix-cache.yml publisher can depend on version here, using the
+  # same validated SHA. It must stay outside the required CI critical path.

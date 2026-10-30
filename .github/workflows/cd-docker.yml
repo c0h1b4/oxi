@@ -1,0 +1,89 @@
+name: Container publication
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        required: true
+      prerelease:
+        type: boolean
+        required: true
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: Validate registry configuration
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+        run: |
+          : "${DOCKERHUB_USERNAME:?Set the DOCKERHUB_USERNAME secret}"
+          : "${DOCKERHUB_TOKEN:?Set the DOCKERHUB_TOKEN secret}"
+          : "${DOCKERHUB_IMAGE:?Set DOCKERHUB_IMAGE to namespace/image}"
+      - name: Resolve image names
+        id: images
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "ghcr=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # workflow_run's github.sha is NOT necessarily the validated commit.
+          context: git
+          images: |
+            ${{ steps.images.outputs.ghcr }}
+            ${{ vars.DOCKERHUB_IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=sha
+            type=raw,value=edge
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.publish }}
+            type=raw,value=${{ inputs.version }},enable=${{ inputs.publish }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.publish && !inputs.prerelease }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.publish && !inputs.prerelease && !startsWith(inputs.version, '0.') }}
+            type=raw,value=latest,enable=${{ inputs.publish && !inputs.prerelease }}
+      - name: Build once and publish to both registries
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=oxi-release
+          cache-to: type=gha,mode=max,scope=oxi-release
