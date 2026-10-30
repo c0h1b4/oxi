@@ -9,7 +9,7 @@
 A feature-complete replacement for Roundcube that connects to any existing IMAP/SMTP mail server.\
 Not a mail platform — just a clean, modern webmail UI.
 
-[![CI](https://github.com/c0h1b4/oxi/actions/workflows/ci.yml/badge.svg)](https://github.com/c0h1b4/oxi/actions/workflows/ci.yml)
+[![CI](https://github.com/c0h1b4/oxi/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/c0h1b4/oxi/actions/workflows/ci-gate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/c0h1b4/oxi)](https://github.com/c0h1b4/oxi/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/c0h1b4/oxi)](https://github.com/c0h1b4/oxi/commits/main)
@@ -50,8 +50,8 @@ oxi now uses versioned releases. The 0.x series is beta software; breaking chang
 may occur before 1.0. Back up persistent data before upgrading.
 
 Use a versioned Docker tag for reproducible deployments. The `latest` image tracks
-`main` and can include unreleased changes. See the [changelog](CHANGELOG.md) and
-[release process](docs/RELEASING.md).
+numbered releases; `edge` tracks `main` and can include unreleased changes.
+See the [changelog](CHANGELOG.md) and [release process](docs/RELEASING.md).
 
 ## Quick Start
 

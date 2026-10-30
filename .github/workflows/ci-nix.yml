@@ -1,0 +1,42 @@
+name: Nix
+
+on:
+  workflow_call:
+    inputs:
+      build:
+        description: Build checks and the complete package (outside the fast CI budget)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Nix (${{ inputs.build && 'build' || 'evaluate' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.build && 30 || 4 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build && 'build' || 'eval' }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            nix-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build && 'build' || 'eval' }}-${{ hashFiles('flake.lock') }}-
+            nix-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build && 'build' || 'eval' }}-
+      - name: Materialize package derivation sources
+        # The pinned bun2nix imports deps.nix via an interpolated source path.
+        # Materialize it before flake check enters read-only evaluation mode.
+        # This evaluates the derivation without building the application.
+        run: nix eval --raw .#packages.x86_64-linux.default.drvPath --no-update-lock-file --no-write-lock-file
+      - name: Evaluate flake and module assertions
+        run: nix flake check --no-build --no-update-lock-file --no-write-lock-file
+      - name: Build checks and package
+        if: inputs.build
+        run: |
+          nix flake check --no-update-lock-file --no-write-lock-file --print-build-logs
+          nix build .#default --no-update-lock-file --no-write-lock-file --print-build-logs
