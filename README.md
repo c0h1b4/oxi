@@ -45,13 +45,13 @@ Not a mail platform — just a clean, modern webmail UI.
 
 ## Releases
 
-**Current release: [v0.1.2 (Beta)](https://github.com/c0h1b4/oxi/releases/tag/v0.1.2).**
+**Current release: [v0.1.3 (Beta)](https://github.com/c0h1b4/oxi/releases/tag/v0.1.3).**
 oxi now uses versioned releases. The 0.x series is beta software; breaking changes
 may occur before 1.0. Back up persistent data before upgrading.
 
 Use a versioned Docker tag for reproducible deployments. The `latest` image tracks
-`main` and can include unreleased changes. See the [changelog](CHANGELOG.md) and
-[release process](docs/RELEASING.md).
+numbered releases; `edge` tracks `main` and can include unreleased changes.
+See the [changelog](CHANGELOG.md) and [release process](docs/RELEASING.md).
 
 ## Quick Start
 
@@ -64,7 +64,7 @@ docker run -d \
   -e IMAP_HOST=mail.example.com \
   -e SMTP_HOST=mail.example.com \
   -v oxi-data:/data \
-  ghcr.io/c0h1b4/oxi:v0.1.2
+  ghcr.io/c0h1b4/oxi:v0.1.3
 ```
 
 Or with `docker-compose.yml`:
@@ -72,7 +72,7 @@ Or with `docker-compose.yml`:
 ```yaml
 services:
   app:
-    image: ghcr.io/c0h1b4/oxi:v0.1.2
+    image: ghcr.io/c0h1b4/oxi:v0.1.3
     ports:
       - "3001:3001"
     environment:
