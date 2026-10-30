@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Called only after tests and GHCR publication succeed, on the validated checkout.
+# Called only after CI and both container registry publications succeed, on the validated checkout.
 set -euo pipefail
 : "${RELEASE_SHA:?set RELEASE_SHA to the validated commit}"
 [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]] || { echo 'Wrong checkout' >&2; exit 1; }

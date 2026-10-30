@@ -1,0 +1,44 @@
+name: Version policy
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test release tooling
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Verify package versions
+        run: python3 .github/scripts/version.py current
+      - name: Require a bump for main PRs (unless labeled no-release)
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: python3 .github/scripts/version.py check --base "$BASE_SHA"
+      - name: Prevent version rollback on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: python3 .github/scripts/version.py check --base "$BASE_SHA" --allow-same
+      - name: Record release boundary
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.before || format('{0}^', github.sha) }}
+        run: printf '%s\n' "$BASE_SHA" > release-base.txt
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: release-context
+          path: release-base.txt
+          retention-days: 14
+

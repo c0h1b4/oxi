@@ -1,0 +1,41 @@
+name: CI Gate
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    uses: ./.github/workflows/ci-version.yml
+  backend:
+    uses: ./.github/workflows/ci-backend.yml
+  frontend:
+    uses: ./.github/workflows/ci-frontend.yml
+  nix:
+    uses: ./.github/workflows/ci-nix.yml
+
+  gate:
+    name: CI Gate
+    if: always()
+    needs: [version, backend, frontend, nix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require every check to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq .
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'

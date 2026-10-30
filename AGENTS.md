@@ -84,7 +84,7 @@ cd frontend && bun run lint
 - Main PRs must bump the version; use `python3 .github/scripts/version.py bump`
   (patch by default), `bump minor`, or `bump major`. Commit all changed manifests.
 - Maintainers can label maintenance-only PRs `no-release` to keep the version.
-- CI publishes tested version bumps on `main` to GHCR and GitHub automatically.
+- CD publishes CI-validated main version bumps to GHCR, Docker Hub, and GitHub automatically.
 - See `docs/RELEASING.md` for prereleases, overrides, Docker tags, and recovery.
 
 ## ENVIRONMENT
@@ -110,4 +110,6 @@ RUST_LOG=info
 - Frontend uses bun, Node 22
 - Each user gets their own SQLite DB under `DATA_DIR/{email_hash}/`
 - Real-time updates via WebSocket + IMAP IDLE manager
-- CI: `.github/workflows/ci.yml` runs clippy, tests, lint, build in parallel
+- CI: `.github/workflows/ci-gate.yml` calls reusable `ci-*.yml` checks; require only `CI Gate`
+- CD: `.github/workflows/cd-gate.yml` publishes successful main CI runs via reusable `cd-*.yml` workflows
+- Full Nix build/check: manually dispatch `.github/workflows/nix-build.yml`; required CI evaluates only

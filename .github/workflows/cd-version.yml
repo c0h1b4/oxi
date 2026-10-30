@@ -1,0 +1,69 @@
+name: Release plan
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        type: string
+        required: true
+      ci-run-id:
+        type: string
+        required: true
+    outputs:
+      current:
+        value: ${{ jobs.plan.outputs.current }}
+      version:
+        value: ${{ jobs.plan.outputs.version }}
+      tag:
+        value: ${{ jobs.plan.outputs.tag }}
+      publish:
+        value: ${{ jobs.plan.outputs.publish }}
+      prerelease:
+        value: ${{ jobs.plan.outputs.prerelease }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      current: ${{ steps.head.outputs.current }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      publish: ${{ steps.plan.outputs.publish }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - name: Ignore superseded main runs
+        id: head
+        env:
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          if [[ "$(git rev-parse origin/main)" == "$RELEASE_SHA" ]]; then
+            echo 'current=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'current=false' >> "$GITHUB_OUTPUT"
+            echo 'A newer main commit exists; skipping publication.'
+          fi
+      - name: Download boundary from the successful main CI run
+        if: steps.head.outputs.current == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-context
+          path: release-context
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci-run-id }}
+      - name: Plan immutable version tags
+        if: steps.head.outputs.current == 'true'
+        id: plan
+        run: |
+          BASE_SHA=$(cat release-context/release-base.txt)
+          # Only accept a Git object ID or the manual-dispatch HEAD parent.
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}(\^)?$ ]]
+          python3 .github/scripts/version.py plan --base "$BASE_SHA"
