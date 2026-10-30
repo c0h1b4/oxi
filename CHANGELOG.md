@@ -5,6 +5,8 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-30
+
 ### Changed
 
 - Split CI into reusable workflows behind one required `CI Gate`, with parallel
@@ -12,10 +14,6 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 - Move container builds and GHCR/Docker Hub publication into a separate CD gate
   that releases the exact commit validated by main CI.
 - Add a manual full Nix build workflow outside the fast required CI budget.
-
-## [0.1.3] - 2026-10-30
-
-### Changed
 
 - Release version bumps on `main` automatically after CI passes, with generated
   GitHub release notes and versioned Docker images.
