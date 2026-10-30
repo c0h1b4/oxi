@@ -1,75 +1,94 @@
 # Release process
 
-oxi uses Semantic Versioning with Git tags named `vMAJOR.MINOR.PATCH`.
-The 0.x series is beta software. Numbered releases are marked Latest on GitHub
-so they appear in the repository Releases box; keep the Beta label in their
-titles and notes. Breaking changes are possible before 1.0; document them in
-each release's notes.
+oxi uses SemVer and publishes from validated `main` commits, following
+[Pantheon's version-gated release model](https://github.com/GustavoWidman/pantheon/blob/main/.github/workflows/release.yml).
+The version in `backend/Cargo.toml` is authoritative. CI requires the backend
+lockfile and frontend manifest to agree; Nix reads the frontend manifest directly.
+Python 3.11+ is required for the release helper.
 
-- Patch releases contain fixes; minor releases add features.
-- For release candidates or additional beta iterations, use a SemVer suffix such
-  as `v0.2.0-beta.1` and use the same version without `v` in package manifests.
-- Never move or overwrite a published release tag. Publish a new version instead.
+## Everyday changes
 
-## Prepare
-
-1. Start a release branch from the current `main`.
-2. Set the same version in `backend/Cargo.toml` and `frontend/package.json`.
-   Also update the frontend version in `nix/frontend.nix`.
-   Update the `oxi-email-server` entry in `backend/Cargo.lock` with Cargo and
-   commit any resulting lockfile changes. Do not update dependencies incidentally.
-3. Move the relevant `CHANGELOG.md` entries out of `Unreleased` into a dated
-   version section. Add release notes under `docs/releases/vVERSION.md`, including
-   upgrade steps and known limitations. Update the current release and pinned
-   Docker examples in `README.md`.
-4. Open a pull request against `main`. Merge only after CI passes (Rust lint and
-   tests, frontend lint/tests/build, and Docker build).
-
-## Tag and publish
-
-Run these commands from a clean checkout after merging the release pull request,
-replacing `0.1.2` with the version being released:
+Prefer one small release per user-facing PR rather than batching unrelated fixes.
+Before opening a PR against `main`, run from the repository root:
 
 ```bash
-git fetch origin --tags
-git switch main
-git pull --ff-only origin main
-git tag -a v0.1.2 -m "oxi v0.1.2 (Beta)"
-git push origin v0.1.2
+python3 .github/scripts/version.py bump          # patch: 0.1.2 -> 0.1.3
+python3 .github/scripts/version.py bump minor    # feature: 0.1.2 -> 0.2.0
+python3 .github/scripts/version.py bump major    # breaking stable API: 1.2.3 -> 2.0.0
 ```
 
-The tag triggers CI again. It verifies that the tag matches both package versions
-and the backend lockfile, then runs all tests and builds. After those checks pass,
-it publishes Docker images to GHCR with both `v0.1.2` and `0.1.2` tags (and a SHA
-tag). Releases do not update `latest`; that tag continues to track `main`.
-No floating minor or major release tags are published.
+Choose one command. The helper updates both manifests and the backend lockfile
+without changing dependencies. Commit those changes with the feature or fix.
+For breaking changes during 0.x, increment the minor version and document the
+migration; the 0.x series remains beta software. After 1.0, breaking changes
+require a major version bump.
 
-Wait for the tag's CI run to succeed and verify that the image exists:
+PRs targeting `main` must increase the version relative to their base. Rebase and
+bump again if another PR has already used your version. Maintainers can apply the
+`no-release` label for documentation, tests, or maintenance changes that should
+keep the existing version. The label exempts only the bump requirement: version
+mismatches and downgrades still fail, and a PR that bumps the version still releases.
+Protect `main` with the Version policy, backend, frontend, and Docker checks.
+
+Keep noteworthy changes in `CHANGELOG.md`. Release notes are generated from GitHub
+PR history automatically. For migration instructions or a curated announcement,
+add `docs/releases/vVERSION.md`; its contents precede the generated notes.
+A hand-written release announcement is optional.
+
+## Automatic publishing
+
+On a push to `main`, CI checks version consistency and rejects version decreases,
+runs Rust lint/tests and frontend lint/tests/typecheck/build, then builds Docker.
+When the version is new, it publishes the image, creates an immutable annotated
+`vVERSION` tag at that exact tested commit, and publishes a GitHub release.
+The same workflow performs all steps; it does not rely on a bot-created tag
+triggering another Actions run. No additional PAT is required.
+
+Docker tags:
+
+| Tag | Meaning |
+| --- | --- |
+| `v0.1.3`, `0.1.3` | Exact release version; recommended for deployments |
+| `0.1` | Latest stable release within that minor series |
+| `1` (once 1.x exists) | Latest stable release within that major series; no `0` alias |
+| `latest` | Latest release without a prerelease suffix, including numbered 0.x betas |
+| `edge` | Latest successful push build of `main`, including unreleased changes |
+| `sha-…` | A successful build of a specific commit |
+
+A push that retains an already released version updates only `edge` and its SHA
+image. PRs and `develop` builds validate Docker without publishing. Prereleases
+publish exact version and SHA tags and are marked prerelease on GitHub; they do
+not update `latest`, minor, or major aliases. Numbered 0.x releases are titled
+Beta but marked Latest on GitHub.
+
+## Overrides and recovery
+
+Prefer the normal patch/minor/major helper over manually choosing a version.
+For an intentional jump or prerelease, supply an exact version:
 
 ```bash
-gh run list --workflow ci.yml --branch v0.1.2
-docker buildx imagetools inspect ghcr.io/c0h1b4/oxi:v0.1.2
+python3 .github/scripts/version.py bump 0.2.0-rc.1
+# Later, promote with a new commit:
+python3 .github/scripts/version.py bump 0.2.0
 ```
 
-Then publish the GitHub release against the existing tag:
+Exact versions must increase and follow `MAJOR.MINOR.PATCH[-PRERELEASE]`.
+Build metadata (`+...`) is unsupported because Docker tags cannot contain `+`.
+Do not override the version only in the Actions UI or manually push release tags;
+commit the version so artifacts and manifests always agree.
 
-```bash
-gh release create v0.1.2 --verify-tag \
-  --title "oxi v0.1.2 (Beta)" \
-  --notes-file docs/releases/v0.1.2.md \
-  --latest
-```
-
-For release candidates or versions with a prerelease suffix, use
-`--prerelease --latest=false` instead of `--latest`.
-GitHub provides source archives automatically. Standalone binaries are not
-currently built or attached; the supported packaged distribution is the Docker
-image. If tag CI fails, fix the issue on `main` and prepare a new version rather
-than moving the failed tag.
+If publication fails, rerun the failed CI run at the same commit. Alternatively,
+run CI with **Run workflow** on `main` while that release commit is still its head.
+The workflow can finish after a tag was pushed but the GitHub release failed.
+An existing tag is never moved, and a later unchanged commit cannot take over an
+older tag. Old reruns with a newer version tag already present do not republish
+release aliases. If a newer commit has superseded a failed release, bump to a new
+version instead. The full validation suite also runs for manual dispatches.
 
 ## Upgrade
 
 Read the release notes, back up the persistent `/data` volume, and replace the
 image tag in your deployment. Keep the previous image reference and data backup
 until the upgrade is verified. Downgrades may require restoring that backup if
-a release changes the cache schema.
+a release changes the cache schema. GitHub provides source archives; Docker is
+the packaged distribution, and standalone binaries are not published.

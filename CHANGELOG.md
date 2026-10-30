@@ -5,6 +5,18 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-30
+
+### Changed
+
+- Release version bumps on `main` automatically after CI passes, with generated
+  GitHub release notes and versioned Docker images.
+- Require a version bump per main PR, with a `no-release` exception for maintenance.
+- Add a patch-by-default version helper with minor, major, and exact-version support.
+- Make Docker `latest` track numbered releases and `edge` track `main`; add
+  floating minor tags and major tags starting at 1.0.
+- Read the Nix frontend version from its package manifest.
+
 ## [0.1.2] - 2026-10-27
 
 ### Fixed
@@ -57,7 +69,8 @@ Initial versioned beta release.
 - Docker images and source archives are provided; standalone release binaries are
   not currently published.
 
-[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/c0h1b4/oxi/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/c0h1b4/oxi/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/c0h1b4/oxi/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/c0h1b4/oxi/releases/tag/v0.1.0

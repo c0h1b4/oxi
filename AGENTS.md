@@ -79,6 +79,14 @@ cd backend && cargo clippy -- -D warnings
 cd frontend && bun run lint
 ```
 
+## RELEASES
+
+- Main PRs must bump the version; use `python3 .github/scripts/version.py bump`
+  (patch by default), `bump minor`, or `bump major`. Commit all changed manifests.
+- Maintainers can label maintenance-only PRs `no-release` to keep the version.
+- CI publishes tested version bumps on `main` to GHCR and GitHub automatically.
+- See `docs/RELEASING.md` for prereleases, overrides, Docker tags, and recovery.
+
 ## ENVIRONMENT
 
 ```bash
