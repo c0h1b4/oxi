@@ -139,8 +139,20 @@ commit the version so artifacts and manifests always agree.
 
 If publication fails, rerun the failed **CD Gate** run at the same commit while
 it is still main HEAD. The CI `release-context` artifact is retained for 14 days.
-If it has expired, run **CI Gate** with **Run workflow** on `main` to revalidate
-and regenerate it; successful CI triggers CD again.
+If it has expired, run **CI Gate** with **Run workflow** on `main` and set
+`release-base` to the full original pre-push commit SHA (the `before` field of
+the failed release's original push, or the SHA in its `release-context` artifact).
+Successful CI regenerates the artifact and triggers CD again. For example:
+
+```bash
+gh workflow run ci-gate.yml --ref main -f release-base=FULL_ORIGINAL_PRE_PUSH_SHA
+```
+
+Manual main runs require this explicit boundary: it must be an existing strict
+ancestor of HEAD whose package version precedes the current version bump.
+Missing, unrelated, or post-bump boundaries fail validation. Do not substitute
+`HEAD^`: a multi-commit push can have the bump earlier in its history. Manual CI
+on other branches does not require `release-base`.
 The workflow can finish after a tag was pushed but the GitHub release failed.
 An existing tag is never moved, and a later unchanged commit cannot take over an
 older tag. Old reruns with a newer version tag already present do not republish

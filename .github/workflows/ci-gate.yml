@@ -8,6 +8,11 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:
   workflow_dispatch:
+    inputs:
+      release-base:
+        description: Original pre-push full commit SHA (required for main release recovery)
+        type: string
+        required: false
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -19,6 +24,8 @@ permissions:
 jobs:
   version:
     uses: ./.github/workflows/ci-version.yml
+    with:
+      recovery-base: ${{ github.event.inputs.release-base || '' }}
   backend:
     uses: ./.github/workflows/ci-backend.yml
   frontend:

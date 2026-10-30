@@ -101,6 +101,24 @@ def bump(target):
     print(f'{version.value} -> {current().value}')
 
 
+def recovery_base(base):
+    """Validate the original pre-push commit for a manual publication retry."""
+    if not re.fullmatch(r'[0-9a-f]{40}', base):
+        raise ValueError('Supply release-base as the full original pre-push commit SHA')
+    head = git('rev-parse', 'HEAD')
+    # Resolve as a commit, not an arbitrary ref or Git revision expression.
+    if git('rev-parse', '--verify', f'{base}^{{commit}}') != base:
+        raise ValueError('Recovery base must identify a commit')
+    if base == head or subprocess.run(
+        ['git', 'merge-base', '--is-ancestor', base, head], cwd=ROOT,
+    ).returncode:
+        raise ValueError('Recovery base must be a strict ancestor of the validated commit')
+    previous = Version(tomllib.loads(git('show', f'{base}:backend/Cargo.toml'))['package']['version'])
+    if current() <= previous:
+        raise ValueError('Recovery base must precede the version bump; use the original pre-push SHA')
+    return base
+
+
 def plan(base=None):
     version = current()
     tag = f'v{version.value}'
@@ -142,6 +160,8 @@ def main():
     check_parser = sub.add_parser('check')
     check_parser.add_argument('--base', required=True)
     check_parser.add_argument('--allow-same', action='store_true')
+    recovery_parser = sub.add_parser('recovery-base')
+    recovery_parser.add_argument('--base', required=True)
     plan_parser = sub.add_parser('plan')
     plan_parser.add_argument('--base', help='pre-push commit; unchanged pushes do not release')
     args = parser.parse_args()
@@ -149,6 +169,8 @@ def main():
         print(current().value)
     elif args.action == 'bump':
         bump(args.target)
+    elif args.action == 'recovery-base':
+        print(recovery_base(args.base))
     elif args.action == 'check':
         check(args.base, args.allow_same or 'no-release' in os.environ.get('LABELS', '').split(','))
     else:
