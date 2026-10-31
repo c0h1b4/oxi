@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { compile } from "tailwindcss";
 import type { Editor } from "@tiptap/react";
 import { RichTextEditor } from "../RichTextEditor";
 
@@ -88,5 +91,47 @@ describe("RichTextEditor Enter", () => {
     expect(items[1].textContent).toBe("");
     expect(editable.querySelector("blockquote")?.textContent).toBe("Original message");
     expect(onChange).toHaveBeenLastCalledWith(editor.getHTML());
+  });
+});
+
+describe("RichTextEditor lists", () => {
+  it.each([
+    ["Bullet List", "ul"],
+    ["Ordered List", "ol"],
+  ])("creates a list using the %s toolbar button", async (title, tag) => {
+    const { editable, editor, onChange } = await renderEditor("<p>First item</p>");
+    act(() => editor.commands.setTextSelection(1));
+
+    fireEvent.mouseDown(editable.closest(".flex-col")!.querySelector(`button[title="${title}"]`)!);
+
+    expect(editable.querySelector(`${tag} > li > p`)?.textContent).toBe("First item");
+    expect(onChange).toHaveBeenLastCalledWith(editor.getHTML());
+  });
+
+  it("restores markers and indentation for both list types at every nesting level", async () => {
+    const { editable } = await renderEditor(
+      "<ul><li><p>Bullet</p><ol><li><p>Nested number</p></li></ol></li></ul>" +
+      "<ol><li><p>Number</p><ul><li><p>Nested bullet</p></li></ul></li></ol>",
+    );
+    const require = createRequire(import.meta.url);
+    const [theme, preflight] = await Promise.all([
+      readFile(require.resolve("tailwindcss/theme.css"), "utf8"),
+      readFile(require.resolve("tailwindcss/preflight.css"), "utf8"),
+    ]);
+    const compiler = await compile(`${theme}\n${preflight}\n@tailwind utilities;`);
+    const style = document.createElement("style");
+    style.textContent = compiler.build(editable.className.split(/\s+/));
+    editable.parentElement!.append(style);
+
+    const lists = editable.querySelectorAll("ul, ol");
+    expect(lists).toHaveLength(4);
+    for (const list of lists) {
+      const styles = getComputedStyle(list);
+      expect(styles.listStyleType).toBe(list.tagName === "UL" ? "disc" : "decimal");
+      expect(styles.paddingInlineStart).not.toBe("");
+      expect(styles.paddingInlineStart).not.toBe("0px");
+    }
+    expect(editable.querySelector("ul > li > ol > li")?.textContent).toBe("Nested number");
+    expect(editable.querySelector("ol > li > ul > li")?.textContent).toBe("Nested bullet");
   });
 });
