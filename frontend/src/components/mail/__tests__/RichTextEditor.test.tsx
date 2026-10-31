@@ -90,3 +90,32 @@ describe("RichTextEditor Enter", () => {
     expect(onChange).toHaveBeenLastCalledWith(editor.getHTML());
   });
 });
+
+describe("RichTextEditor lists", () => {
+  it.each([
+    ["Bullet List", "ul"],
+    ["Ordered List", "ol"],
+  ])("creates a list using the %s toolbar button", async (title, tag) => {
+    const { editable, editor, onChange } = await renderEditor("<p>First item</p>");
+    act(() => editor.commands.setTextSelection(1));
+
+    fireEvent.mouseDown(editable.closest(".flex-col")!.querySelector(`button[title="${title}"]`)!);
+
+    expect(editable.querySelector(`${tag} > li > p`)?.textContent).toBe("First item");
+    expect(onChange).toHaveBeenLastCalledWith(editor.getHTML());
+  });
+
+  it("restores markers and indentation for both list types at every nesting level", async () => {
+    const { editable } = await renderEditor(
+      "<ul><li><p>Bullet</p><ol><li><p>Nested number</p></li></ol></li></ul>" +
+      "<ol><li><p>Number</p><ul><li><p>Nested bullet</p></li></ul></li></ol>",
+    );
+    expect(editable.classList.contains("[&_ul]:list-disc")).toBe(true);
+    expect(editable.classList.contains("[&_ol]:list-decimal")).toBe(true);
+    expect(editable.classList.contains("[&_ul]:ps-6")).toBe(true);
+    expect(editable.classList.contains("[&_ol]:ps-6")).toBe(true);
+    expect(editable.querySelectorAll("ul, ol")).toHaveLength(4);
+    expect(editable.querySelector("ul > li > ol > li")?.textContent).toBe("Nested number");
+    expect(editable.querySelector("ol > li > ul > li")?.textContent).toBe("Nested bullet");
+  });
+});
