@@ -157,7 +157,10 @@ The workflow can finish after a tag was pushed but the GitHub release failed.
 An existing tag is never moved, and a later unchanged commit cannot take over an
 older tag. Old reruns with a newer version tag already present do not republish
 release aliases. If a newer commit has superseded a failed release, bump to a new
-version instead. Required CI validation also runs for manual CI dispatches; full Nix builds
+version instead. For a maintenance-only publication fix that deliberately keeps
+the unreleased version, merge it with `no-release`, then manually run CI on
+`main` using the failed release's original pre-bump `release-base`. Rerunning
+an old CD run does not pick up workflow fixes and is skipped once superseded. Required CI validation also runs for manual CI dispatches; full Nix builds
 remain a separate manual workflow.
 
 ## Upgrade

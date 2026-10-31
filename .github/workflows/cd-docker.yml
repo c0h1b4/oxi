@@ -36,6 +36,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+      - name: Attach validated commit to a local branch for Git metadata
+        env:
+          RELEASE_SHA: ${{ inputs.sha }}
+        # metadata-action's Git context cannot resolve a shallow, unnamed HEAD.
+        # Name the exact tested commit; never check out the moving remote main.
+        run: git checkout -B main "$RELEASE_SHA"
       - name: Validate registry configuration
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
