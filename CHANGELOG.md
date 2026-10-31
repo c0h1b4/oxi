@@ -5,6 +5,8 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-31
+
 ### Fixed
 
 - Restore list markers and indentation in the compose editor, including nested lists.
@@ -15,7 +17,7 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 - Editable HTML source mode for composing, saving, and sending messages, with a
   warning that rich-text edits may remove unsupported HTML.
 
-## [0.1.3] - 2026-10-30
+## [0.1.3] - 2026-10-30 (unpublished)
 
 ### Changed
 
@@ -87,8 +89,9 @@ Initial versioned beta release.
 - Docker images and source archives are provided; standalone release binaries are
   not currently published.
 
-[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.3...HEAD
-[0.1.3]: https://github.com/c0h1b4/oxi/compare/v0.1.2...v0.1.3
+[Unreleased]: https://github.com/c0h1b4/oxi/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/c0h1b4/oxi/compare/v0.1.2...v0.1.4
+[0.1.3]: https://github.com/c0h1b4/oxi/compare/v0.1.2...d1179483b5fb74e9708cf16de8f73ed825dc07e1
 [0.1.2]: https://github.com/c0h1b4/oxi/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/c0h1b4/oxi/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/c0h1b4/oxi/releases/tag/v0.1.0
