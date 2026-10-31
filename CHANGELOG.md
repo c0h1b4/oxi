@@ -5,6 +5,16 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore list markers and indentation in the compose editor, including nested lists.
+- Reset HTML source editing mode for each new message while preserving it on undo-send.
+
+### Added
+
+- Editable HTML source mode for composing, saving, and sending messages, with a
+  warning that rich-text edits may remove unsupported HTML.
+
 ## [0.1.3] - 2026-10-30
 
 ### Changed

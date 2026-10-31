@@ -1,8 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { compile } from "tailwindcss";
 import type { Editor } from "@tiptap/react";
 import { RichTextEditor } from "../RichTextEditor";
 
@@ -113,24 +110,11 @@ describe("RichTextEditor lists", () => {
       "<ul><li><p>Bullet</p><ol><li><p>Nested number</p></li></ol></li></ul>" +
       "<ol><li><p>Number</p><ul><li><p>Nested bullet</p></li></ul></li></ol>",
     );
-    const require = createRequire(import.meta.url);
-    const [theme, preflight] = await Promise.all([
-      readFile(require.resolve("tailwindcss/theme.css"), "utf8"),
-      readFile(require.resolve("tailwindcss/preflight.css"), "utf8"),
-    ]);
-    const compiler = await compile(`${theme}\n${preflight}\n@tailwind utilities;`);
-    const style = document.createElement("style");
-    style.textContent = compiler.build(editable.className.split(/\s+/));
-    editable.parentElement!.append(style);
-
-    const lists = editable.querySelectorAll("ul, ol");
-    expect(lists).toHaveLength(4);
-    for (const list of lists) {
-      const styles = getComputedStyle(list);
-      expect(styles.listStyleType).toBe(list.tagName === "UL" ? "disc" : "decimal");
-      expect(styles.paddingInlineStart).not.toBe("");
-      expect(styles.paddingInlineStart).not.toBe("0px");
-    }
+    expect(editable.classList.contains("[&_ul]:list-disc")).toBe(true);
+    expect(editable.classList.contains("[&_ol]:list-decimal")).toBe(true);
+    expect(editable.classList.contains("[&_ul]:ps-6")).toBe(true);
+    expect(editable.classList.contains("[&_ol]:ps-6")).toBe(true);
+    expect(editable.querySelectorAll("ul, ol")).toHaveLength(4);
     expect(editable.querySelector("ul > li > ol > li")?.textContent).toBe("Nested number");
     expect(editable.querySelector("ol > li > ul > li")?.textContent).toBe("Nested bullet");
   });

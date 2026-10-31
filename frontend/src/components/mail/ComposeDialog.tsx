@@ -19,6 +19,7 @@ import {
   Minimize2,
   Upload,
   FileText,
+  FileCode,
   Code,
   PenLine,
 } from "lucide-react";
@@ -77,6 +78,7 @@ export function ComposeDialog() {
     attachments,
     fromIdentityId,
     isHtml,
+    editingHtmlSource,
     signatureHtml,
     signatureEnabled,
     signatureInitialized,
@@ -87,6 +89,7 @@ export function ComposeDialog() {
     setDraftId,
     setFromIdentityId,
     setIsHtml,
+    setEditingHtmlSource,
     setSignatureHtml,
     setSignatureEnabled,
     initializeSignature,
@@ -104,7 +107,6 @@ export function ComposeDialog() {
   const [draftSaved, setDraftSaved] = useState(false);
   const [showDiscardAlert, setShowDiscardAlert] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [editingHtmlSource, setEditingHtmlSource] = useState(false);
   const [previewAttId, setPreviewAttId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -521,7 +523,7 @@ export function ComposeDialog() {
     setEditingHtmlSource(false);
     setField("body", convertBodyFormat(body, isHtml, signatureHtml));
     setIsHtml(!isHtml);
-  }, [isHtml, body, signatureHtml, setField, setIsHtml]);
+  }, [isHtml, body, signatureHtml, setField, setIsHtml, setEditingHtmlSource]);
 
   const previewAttachment = previewAttId
     ? attachments.find((a) => a.id === previewAttId)
@@ -755,6 +757,11 @@ export function ComposeDialog() {
               )}
 
               {/* Body */}
+              {isHtml && editingHtmlSource && (
+                <p id="html-source-hint" className="shrink-0 px-4 pt-3 text-xs text-muted-foreground">
+                  Rich-text edits may remove unsupported HTML, including tables, styles, and custom attributes. Stay in HTML source to preserve them.
+                </p>
+              )}
               {isHtml && !editingHtmlSource ? (
                 <RichTextEditor
                   content={body}
@@ -766,6 +773,7 @@ export function ComposeDialog() {
               ) : (
                 <textarea
                   aria-label={isHtml ? "HTML source" : "Message body"}
+                  aria-describedby={isHtml ? "html-source-hint" : undefined}
                   value={body}
                   onChange={(e) => setField("body", e.target.value)}
                   placeholder={isHtml ? "Write your HTML..." : "Write your message..."}
@@ -857,7 +865,7 @@ export function ComposeDialog() {
                 {isHtml && (
                   <button
                     type="button"
-                    onClick={() => setEditingHtmlSource((editing) => !editing)}
+                    onClick={() => setEditingHtmlSource(!editingHtmlSource)}
                     aria-pressed={editingHtmlSource}
                     title={editingHtmlSource ? "Switch to rich-text editing" : "Edit HTML source"}
                     className={cn(
@@ -865,7 +873,7 @@ export function ComposeDialog() {
                       editingHtmlSource ? "text-primary" : "text-muted-foreground"
                     )}
                   >
-                    <Code className="size-4" />
+                    <FileCode className="size-4" />
                     HTML source
                   </button>
                 )}
