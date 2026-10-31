@@ -102,15 +102,15 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          `prose prose-sm dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere] [&_img]:max-w-full ${compact ? "min-h-[100px]" : "min-h-[200px]"} outline-none px-4 py-3`,
+          `max-w-none min-w-0 [overflow-wrap:anywhere] [&_img]:max-w-full [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:ps-6 [&_ol]:ps-6 ${compact ? "min-h-[100px]" : "min-h-[200px]"} outline-none px-4 py-3`,
       },
     },
   });
 
-  // Sync external content changes (e.g. when opening a draft)
+  // Sync external content without writing Tiptap-normalized HTML back to the draft.
   useEffect(() => {
     if (editor && content !== editor.getHTML()) {
-      editor.commands.setContent(content);
+      editor.commands.setContent(content, { emitUpdate: false });
     }
   }, [content]); // eslint-disable-line react-hooks/exhaustive-deps
 

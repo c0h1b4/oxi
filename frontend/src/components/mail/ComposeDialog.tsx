@@ -19,6 +19,7 @@ import {
   Minimize2,
   Upload,
   FileText,
+  FileCode,
   Code,
   PenLine,
 } from "lucide-react";
@@ -77,6 +78,7 @@ export function ComposeDialog() {
     attachments,
     fromIdentityId,
     isHtml,
+    editingHtmlSource,
     signatureHtml,
     signatureEnabled,
     signatureInitialized,
@@ -87,6 +89,7 @@ export function ComposeDialog() {
     setDraftId,
     setFromIdentityId,
     setIsHtml,
+    setEditingHtmlSource,
     setSignatureHtml,
     setSignatureEnabled,
     initializeSignature,
@@ -517,9 +520,10 @@ export function ComposeDialog() {
   );
 
   const handleToggleHtml = useCallback(() => {
+    setEditingHtmlSource(false);
     setField("body", convertBodyFormat(body, isHtml, signatureHtml));
     setIsHtml(!isHtml);
-  }, [isHtml, body, signatureHtml, setField, setIsHtml]);
+  }, [isHtml, body, signatureHtml, setField, setIsHtml, setEditingHtmlSource]);
 
   const previewAttachment = previewAttId
     ? attachments.find((a) => a.id === previewAttId)
@@ -753,7 +757,12 @@ export function ComposeDialog() {
               )}
 
               {/* Body */}
-              {isHtml ? (
+              {isHtml && editingHtmlSource && (
+                <p id="html-source-hint" className="shrink-0 px-4 pt-3 text-xs text-muted-foreground">
+                  Rich-text edits may remove unsupported HTML, including tables, styles, and custom attributes. Stay in HTML source to preserve them.
+                </p>
+              )}
+              {isHtml && !editingHtmlSource ? (
                 <RichTextEditor
                   content={body}
                   onChange={(html) => setField("body", html)}
@@ -763,10 +772,16 @@ export function ComposeDialog() {
                 />
               ) : (
                 <textarea
+                  aria-label={isHtml ? "HTML source" : "Message body"}
+                  aria-describedby={isHtml ? "html-source-hint" : undefined}
                   value={body}
                   onChange={(e) => setField("body", e.target.value)}
-                  placeholder="Write your message..."
-                  className="min-h-60 w-full min-w-0 flex-1 shrink-0 resize-none overflow-auto bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50"
+                  placeholder={isHtml ? "Write your HTML..." : "Write your message..."}
+                  spellCheck={isHtml ? false : undefined}
+                  className={cn(
+                    "min-h-60 w-full min-w-0 flex-1 shrink-0 resize-none overflow-auto bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50",
+                    isHtml && "font-mono"
+                  )}
                 />
               )}
             </div>
@@ -847,6 +862,21 @@ export function ComposeDialog() {
                     <Save className="size-4" />
                   )}
                 </button>
+                {isHtml && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingHtmlSource(!editingHtmlSource)}
+                    aria-pressed={editingHtmlSource}
+                    title={editingHtmlSource ? "Switch to rich-text editing" : "Edit HTML source"}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-xs hover:bg-accent hover:text-foreground",
+                      editingHtmlSource ? "text-primary" : "text-muted-foreground"
+                    )}
+                  >
+                    <FileCode className="size-4" />
+                    HTML source
+                  </button>
+                )}
                 <button
                   onClick={handleToggleHtml}
                   className={cn(
