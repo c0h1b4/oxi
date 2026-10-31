@@ -57,6 +57,7 @@ interface ComposeState {
   attachments: ComposeAttachment[];
   fromIdentityId: number | null;
   isHtml: boolean;
+  editingHtmlSource: boolean;
   signatureHtml: string;
   signatureEnabled: boolean;
   signatureInitialized: boolean;
@@ -73,6 +74,7 @@ interface ComposeState {
   setDraftId: (id: string) => void;
   setFromIdentityId: (id: number | null) => void;
   setIsHtml: (v: boolean) => void;
+  setEditingHtmlSource: (editing: boolean) => void;
   setSignatureHtml: (html: string) => void;
   setSignatureEnabled: (enabled: boolean) => void;
   addAttachments: (atts: ComposeAttachment[]) => void;
@@ -182,6 +184,7 @@ const initialState = {
   attachments: [] as ComposeAttachment[],
   fromIdentityId: null as number | null,
   isHtml: true,
+  editingHtmlSource: false,
   signatureHtml: "",
   signatureEnabled: true,
   signatureInitialized: false,
@@ -266,6 +269,8 @@ export const useComposeStore = create<ComposeState>((set) => ({
   setFromIdentityId: (id) => set({ fromIdentityId: id }),
 
   setIsHtml: (v) => set({ isHtml: v }),
+
+  setEditingHtmlSource: (editing) => set({ editingHtmlSource: editing }),
 
   setSignatureHtml: (html) => set({ signatureHtml: html }),
 

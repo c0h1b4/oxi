@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const { send, save, identityQuery } = vi.hoisted(() => ({
+const { send, save, notify, identityQuery } = vi.hoisted(() => ({
   send: vi.fn(),
+  notify: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }),
   save: vi.fn(),
   identityQuery: { data: [] as import("@/types/identity").Identity[] },
 }));
@@ -14,6 +15,7 @@ vi.mock("@/hooks/useCompose", () => ({
   useDeleteDraft: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("@/hooks/useIdentities", () => ({ useIdentities: () => identityQuery }));
+vi.mock("sonner", () => ({ toast: notify }));
 vi.mock("../ComposeDialog/SubjectInput", () => ({ SubjectInput: () => <input aria-label="Subject" /> }));
 vi.mock("../ComposeDialog/RecipientInput", () => ({ RecipientInput: () => <textarea aria-label="Recipients" /> }));
 vi.mock("next/dynamic", () => ({ default: () => RichTextEditor }));
@@ -27,6 +29,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   send.mockReset();
   save.mockReset();
+  notify.mockReset();
   identityQuery.data = [];
   useUiStore.setState({ effectiveAnimationMode: "off" });
   useComposeStore.getState().openDraft({ id: "saved-draft", to: "recipient@example.com", cc: "", bcc: "", subject: "Saved", body: "Body", inReplyTo: null, references: null, attachments: [], isHtml: false });
@@ -73,7 +76,6 @@ it("preserves a draft and footer actions when maximizing and restoring", () => {
   fireEvent.click(screen.getByRole("button", { name: "Discard" }));
   expect(screen.getByRole("alertdialog")).toBeTruthy();
 });
-
 
 it.each([
   { isHtml: true, signature: "", body: "" },
@@ -157,7 +159,6 @@ it.each(["close", "manual save", "autosave", "discard"])("preserves text typed i
   }
 });
 
-
 const listHtml = '<ol start="3"><li><p>First item</p><ul><li><p>Nested bullet</p></li></ul></li></ol><ul><li><p>Another bullet</p></li></ul>';
 
 function openHtmlDraft(body = listHtml) {
@@ -168,6 +169,55 @@ function openHtmlDraft(body = listHtml) {
 function renderedEditor() {
   return (document.querySelector(".tiptap") as HTMLElement & { editor: Editor }).editor;
 }
+
+it.each(["new message", "reply", "forward", "draft", "reset"])("clears HTML source mode for a fresh %s", (nextCompose) => {
+  openHtmlDraft();
+  fireEvent.click(screen.getByRole("button", { name: "HTML source" }));
+  expect(useComposeStore.getState().editingHtmlSource).toBe(true);
+  fireEvent.click(screen.getByTitle("Close"));
+
+  act(() => {
+    const store = useComposeStore.getState();
+    if (nextCompose === "new message") store.openCompose();
+    if (nextCompose === "reply") store.openReply({ to: "sender@example.com", cc: "", subject: "Re: Hello", body: "<p>Reply</p>", inReplyTo: null, references: null });
+    if (nextCompose === "forward") store.openForward({ subject: "Fwd: Hello", body: "<p>Forward</p>" });
+    if (nextCompose === "draft") store.openDraft({ id: "another-draft", to: "", cc: "", bcc: "", subject: "", body: "<p>Draft</p>", inReplyTo: null, references: null, attachments: [] });
+    if (nextCompose === "reset") {
+      store.reset();
+      useComposeStore.setState({ isOpen: true });
+    }
+  });
+
+  expect(useComposeStore.getState().editingHtmlSource).toBe(false);
+  expect(screen.getByRole("button", { name: "HTML source" }).getAttribute("aria-pressed")).toBe("false");
+  expect(screen.queryByRole("textbox", { name: "HTML source" })).toBeNull();
+  expect(document.querySelector(".tiptap")).not.toBeNull();
+});
+
+it("preserves HTML source mode and raw HTML when undoing send", () => {
+  openHtmlDraft();
+  fireEvent.click(screen.getByRole("button", { name: "HTML source" }));
+  const html = '<table style="color: red"><tr><td>Keep raw HTML</td></tr></table>';
+  fireEvent.change(screen.getByRole("textbox", { name: "HTML source" }), { target: { value: html } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+  const undoSend = notify.mock.calls.find(([message]) => message === "Sending message...")![1];
+  act(() => undoSend.action.onClick());
+  act(() => vi.advanceTimersByTime(5000));
+
+  expect(send).not.toHaveBeenCalled();
+  expect(useComposeStore.getState().editingHtmlSource).toBe(true);
+  expect((screen.getByRole("textbox", { name: "HTML source" }) as HTMLTextAreaElement).value).toBe(html);
+});
+
+it("explains the risk of rich-text edits beside the HTML source", () => {
+  openHtmlDraft();
+  fireEvent.click(screen.getByRole("button", { name: "HTML source" }));
+  const source = screen.getByRole("textbox", { name: "HTML source" });
+  const hint = document.getElementById(source.getAttribute("aria-describedby")!);
+  expect(hint?.textContent).toContain("Rich-text edits may remove unsupported HTML");
+  expect(hint?.textContent).toContain("tables, styles, and custom attributes");
+});
 
 it("edits HTML source and rich text in both directions without losing lists", () => {
   openHtmlDraft();
