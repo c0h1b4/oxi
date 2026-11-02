@@ -34,6 +34,12 @@ assets/
 .env.local
 .env.*.local
 
+# Local email samples and mailbox exports
+debugging/
+**/*.eml
+**/*.mbox
+**/*.msg
+
 # OS files
 .DS_Store
 Thumbs.db

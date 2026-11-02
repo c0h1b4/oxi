@@ -104,5 +104,8 @@ docs/*
 !docs/RELEASING.md
 !docs/releases/
 
-# Debugging files
+# Debugging files and raw mailbox exports (may contain credentials or personal data)
 debugging/
+*.eml
+*.mbox
+*.msg
