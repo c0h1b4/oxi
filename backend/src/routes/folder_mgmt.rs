@@ -44,15 +44,15 @@ const SYSTEM_FOLDERS: &[&str] = &["INBOX", "Sent", "Drafts", "Trash", "Junk", "S
 
 /// Returns `true` if the folder is a system folder (case-insensitive).
 fn is_system_folder(name: &str) -> bool {
-    SYSTEM_FOLDERS
-        .iter()
-        .any(|s| s.eq_ignore_ascii_case(name))
+    SYSTEM_FOLDERS.iter().any(|s| s.eq_ignore_ascii_case(name))
 }
 
 /// Validates a folder name. Returns `Ok(())` if valid, or an `AppError::BadRequest`.
 fn validate_folder_name(name: &str) -> Result<(), AppError> {
     if name.trim().is_empty() {
-        return Err(AppError::BadRequest("Folder name cannot be empty".to_string()));
+        return Err(AppError::BadRequest(
+            "Folder name cannot be empty".to_string(),
+        ));
     }
     if name.len() > 255 {
         return Err(AppError::BadRequest(
@@ -73,10 +73,7 @@ fn validate_folder_name(name: &str) -> Result<(), AppError> {
 }
 
 /// Build IMAP credentials from the session and app configuration.
-fn build_creds(
-    session: &SessionState,
-    config: &AppConfig,
-) -> Result<ImapCredentials, AppError> {
+fn build_creds(session: &SessionState, config: &AppConfig) -> Result<ImapCredentials, AppError> {
     let imap_host = config
         .imap_host
         .as_deref()
@@ -113,10 +110,13 @@ pub async fn create_folder(
         .map_err(|e| AppError::InternalError(format!("IMAP create_folder failed: {e}")))?;
 
     // Cache the new folder locally.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     db::folders::insert_folder_if_new(&conn, &body.name, None, "")
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(MessageResponse { status: "created" }).into_response())
@@ -146,10 +146,13 @@ pub async fn rename_folder(
         .map_err(|e| AppError::InternalError(format!("IMAP rename_folder failed: {e}")))?;
 
     // Update the local cache.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     db::folders::rename_folder_in_cache(&conn, &name, &body.new_name)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(MessageResponse { status: "renamed" }).into_response())
@@ -176,10 +179,13 @@ pub async fn delete_folder(
         .map_err(|e| AppError::InternalError(format!("IMAP delete_folder failed: {e}")))?;
 
     // Remove from local cache.
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     db::folders::delete_folder_and_messages(&conn, &name)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(MessageResponse { status: "deleted" }).into_response())

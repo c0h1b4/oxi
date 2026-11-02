@@ -364,7 +364,7 @@ mod tests {
     #[tokio::test]
     async fn expired_session_returns_account_expired() {
         let store = Arc::new(SessionStore::new(Duration::from_millis(50)));
-        let session = create_test_session(&store.as_ref(), "bob@example.com", "pass", "hash");
+        let session = create_test_session(store.as_ref(), "bob@example.com", "pass", "hash");
 
         thread::sleep(Duration::from_millis(100));
 

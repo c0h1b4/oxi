@@ -59,8 +59,14 @@ pub async fn send_message_handler(
 
     // Validate: subject or body must be non-empty.
     let has_subject = !req.subject.trim().is_empty();
-    let has_text = req.text_body.as_deref().is_some_and(|t| !t.trim().is_empty());
-    let has_html = req.html_body.as_deref().is_some_and(|h| !h.trim().is_empty());
+    let has_text = req
+        .text_body
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty());
+    let has_html = req
+        .html_body
+        .as_deref()
+        .is_some_and(|h| !h.trim().is_empty());
     if !has_subject && !has_text && !has_html {
         return Err(AppError::BadRequest(
             "Subject or body is required".to_string(),
@@ -84,9 +90,12 @@ pub async fn send_message_handler(
 
     // Resolve the From address: use identity if specified, else session email.
     let from_address = if let Some(identity_id) = req.from_identity_id {
-        let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+        let conn = config
+            .user_db(&session.user_hash)
+            .await
             .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
         let identity = db::identities::get_identity(&conn, identity_id)
+            .await
             .map_err(AppError::InternalError)?
             .ok_or_else(|| AppError::NotFound("Identity not found".to_string()))?;
         if identity.display_name.is_empty() {
@@ -100,7 +109,7 @@ pub async fn send_message_handler(
 
     // Load attachments from draft if draft_id is provided.
     let attachments = if let Some(ref draft_id) = req.draft_id {
-        load_draft_attachments(&config.data_dir, &session.user_hash, draft_id)?
+        load_draft_attachments(&config, &session.user_hash, draft_id).await?
     } else {
         vec![]
     };
@@ -144,11 +153,12 @@ pub async fn send_message_handler(
             {
                 Ok(()) => {
                     // APPEND changed the server, not the local message cache.
-                    let database = db::pool::UserDb::new(&config.data_dir, &session.user_hash);
-                    if let Err(e) = database
-                        .run(|conn| db::folders::invalidate_folder_freshness(conn, "Sent"))
-                        .await
-                    {
+                    let result = async {
+                        let database = config.user_db(&session.user_hash).await?;
+                        db::folders::invalidate_folder_freshness(&database, "Sent").await
+                    }
+                    .await;
+                    if let Err(e) = result {
                         tracing::warn!(error = %e, "Failed to invalidate Sent folder cache after IMAP append");
                     }
                 }
@@ -161,11 +171,14 @@ pub async fn send_message_handler(
 
     // Clean up draft and attachment files after successful send.
     if let Some(ref draft_id) = req.draft_id {
-        if let Err(e) = super::drafts::delete_imap_draft(imap_client.as_ref(), &config, &session, draft_id).await {
+        if let Err(e) =
+            super::drafts::delete_imap_draft(imap_client.as_ref(), &config, &session, draft_id)
+                .await
+        {
             // SMTP already accepted the message: do not invite an accidental resend.
             tracing::warn!(error = %e, "Failed to remove IMAP draft after send");
         }
-        cleanup_draft(&config.data_dir, &session.user_hash, draft_id).await;
+        cleanup_draft(&config, &session.user_hash, draft_id).await;
     }
 
     Ok(Json(SendResponse {
@@ -176,20 +189,23 @@ pub async fn send_message_handler(
 }
 
 /// Load attachment data from disk for a given draft.
-fn load_draft_attachments(
-    data_dir: &str,
+async fn load_draft_attachments(
+    config: &AppConfig,
     user_hash: &str,
     draft_id: &str,
 ) -> Result<Vec<AttachmentData>, AppError> {
-    let conn = db::pool::open_user_db(data_dir, user_hash)
+    let conn = config
+        .user_db(user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Failed to open database: {e}")))?;
 
     let db_attachments = db::drafts::get_draft_attachments(&conn, draft_id)
+        .await
         .map_err(AppError::InternalError)?;
 
     let mut attachments = Vec::new();
     for att in db_attachments {
-        let data = std::fs::read(&att.file_path).map_err(|e| {
+        let data = tokio::fs::read(&att.file_path).await.map_err(|e| {
             AppError::InternalError(format!(
                 "Failed to read attachment file '{}': {e}",
                 att.filename
@@ -206,16 +222,16 @@ fn load_draft_attachments(
 }
 
 /// Clean up draft record and attachment files from disk after successful send.
-async fn cleanup_draft(data_dir: &str, user_hash: &str, draft_id: &str) {
+async fn cleanup_draft(config: &AppConfig, user_hash: &str, draft_id: &str) {
     // Delete draft from DB (cascade deletes attachment records).
-    if let Ok(conn) = db::pool::open_user_db(data_dir, user_hash)
-        && let Err(e) = db::drafts::delete_draft(&conn, draft_id)
+    if let Ok(conn) = config.user_db(user_hash).await
+        && let Err(e) = db::drafts::delete_draft(&conn, draft_id).await
     {
         tracing::warn!(error = %e, "Failed to delete draft after send");
     }
 
     // Remove the attachment directory from disk.
-    let att_dir = Path::new(data_dir)
+    let att_dir = Path::new(&config.data_dir)
         .join(user_hash)
         .join("attachments")
         .join(draft_id);
@@ -228,7 +244,7 @@ async fn cleanup_draft(data_dir: &str, user_hash: &str, draft_id: &str) {
 
 /// Build RFC822 bytes from a SendableMessage for IMAP APPEND.
 fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec<u8>, String> {
-    use lettre::message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart};
+    use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart, header::ContentType};
 
     let from_mailbox: Mailbox = message
         .from
@@ -241,11 +257,15 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
         .message_id(Some(message_id.to_string()));
 
     for addr in &message.to {
-        let mailbox: Mailbox = addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?;
+        let mailbox: Mailbox = addr
+            .parse()
+            .map_err(|e: lettre::address::AddressError| e.to_string())?;
         builder = builder.to(mailbox);
     }
     for addr in &message.cc {
-        let mailbox: Mailbox = addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?;
+        let mailbox: Mailbox = addr
+            .parse()
+            .map_err(|e: lettre::address::AddressError| e.to_string())?;
         builder = builder.cc(mailbox);
     }
     if let Some(ref irt) = message.in_reply_to {
@@ -257,12 +277,11 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
 
     // Separate inline images from regular file attachments.
     let html_body = message.html_body.as_deref().unwrap_or("");
-    let (inline_atts, file_atts): (Vec<_>, Vec<_>) =
-        message.attachments.iter().partition(|att| {
-            att.content_id
-                .as_ref()
-                .is_some_and(|cid| html_body.contains(&format!("cid:{cid}")))
-        });
+    let (inline_atts, file_atts): (Vec<_>, Vec<_>) = message.attachments.iter().partition(|att| {
+        att.content_id
+            .as_ref()
+            .is_some_and(|cid| html_body.contains(&format!("cid:{cid}")))
+    });
 
     let body_part = if let Some(ref html) = message.html_body {
         if inline_atts.is_empty() {
@@ -284,10 +303,7 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
                     .body(html.clone()),
             );
             for att in &inline_atts {
-                let ct: ContentType = att
-                    .content_type
-                    .parse()
-                    .unwrap_or(ContentType::TEXT_PLAIN);
+                let ct: ContentType = att.content_type.parse().unwrap_or(ContentType::TEXT_PLAIN);
                 let cid = att.content_id.as_deref().unwrap_or("unknown");
                 let inline_part =
                     Attachment::new_inline(cid.to_string()).body(att.data.clone(), ct);
@@ -312,22 +328,15 @@ fn build_rfc822_bytes(message: &SendableMessage, message_id: &str) -> Result<Vec
 
     // Wrap in mixed multipart if there are file attachments.
     let email = if file_atts.is_empty() {
-        builder
-            .multipart(body_part)
-            .map_err(|e| e.to_string())?
+        builder.multipart(body_part).map_err(|e| e.to_string())?
     } else {
         let mut mixed = MultiPart::mixed().multipart(body_part);
         for att in &file_atts {
-            let ct: ContentType = att
-                .content_type
-                .parse()
-                .unwrap_or(ContentType::TEXT_PLAIN);
+            let ct: ContentType = att.content_type.parse().unwrap_or(ContentType::TEXT_PLAIN);
             let attachment = Attachment::new(att.filename.clone()).body(att.data.clone(), ct);
             mixed = mixed.singlepart(attachment);
         }
-        builder
-            .multipart(mixed)
-            .map_err(|e| e.to_string())?
+        builder.multipart(mixed).map_err(|e| e.to_string())?
     };
 
     Ok(email.formatted())

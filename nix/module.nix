@@ -82,6 +82,18 @@ in
       description = "Whether TLS is enabled for mail connections.";
     };
 
+    environmentFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Runtime secret environment file, e.g. /run/secrets/oxi.env containing DATABASE_URL. Do not place secrets in the Nix store.";
+    };
+
+    databaseMaxConnections = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 10;
+      description = "Maximum PostgreSQL connections per process.";
+    };
+
     sessionTimeoutHours = lib.mkOption {
       type = lib.types.int;
       default = 24;
@@ -135,6 +147,7 @@ in
         HOST = cfg.host;
         PORT = toString cfg.port;
         DATA_DIR = cfg.dataDir;
+        DATABASE_MAX_CONNECTIONS = toString cfg.databaseMaxConnections;
         STATIC_DIR = "${cfg.package}/share/oxi/static";
         IMAP_HOST = cfg.imapHost;
         IMAP_PORT = toString cfg.imapPort;
@@ -149,6 +162,7 @@ in
 
       serviceConfig = {
         Type = "simple";
+        EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
         ExecStart = "${cfg.package}/bin/oxi-email-server";
         WorkingDirectory = cfg.dataDir;
         User = cfg.user;

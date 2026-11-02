@@ -46,10 +46,13 @@ pub async fn list_groups_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let groups = db::contact_groups::list_groups(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(ListGroupsResponse { groups }).into_response())
@@ -66,11 +69,14 @@ pub async fn create_group_handler(
         return Err(AppError::BadRequest("Group name is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let id = Uuid::new_v4().to_string();
     db::contact_groups::create_group(&conn, &id, name)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "id": id, "name": name })).into_response())
@@ -88,10 +94,13 @@ pub async fn update_group_handler(
         return Err(AppError::BadRequest("Group name is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let updated = db::contact_groups::update_group(&conn, &id, name)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if updated {
@@ -107,10 +116,13 @@ pub async fn delete_group_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let deleted = db::contact_groups::delete_group(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if deleted {
@@ -126,10 +138,13 @@ pub async fn list_members_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let members = db::contact_groups::list_group_members(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(GroupMembersResponse { members }).into_response())
@@ -142,10 +157,13 @@ pub async fn add_member_handler(
     Path(id): Path<String>,
     Json(body): Json<AddMemberBody>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     db::contact_groups::add_member(&conn, &id, &body.contact_id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
@@ -157,10 +175,13 @@ pub async fn remove_member_handler(
     Extension(config): Extension<Arc<AppConfig>>,
     Path((id, contact_id)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let removed = db::contact_groups::remove_member(&conn, &id, &contact_id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if removed {

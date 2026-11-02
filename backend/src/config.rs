@@ -9,7 +9,7 @@ use serde::Deserialize;
 /// Layers (lowest to highest priority):
 ///   1. Serde defaults
 ///   2. Environment variables (flat, e.g. `PORT`, `IMAP_HOST`)
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
     /// Bind address for the HTTP server.
@@ -43,6 +43,17 @@ pub struct AppConfig {
     /// Directory for persistent data storage.
     #[serde(default = "default_data_dir")]
     pub data_dir: String,
+
+    /// PostgreSQL connection URL. Unset retains per-user SQLite files.
+    #[serde(default)]
+    pub database_url: Option<String>,
+
+    #[serde(default = "default_database_max_connections")]
+    pub database_max_connections: u32,
+
+    /// Initialized once at startup; never deserialized from environment variables.
+    #[serde(skip)]
+    pub database: Option<crate::db::pool::Database>,
 
     /// Session timeout in hours.
     #[serde(default = "default_session_timeout_hours")]
@@ -112,6 +123,10 @@ fn default_data_dir() -> String {
     "/data".to_string()
 }
 
+fn default_database_max_connections() -> u32 {
+    10
+}
+
 fn default_session_timeout_hours() -> u64 {
     24
 }
@@ -129,6 +144,29 @@ fn default_serve_static() -> bool {
 }
 
 impl AppConfig {
+    pub async fn initialize_database(&mut self) -> Result<(), String> {
+        self.database = Some(
+            crate::db::pool::Database::connect(
+                &self.data_dir,
+                self.database_url.as_deref(),
+                self.database_max_connections,
+            )
+            .await?,
+        );
+        Ok(())
+    }
+
+    pub async fn user_db(&self, user_hash: &str) -> Result<crate::db::pool::UserDb, String> {
+        match &self.database {
+            Some(database) => database.user(user_hash).await,
+            // Tests construct AppConfig directly; never silently ignore a configured URL.
+            None if self.database_url.is_none() => {
+                crate::db::pool::open_user_db(&self.data_dir, user_hash).await
+            }
+            None => Err("Database has not been initialized".into()),
+        }
+    }
+
     /// Use the root path when no reverse-proxy prefix is configured.
     pub fn normalized_base_path(&self) -> &str {
         self.base_path
@@ -170,9 +208,7 @@ impl AppConfig {
     /// struct fields via case-insensitive matching (e.g. `IMAP_HOST` → `imap_host`).
     #[allow(clippy::result_large_err)]
     pub fn load() -> Result<Self, figment::Error> {
-        Figment::new()
-            .merge(Env::raw())
-            .extract()
+        Figment::new().merge(Env::raw()).extract()
     }
 }
 

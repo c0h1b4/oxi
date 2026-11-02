@@ -26,6 +26,10 @@
         }).config;
       accepts = config: builtins.all (item: item.assertion) config.assertions;
       root = evaluate { };
+      postgres = evaluate {
+        environmentFile = "/run/secrets/oxi.env";
+        databaseMaxConnections = 6;
+      };
       empty = evaluate { basePath = ""; };
       subpath = evaluate { basePath = "/oxi"; };
       nested = evaluate { basePath = "/apps/oxi"; };
@@ -58,6 +62,9 @@
       checks = {
         module-base-path =
           assert accepts root && accepts empty && accepts subpath && accepts nested && accepts custom;
+          assert postgres.systemd.services.oxi.serviceConfig.EnvironmentFile == [ "/run/secrets/oxi.env" ];
+          assert postgres.systemd.services.oxi.environment.DATABASE_MAX_CONNECTIONS == "6";
+          assert !(postgres.systemd.services.oxi.environment ? DATABASE_URL);
           assert root.services.oxi.package.oxiBasePath == "";
           assert empty.services.oxi.package.oxiBasePath == "";
           assert subpath.services.oxi.package.oxiBasePath == "/oxi";

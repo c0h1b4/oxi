@@ -54,10 +54,13 @@ pub async fn list_events(
     Extension(config): Extension<Arc<AppConfig>>,
     Query(params): Query<ListEventsParams>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let events = db::calendar::list_events(&conn, &params.start, &params.end)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "events": events })).into_response())
@@ -71,10 +74,13 @@ pub async fn get_event(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let event = db::calendar::get_event(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     match event {
@@ -101,10 +107,13 @@ pub async fn create_event(
         return Err(AppError::BadRequest("End time is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let event = db::calendar::create_event(&conn, &body)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok((axum::http::StatusCode::CREATED, Json(event)).into_response())
@@ -119,10 +128,13 @@ pub async fn update_event(
     Path(id): Path<String>,
     Json(body): Json<UpdateEvent>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     match db::calendar::update_event(&conn, &id, &body)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?
     {
         Some(event) => Ok(Json(event).into_response()),
@@ -138,10 +150,13 @@ pub async fn delete_event(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let deleted = db::calendar::delete_event(&conn, &id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if deleted {
@@ -166,7 +181,9 @@ pub async fn import_ics(
     let parsed = ics::parse_ics(&body)
         .map_err(|e| AppError::BadRequest(format!("Failed to parse ICS: {e}")))?;
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let mut created_events = Vec::new();
@@ -175,13 +192,13 @@ pub async fn import_ics(
     for event_data in parsed {
         // Deduplicate by source_uid
         if let Some(ref uid) = event_data.source_uid
-            && let Ok(Some(_)) = db::calendar::find_event_by_source_uid(&conn, uid)
+            && let Ok(Some(_)) = db::calendar::find_event_by_source_uid(&conn, uid).await
         {
             skipped += 1;
             continue;
         }
 
-        match db::calendar::create_event(&conn, &event_data) {
+        match db::calendar::create_event(&conn, &event_data).await {
             Ok(event) => created_events.push(event),
             Err(e) => {
                 tracing::warn!("Failed to create imported event: {e}");
@@ -209,10 +226,13 @@ pub async fn get_calendar_settings(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let settings = db::calendar::get_calendar_settings(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(settings).into_response())
@@ -226,10 +246,13 @@ pub async fn update_calendar_settings(
     Extension(config): Extension<Arc<AppConfig>>,
     Json(body): Json<UpdateCalendarSettings>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let settings = db::calendar::update_calendar_settings(&conn, &body)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(settings).into_response())
@@ -246,10 +269,13 @@ pub async fn list_meeting_templates(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let templates = db::calendar::list_meeting_templates(&conn)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok(Json(serde_json::json!({ "templates": templates })).into_response())
@@ -267,16 +293,18 @@ pub async fn create_meeting_template(
         return Err(AppError::BadRequest("Name is required".to_string()));
     }
     if body.url_template.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "URL template is required".to_string(),
-        ));
+        return Err(AppError::BadRequest("URL template is required".to_string()));
     }
 
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
-    let template = db::calendar::create_meeting_template(&conn, &body.name, &body.url_template, &body.icon)
-        .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
+    let template =
+        db::calendar::create_meeting_template(&conn, &body.name, &body.url_template, &body.icon)
+            .await
+            .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     Ok((axum::http::StatusCode::CREATED, Json(template)).into_response())
 }
@@ -289,10 +317,13 @@ pub async fn delete_meeting_template(
     Extension(config): Extension<Arc<AppConfig>>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash)
+    let conn = config
+        .user_db(&session.user_hash)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     let deleted = db::calendar::delete_meeting_template(&conn, id)
+        .await
         .map_err(|e| AppError::InternalError(format!("Database error: {e}")))?;
 
     if deleted {

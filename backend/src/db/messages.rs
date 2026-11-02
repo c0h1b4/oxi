@@ -1,7 +1,6 @@
-use rusqlite::{Connection, params};
+use super::pool::UserDb;
 use serde::Serialize;
-
-// mail_parser is used for RFC2822 date parsing in parse_date_to_epoch.
+use sqlx::Row;
 
 /// A cached email message header, mirroring the query-visible columns of the
 /// `messages` table.
@@ -25,46 +24,39 @@ pub struct CachedMessage {
     pub reaction: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Helper to map a row to CachedMessage (used in multiple queries)
-// ---------------------------------------------------------------------------
-
-fn row_to_cached_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedMessage> {
-    let has_attachments_int: i32 = row.get(12)?;
+fn row_to_cached_message(row: sqlx::any::AnyRow) -> Result<CachedMessage, String> {
+    let integer = |index| -> Result<u32, String> {
+        u32::try_from(row.try_get::<i64, _>(index).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
+    };
     Ok(CachedMessage {
-        uid: row.get(0)?,
-        folder: row.get(1)?,
-        message_id: row.get(2)?,
-        in_reply_to: row.get(3)?,
-        references_header: row.get(4)?,
-        subject: row.get(5)?,
-        from_address: row.get(6)?,
-        from_name: row.get(7)?,
-        to_addresses: row.get(8)?,
-        cc_addresses: row.get(9)?,
-        date: row.get(10)?,
-        flags: row.get(11)?,
-        size: row.get(13)?,
-        has_attachments: has_attachments_int != 0,
-        snippet: row.get(14)?,
-        reaction: row.get(15)?,
+        uid: integer(0)?,
+        folder: row.try_get(1).map_err(|e| e.to_string())?,
+        message_id: row.try_get(2).map_err(|e| e.to_string())?,
+        in_reply_to: row.try_get(3).map_err(|e| e.to_string())?,
+        references_header: row.try_get(4).map_err(|e| e.to_string())?,
+        subject: row.try_get(5).map_err(|e| e.to_string())?,
+        from_address: row.try_get(6).map_err(|e| e.to_string())?,
+        from_name: row.try_get(7).map_err(|e| e.to_string())?,
+        to_addresses: row.try_get(8).map_err(|e| e.to_string())?,
+        cc_addresses: row.try_get(9).map_err(|e| e.to_string())?,
+        date: row.try_get(10).map_err(|e| e.to_string())?,
+        flags: row.try_get(11).map_err(|e| e.to_string())?,
+        snippet: row.try_get(14).map_err(|e| e.to_string())?,
+        reaction: row.try_get(15).map_err(|e| e.to_string())?,
+        has_attachments: row.try_get::<i64, _>(12).map_err(|e| e.to_string())? != 0,
+        size: integer(13)?,
     })
 }
 
 /// The SELECT column list used by all queries that return `CachedMessage`.
-const MSG_SELECT_COLS: &str =
-    "uid, folder, message_id, in_reply_to, references_header,
+const MSG_SELECT_COLS: &str = "uid, folder, message_id, in_reply_to, references_header,
      subject, from_address, from_name, to_addresses, cc_addresses,
      date, flags, has_attachments, size, snippet, reaction";
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Insert or replace a message header row.
 #[allow(clippy::too_many_arguments)]
-pub fn upsert_message(
-    conn: &Connection,
+pub async fn upsert_message(
+    db: &UserDb,
     folder: &str,
     uid: u32,
     message_id: Option<&str>,
@@ -82,65 +74,56 @@ pub fn upsert_message(
     snippet: &str,
     reaction: Option<&str>,
 ) -> Result<(), String> {
-    let date_epoch = parse_date_to_epoch(date);
-    conn.execute(
-        "INSERT OR REPLACE INTO messages
-            (uid, folder, message_id, in_reply_to, references_header,
-             subject, from_address, from_name, to_addresses, cc_addresses,
-             date, flags, size, has_attachments, snippet, date_epoch, reaction)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
-        params![
-            uid,
-            folder,
-            message_id,
-            in_reply_to,
-            references_header,
-            subject,
-            from_address,
-            from_name,
-            to_json,
-            cc_json,
-            date,
-            flags_csv,
-            size,
-            has_attachments as i32,
-            snippet,
-            date_epoch,
-            reaction,
-        ],
-    )
-    .map_err(|e| format!("Failed to upsert message: {e}"))?;
+    let mut connection = db.acquire().await?;
+    sqlx::query("INSERT INTO messages
+        (user_hash,uid,folder,message_id,in_reply_to,references_header,subject,from_address,
+         from_name,to_addresses,cc_addresses,date,flags,size,has_attachments,snippet,date_epoch,reaction)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        ON CONFLICT(user_hash,uid,folder) DO UPDATE SET message_id=excluded.message_id,
+         in_reply_to=excluded.in_reply_to,references_header=excluded.references_header,
+         subject=excluded.subject,from_address=excluded.from_address,from_name=excluded.from_name,
+         to_addresses=excluded.to_addresses,cc_addresses=excluded.cc_addresses,date=excluded.date,
+         flags=excluded.flags,size=excluded.size,has_attachments=excluded.has_attachments,
+         snippet=excluded.snippet,date_epoch=excluded.date_epoch,reaction=excluded.reaction")
+        .bind(db.user_hash()).bind(i64::from(uid)).bind(folder).bind(message_id).bind(in_reply_to)
+        .bind(references_header).bind(subject).bind(from_address).bind(from_name).bind(to_json)
+        .bind(cc_json).bind(date).bind(flags_csv).bind(i64::from(size)).bind(i64::from(has_attachments))
+        .bind(snippet).bind(parse_date_to_epoch(date)).bind(reaction)
+        .execute(&mut *connection).await.map_err(|e| format!("Failed to upsert message: {e}"))?;
     Ok(())
 }
 
-/// Remove a successfully moved/deleted source UID and reject older header reads.
-/// Invalidate freshness so a rejected batch is retried by the next list request.
-pub fn remove_after_mutation(conn: &Connection, folder: &str, uid: u32) -> Result<(), String> {
-    let transaction =
-        rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+/// Invalidate older network reads in the same transaction as the deletion.
+pub async fn remove_after_mutation(db: &UserDb, folder: &str, uid: u32) -> Result<(), String> {
+    let transaction = db.begin_write().await?;
+    delete_message(&transaction, folder, uid).await?;
+    super::header_sync::invalidate(&transaction).await?;
+    super::folders::invalidate_folder_freshness(&transaction, folder).await?;
+    transaction.commit().await
+}
+
+pub async fn delete_folder_messages(db: &UserDb, folder: &str) -> Result<usize, String> {
+    let mut connection = db.acquire().await?;
+    let deleted = sqlx::query("DELETE FROM messages WHERE user_hash=$1 AND folder=$2")
+        .bind(db.user_hash())
+        .bind(folder)
+        .execute(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
+    usize::try_from(deleted).map_err(|e| e.to_string())
+}
+
+pub async fn max_uid(db: &UserDb, folder: &str) -> Result<u32, String> {
+    let mut connection = db.acquire().await?;
+    let row =
+        sqlx::query("SELECT COALESCE(MAX(uid),0) FROM messages WHERE user_hash=$1 AND folder=$2")
+            .bind(db.user_hash())
+            .bind(folder)
+            .fetch_one(&mut *connection)
+            .await
             .map_err(|e| e.to_string())?;
-    delete_message(conn, folder, uid)?;
-    super::header_sync::invalidate(&transaction)?;
-    super::folders::invalidate_folder_freshness(conn, folder)?;
-    transaction.commit().map_err(|e| e.to_string())
-}
-
-/// Delete all messages in a folder (used when UIDVALIDITY changes).
-pub fn delete_folder_messages(conn: &Connection, folder: &str) -> Result<usize, String> {
-    let deleted = conn
-        .execute("DELETE FROM messages WHERE folder = ?1", params![folder])
-        .map_err(|e| format!("Failed to delete folder messages: {e}"))?;
-    Ok(deleted)
-}
-
-/// Return the highest cached UID for a folder, or 0 if no messages are cached.
-pub fn max_uid(conn: &Connection, folder: &str) -> Result<u32, String> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(uid), 0) FROM messages WHERE folder = ?1",
-        params![folder],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("Failed to get max uid: {e}"))
+    u32::try_from(row.try_get::<i64, _>(0).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 /// Public wrapper to parse a date string to a Unix epoch timestamp.
@@ -193,7 +176,8 @@ fn datetime_to_epoch(dt: &mail_parser::DateTime) -> i64 {
     }
     days += (dt.day as i64) - 1;
 
-    let secs = days * 86400 + (dt.hour as i64) * 3600 + (dt.minute as i64) * 60 + (dt.second as i64);
+    let secs =
+        days * 86400 + (dt.hour as i64) * 3600 + (dt.minute as i64) * 60 + (dt.second as i64);
     // tz_before_gmt=true means the offset is negative (behind UTC)
     let tz_offset_secs = (dt.tz_hour as i64) * 3600 + (dt.tz_minute as i64) * 60;
     if dt.tz_before_gmt {
@@ -235,91 +219,84 @@ fn parse_iso8601_to_epoch(s: &str) -> Result<i64, ()> {
     Ok(datetime_to_epoch(&dt))
 }
 
-/// Suggest distinct cached subjects, newest first. Search text is literal, not a LIKE pattern.
-pub fn suggest_subjects(conn: &Connection, query: &str) -> Result<Vec<String>, String> {
+/// Suggest distinct subjects with literal, case-insensitive matching.
+pub async fn suggest_subjects(db: &UserDb, query: &str) -> Result<Vec<String>, String> {
     let query = query.trim();
     if query.chars().count() < 2 {
         return Ok(Vec::new());
     }
-    let mut stmt = conn
-        .prepare(
-            "SELECT subject FROM messages
-             WHERE trim(subject) != '' AND instr(lower(subject), lower(?1)) > 0
-             GROUP BY subject COLLATE NOCASE
-             ORDER BY MAX(date_epoch) DESC, subject COLLATE NOCASE
-             LIMIT 8",
-        )
-        .map_err(|e| format!("Failed to prepare subject suggestions: {e}"))?;
-    stmt.query_map(params![query], |row| row.get(0))
-        .map_err(|e| format!("Failed to query subject suggestions: {e}"))?
-        .collect::<Result<Vec<String>, _>>()
-        .map_err(|e| format!("Failed to read subject suggestions: {e}"))
+    let sql=db.sql(
+        "SELECT MIN(subject) FROM messages WHERE user_hash=$1 AND trim(subject)!='' AND instr(lower(subject),lower($2))>0 GROUP BY lower(subject) ORDER BY MAX(date_epoch) DESC,lower(subject) LIMIT 8",
+        "SELECT MIN(subject) FROM messages WHERE user_hash=$1 AND trim(subject)!='' AND strpos(lower(subject),lower($2))>0 GROUP BY lower(subject) ORDER BY MAX(date_epoch) DESC,lower(subject) LIMIT 8");
+    let mut connection = db.acquire().await?;
+    sqlx::query(sql)
+        .bind(db.user_hash())
+        .bind(query)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|row| row.try_get(0).map_err(|e| e.to_string()))
+        .collect()
 }
 
-/// Return a page of messages for a folder, ordered by date descending.
-/// `page` is 0-indexed.
-pub fn get_messages(
-    conn: &Connection,
+pub async fn get_messages(
+    db: &UserDb,
     folder: &str,
     page: u32,
     per_page: u32,
 ) -> Result<Vec<CachedMessage>, String> {
-    let offset = page * per_page;
+    let offset = i64::try_from(u64::from(page) * u64::from(per_page))
+        .map_err(|_| "Message page offset exceeds database range".to_string())?;
     let sql = format!(
-        "SELECT {MSG_SELECT_COLS}
-         FROM messages
-         WHERE folder = ?1
-         ORDER BY date_epoch DESC
-         LIMIT ?2 OFFSET ?3"
+        "SELECT {MSG_SELECT_COLS} FROM messages WHERE user_hash=$1 AND folder=$2 ORDER BY date_epoch DESC LIMIT $3 OFFSET $4"
     );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| format!("Failed to prepare get_messages: {e}"))?;
-
-    let rows = stmt
-        .query_map(params![folder, per_page, offset], |row| {
-            row_to_cached_message(row)
-        })
-        .map_err(|e| format!("Failed to query messages: {e}"))?;
-
-    let mut messages = Vec::new();
-    for row in rows {
-        messages.push(row.map_err(|e| format!("Failed to read message row: {e}"))?);
-    }
-    Ok(messages)
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(folder)
+        .bind(i64::from(per_page))
+        .bind(offset)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(row_to_cached_message)
+        .collect()
 }
 
-/// Return the total number of cached messages for a folder.
-pub fn count_messages(conn: &Connection, folder: &str) -> Result<u32, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM messages WHERE folder = ?1",
-        params![folder],
-        |row| row.get(0),
-    )
-    .map_err(|e| format!("Failed to count messages: {e}"))
+pub async fn count_messages(db: &UserDb, folder: &str) -> Result<u32, String> {
+    let mut connection = db.acquire().await?;
+    let row = sqlx::query("SELECT COUNT(*) FROM messages WHERE user_hash=$1 AND folder=$2")
+        .bind(db.user_hash())
+        .bind(folder)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?;
+    u32::try_from(row.try_get::<i64, _>(0).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
-/// Update only the flags column for a specific message.
-pub fn update_message_flags(
-    conn: &Connection,
+pub async fn update_message_flags(
+    db: &UserDb,
     folder: &str,
     uid: u32,
     flags_csv: &str,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE messages SET flags = ?1 WHERE folder = ?2 AND uid = ?3",
-        params![flags_csv, folder, uid],
-    )
-    .map_err(|e| format!("Failed to update message flags: {e}"))?;
+    let mut connection = db.acquire().await?;
+    sqlx::query("UPDATE messages SET flags=$1 WHERE user_hash=$2 AND folder=$3 AND uid=$4")
+        .bind(flags_csv)
+        .bind(db.user_hash())
+        .bind(folder)
+        .bind(i64::from(uid))
+        .execute(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Cache a message body (HTML and/or plain text) along with attachment
-/// metadata (as a JSON string) and the raw RFC-822 headers.
 #[allow(clippy::too_many_arguments)]
-pub fn cache_message_body(
-    conn: &Connection,
+pub async fn cache_message_body(
+    db: &UserDb,
     folder: &str,
     uid: u32,
     html: Option<&str>,
@@ -328,28 +305,29 @@ pub fn cache_message_body(
     raw_headers: Option<&str>,
     email_theme: Option<i32>,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE messages
-         SET body_html = ?1, body_text = ?2, body_cached = 1,
-             attachments_json = ?3, raw_headers = ?4, email_theme = ?5
-         WHERE folder = ?6 AND uid = ?7",
-        params![html, text, attachments_json, raw_headers, email_theme, folder, uid],
-    )
-    .map_err(|e| format!("Failed to cache message body: {e}"))?;
+    let mut connection = db.acquire().await?;
+    sqlx::query("UPDATE messages SET body_html=$1,body_text=$2,body_cached=1,attachments_json=$3,raw_headers=$4,email_theme=$5 WHERE user_hash=$6 AND folder=$7 AND uid=$8")
+        .bind(html).bind(text).bind(attachments_json).bind(raw_headers).bind(email_theme.map(i64::from))
+        .bind(db.user_hash()).bind(folder).bind(i64::from(uid))
+        .execute(&mut *connection).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn update_email_theme(
-    conn: &Connection,
+pub async fn update_email_theme(
+    db: &UserDb,
     folder: &str,
     uid: u32,
     email_theme: i32,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE messages SET email_theme = ?1 WHERE folder = ?2 AND uid = ?3",
-        params![email_theme, folder, uid],
-    )
-    .map_err(|e| format!("Failed to update email theme: {e}"))?;
+    let mut connection = db.acquire().await?;
+    sqlx::query("UPDATE messages SET email_theme=$1 WHERE user_hash=$2 AND folder=$3 AND uid=$4")
+        .bind(i64::from(email_theme))
+        .bind(db.user_hash())
+        .bind(folder)
+        .bind(i64::from(uid))
+        .execute(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -362,150 +340,115 @@ pub struct CachedBody {
     pub email_theme: Option<i32>,
 }
 
-/// Return the cached body if `body_cached = 1`, otherwise `None`.
-pub fn get_cached_body(
-    conn: &Connection,
+pub async fn get_cached_body(
+    db: &UserDb,
     folder: &str,
     uid: u32,
 ) -> Result<Option<CachedBody>, String> {
-    let result = conn.query_row(
-        "SELECT body_cached, body_html, body_text, attachments_json, raw_headers, email_theme
-         FROM messages
-         WHERE folder = ?1 AND uid = ?2",
-        params![folder, uid],
-        |row| {
-            let cached: i32 = row.get(0)?;
-            if cached == 1 {
-                Ok(Some(CachedBody {
-                    html: row.get(1)?,
-                    text: row.get(2)?,
-                    attachments_json: row.get(3)?,
-                    raw_headers: row.get(4)?,
-                    email_theme: row.get(5)?,
-                }))
-            } else {
-                Ok(None)
-            }
-        },
-    );
-
-    match result {
-        Ok(body) => Ok(body),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("Failed to get cached body: {e}")),
-    }
+    let mut connection = db.acquire().await?;
+    let row=sqlx::query("SELECT body_html,body_text,attachments_json,raw_headers,email_theme FROM messages WHERE user_hash=$1 AND folder=$2 AND uid=$3 AND body_cached=1")
+        .bind(db.user_hash()).bind(folder).bind(i64::from(uid)).fetch_optional(&mut *connection).await.map_err(|e| e.to_string())?;
+    row.map(|row| {
+        Ok(CachedBody {
+            html: row.try_get(0).map_err(|e| e.to_string())?,
+            text: row.try_get(1).map_err(|e| e.to_string())?,
+            attachments_json: row.try_get(2).map_err(|e| e.to_string())?,
+            raw_headers: row.try_get(3).map_err(|e| e.to_string())?,
+            email_theme: row
+                .try_get::<Option<i64>, _>(4)
+                .map_err(|e| e.to_string())?
+                .map(i32::try_from)
+                .transpose()
+                .map_err(|e| e.to_string())?,
+        })
+    })
+    .transpose()
 }
 
-/// Return a single message by folder and UID, or None if not found.
-pub fn get_single_message(conn: &Connection, folder: &str, uid: u32) -> Result<Option<CachedMessage>, String> {
+pub async fn get_single_message(
+    db: &UserDb,
+    folder: &str,
+    uid: u32,
+) -> Result<Option<CachedMessage>, String> {
     let sql = format!(
-        "SELECT {MSG_SELECT_COLS}
-         FROM messages
-         WHERE folder = ?1 AND uid = ?2"
+        "SELECT {MSG_SELECT_COLS} FROM messages WHERE user_hash=$1 AND folder=$2 AND uid=$3"
     );
-
-    let result = conn.query_row(&sql, params![folder, uid], |row| {
-        row_to_cached_message(row)
-    });
-
-    match result {
-        Ok(msg) => Ok(Some(msg)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("Failed to get single message: {e}")),
-    }
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(folder)
+        .bind(i64::from(uid))
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .map(row_to_cached_message)
+        .transpose()
 }
 
-/// Delete a single message by folder and UID.
-pub fn delete_message(conn: &Connection, folder: &str, uid: u32) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM messages WHERE folder = ?1 AND uid = ?2",
-        params![folder, uid],
-    )
-    .map_err(|e| format!("Failed to delete message: {e}"))?;
+pub async fn delete_message(db: &UserDb, folder: &str, uid: u32) -> Result<(), String> {
+    let mut connection = db.acquire().await?;
+    sqlx::query("DELETE FROM messages WHERE user_hash=$1 AND folder=$2 AND uid=$3")
+        .bind(db.user_hash())
+        .bind(folder)
+        .bind(i64::from(uid))
+        .execute(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Return `(folder, uid)` pairs for messages that don't have a cached body,
-/// ordered by date_epoch DESC (most recent first), limited to `limit`.
-/// Used by the deep-index background task to know which bodies to fetch.
-pub fn get_unindexed_messages(conn: &Connection, limit: u32) -> Result<Vec<(String, u32)>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT folder, uid FROM messages
-             WHERE body_cached = 0
-             ORDER BY date_epoch DESC
-             LIMIT ?1",
-        )
-        .map_err(|e| format!("Failed to prepare get_unindexed_messages: {e}"))?;
-
-    let rows = stmt
-        .query_map(params![limit], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
-        })
-        .map_err(|e| format!("Failed to query unindexed messages: {e}"))?;
-
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| format!("Failed to read unindexed row: {e}"))?);
-    }
-    Ok(result)
+pub async fn get_unindexed_messages(db: &UserDb, limit: u32) -> Result<Vec<(String, u32)>, String> {
+    let mut connection = db.acquire().await?;
+    sqlx::query("SELECT folder,uid FROM messages WHERE user_hash=$1 AND body_cached=0 ORDER BY date_epoch DESC LIMIT $2")
+        .bind(db.user_hash()).bind(i64::from(limit)).fetch_all(&mut *connection).await.map_err(|e| e.to_string())?
+        .into_iter().map(|row| Ok((row.try_get(0).map_err(|e| e.to_string())?,
+            u32::try_from(row.try_get::<i64,_>(1).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?))).collect()
 }
 
-/// Return all (uid, flags_csv) pairs for a folder, for reconciliation.
-pub fn get_all_uids_and_flags(conn: &Connection, folder: &str) -> Result<Vec<(u32, String)>, String> {
-    let mut stmt = conn
-        .prepare("SELECT uid, flags FROM messages WHERE folder = ?1")
-        .map_err(|e| format!("Failed to prepare get_all_uids_and_flags: {e}"))?;
-    let rows = stmt
-        .query_map(params![folder], |row| {
-            Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
+pub async fn get_all_uids_and_flags(
+    db: &UserDb,
+    folder: &str,
+) -> Result<Vec<(u32, String)>, String> {
+    let mut connection = db.acquire().await?;
+    sqlx::query("SELECT uid,flags FROM messages WHERE user_hash=$1 AND folder=$2")
+        .bind(db.user_hash())
+        .bind(folder)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|row| {
+            Ok((
+                u32::try_from(row.try_get::<i64, _>(0).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?,
+                row.try_get(1).map_err(|e| e.to_string())?,
+            ))
         })
-        .map_err(|e| format!("Failed to query uids and flags: {e}"))?;
-
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| format!("Failed to read uid/flags row: {e}"))?);
-    }
-    Ok(result)
+        .collect()
 }
 
-/// Find messages related to the given `target_message_id` for threading.
-///
-/// Returns messages where:
-/// - `message_id` equals `target_message_id`, OR
-/// - `in_reply_to` equals `target_message_id`, OR
-/// - `references_header` contains `target_message_id`
-pub fn get_thread_messages(
-    conn: &Connection,
+pub async fn get_thread_messages(
+    db: &UserDb,
     target_message_id: &str,
 ) -> Result<Vec<CachedMessage>, String> {
-    // Escape % and _ characters in the message_id to prevent LIKE injection.
-    let escaped_target = target_message_id.replace("%", "\\%").replace("_", "\\_");
-    let like_pattern = format!("%{}%", escaped_target);
-    let sql = format!(
-        "SELECT {MSG_SELECT_COLS}
-         FROM messages
-         WHERE message_id = ?1
-            OR in_reply_to = ?1
-            OR references_header LIKE ?2 ESCAPE '\\'
-         ORDER BY date_epoch ASC"
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| format!("Failed to prepare get_thread_messages: {e}"))?;
-
-    let rows = stmt
-        .query_map(params![target_message_id, like_pattern], |row| {
-            row_to_cached_message(row)
-        })
-        .map_err(|e| format!("Failed to query thread messages: {e}"))?;
-
-    let mut messages = Vec::new();
-    for row in rows {
-        messages.push(row.map_err(|e| format!("Failed to read thread message row: {e}"))?);
-    }
-    Ok(messages)
+    let escaped = target_message_id
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let pattern = format!("%{escaped}%");
+    let sql=format!("SELECT {MSG_SELECT_COLS} FROM messages WHERE user_hash=$1 AND
+        (message_id=$2 OR in_reply_to=$2 OR references_header LIKE $3 ESCAPE '\\') ORDER BY date_epoch ASC");
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(target_message_id)
+        .bind(pattern)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(row_to_cached_message)
+        .collect()
 }
 
 /// Build a complete email thread by transitively walking the References chain.
@@ -516,8 +459,8 @@ pub fn get_thread_messages(
 /// The process repeats until no new IDs are discovered (transitive closure).
 ///
 /// The result is deduplicated by `(folder, uid)` and sorted by `date_epoch` ascending.
-pub fn get_full_thread(
-    conn: &Connection,
+pub async fn get_full_thread(
+    conn: &UserDb,
     message_id: &str,
     references: Option<&str>,
 ) -> Result<Vec<CachedMessage>, String> {
@@ -540,10 +483,7 @@ pub fn get_full_thread(
 
     loop {
         // Find IDs we haven't queried yet.
-        let to_query: Vec<String> = known_ids
-            .difference(&processed_ids)
-            .cloned()
-            .collect();
+        let to_query: Vec<String> = known_ids.difference(&processed_ids).cloned().collect();
 
         if to_query.is_empty() {
             break;
@@ -552,7 +492,7 @@ pub fn get_full_thread(
         for id in &to_query {
             processed_ids.insert(id.clone());
 
-            let found = get_thread_messages(conn, id)?;
+            let found = get_thread_messages(conn, id).await?;
             for msg in found {
                 // Extract IDs from each found message and add to known set.
                 if let Some(ref mid) = msg.message_id
@@ -587,12 +527,10 @@ pub fn get_full_thread(
     Ok(all_messages)
 }
 
-/// Search the SQLite message cache using LIKE for text matches across
-/// subject, from_name, from_address, and to_addresses.
-/// This provides comprehensive results independent of the tantivy index state.
+/// Search the local cache on either backend. All filters remain tenant-scoped.
 #[allow(clippy::too_many_arguments)]
-pub fn search_messages_sqlite(
-    conn: &Connection,
+pub async fn search_messages_sqlite(
+    db: &UserDb,
     text: &str,
     folder: Option<&str>,
     from: Option<&str>,
@@ -602,98 +540,59 @@ pub fn search_messages_sqlite(
     has_attachment: Option<bool>,
     limit: usize,
 ) -> Result<Vec<CachedMessage>, String> {
-    let mut conditions = Vec::new();
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut idx = 1u32;
-
-    // Exclude Trash/Spam/Junk from search results (same as tantivy).
-    conditions.push("LOWER(folder) NOT IN ('trash', 'spam', 'junk')".to_string());
-
-    if !text.is_empty() {
-        let pattern = format!("%{text}%");
-        conditions.push(format!(
-            "(subject LIKE ?{idx} OR from_name LIKE ?{idx} OR from_address LIKE ?{idx} OR to_addresses LIKE ?{idx})"
-        ));
-        param_values.push(Box::new(pattern));
-        idx += 1;
-    }
-
-    if let Some(f) = folder {
-        conditions.push(format!("folder = ?{idx}"));
-        param_values.push(Box::new(f.to_string()));
-        idx += 1;
-    }
-
-    if let Some(f) = from {
-        if f.contains('@') {
-            conditions.push(format!("from_address = ?{idx}"));
-        } else {
-            conditions.push(format!("from_name LIKE ?{idx}"));
-        }
-        let val = if f.contains('@') { f.to_string() } else { format!("%{f}%") };
-        param_values.push(Box::new(val));
-        idx += 1;
-    }
-
-    if let Some(t) = to {
-        conditions.push(format!("to_addresses LIKE ?{idx}"));
-        param_values.push(Box::new(format!("%{t}%")));
-        idx += 1;
-    }
-
-    if let Some(df) = date_from {
-        conditions.push(format!("date_epoch >= ?{idx}"));
-        param_values.push(Box::new(df));
-        idx += 1;
-    }
-
-    if let Some(dt) = date_to {
-        conditions.push(format!("date_epoch <= ?{idx}"));
-        param_values.push(Box::new(dt));
-        idx += 1;
-    }
-
-    if let Some(ha) = has_attachment {
-        conditions.push(format!("has_attachments = ?{idx}"));
-        param_values.push(Box::new(ha as i32));
-        idx += 1;
-    }
-
-    let _ = idx; // suppress unused warning
-
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", conditions.join(" AND "))
-    };
-
     let sql = format!(
-        "SELECT {MSG_SELECT_COLS}
-         FROM messages
-         {where_clause}
-         ORDER BY date_epoch DESC
-         LIMIT ?{}", param_values.len() + 1
+        "SELECT {MSG_SELECT_COLS} FROM messages WHERE user_hash=$1
+        AND LOWER(folder) NOT IN ('trash','spam','junk')
+        AND ($2='' OR LOWER(subject) LIKE LOWER($3) OR LOWER(from_name) LIKE LOWER($3)
+             OR LOWER(from_address) LIKE LOWER($3) OR LOWER(to_addresses) LIKE LOWER($3))
+        AND (CAST($4 AS TEXT) IS NULL OR folder=$4)
+        AND (CAST($5 AS TEXT) IS NULL OR LOWER(from_address)=LOWER($5))
+        AND (CAST($6 AS TEXT) IS NULL OR LOWER(from_name) LIKE LOWER($6))
+        AND (CAST($7 AS TEXT) IS NULL OR LOWER(to_addresses) LIKE LOWER($7))
+        AND (CAST($8 AS BIGINT) IS NULL OR date_epoch >= $8)
+        AND (CAST($9 AS BIGINT) IS NULL OR date_epoch <= $9)
+        AND (CAST($10 AS BIGINT) IS NULL OR has_attachments=$10)
+        ORDER BY date_epoch DESC LIMIT $11"
     );
+    let from_address = from.filter(|value| value.contains('@'));
+    let from_name = from
+        .filter(|value| !value.contains('@'))
+        .map(|value| format!("%{value}%"));
+    let limit = i64::try_from(limit).map_err(|e| e.to_string())?;
+    let mut connection = db.acquire().await?;
+    sqlx::query(&sql)
+        .bind(db.user_hash())
+        .bind(text)
+        .bind(format!("%{text}%"))
+        .bind(folder)
+        .bind(from_address)
+        .bind(from_name)
+        .bind(to.map(|value| format!("%{value}%")))
+        .bind(date_from)
+        .bind(date_to)
+        .bind(has_attachment.map(i64::from))
+        .bind(limit)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(row_to_cached_message)
+        .collect()
+}
 
-    param_values.push(Box::new(limit as i64));
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| format!("Failed to prepare search query: {e}"))?;
-
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(params_refs), |row| {
-            row_to_cached_message(row)
-        })
-        .map_err(|e| format!("Failed to execute search query: {e}"))?;
-
-    let mut results = Vec::new();
-    for row in rows {
-        results.push(row.map_err(|e| format!("Failed to read search row: {e}"))?);
-    }
-    Ok(results)
+/// None distinguishes an empty cache from cached zero-byte messages.
+pub async fn cached_storage_bytes(db: &UserDb) -> Result<Option<u64>, String> {
+    let mut connection = db.acquire().await?;
+    let row = sqlx::query("SELECT CAST(SUM(size) AS BIGINT) FROM messages WHERE user_hash=$1")
+        .bind(db.user_hash())
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(|e| e.to_string())?;
+    row.try_get::<Option<i64>, _>(0)
+        .map_err(|e| e.to_string())?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -703,12 +602,14 @@ mod tests {
     use crate::db::pool::open_test_db;
 
     /// Helper: insert a folder so that the foreign key constraint is satisfied.
-    fn ensure_folder(conn: &Connection, name: &str) {
-        upsert_folder(conn, name, Some("/"), None, "", true, 0, 0, 1, 0).unwrap();
+    async fn ensure_folder(conn: &UserDb, name: &str) {
+        upsert_folder(conn, name, Some("/"), None, "", true, 0, 0, 1, 0)
+            .await
+            .unwrap();
     }
 
     /// Helper: insert a sample message.
-    fn insert_sample(conn: &Connection, folder: &str, uid: u32, date: &str) {
+    async fn insert_sample(conn: &UserDb, folder: &str, uid: u32, date: &str) {
         upsert_message(
             conn,
             folder,
@@ -728,46 +629,62 @@ mod tests {
             "snippet",
             None,
         )
+        .await
         .unwrap();
     }
 
-    #[test]
-    fn subject_suggestions_match_literal_text_deduplicate_and_limit() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        ensure_folder(&conn, "Archive");
+    #[tokio::test]
+    async fn subject_suggestions_match_literal_text_deduplicate_and_limit() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        ensure_folder(&conn, "Archive").await;
         for uid in 1..=12 {
-            insert_sample(&conn, "INBOX", uid, &format!("2024-01-{uid:02}T10:00:00Z"));
+            insert_sample(&conn, "INBOX", uid, &format!("2024-01-{uid:02}T10:00:00Z")).await;
         }
-        insert_sample(&conn, "Archive", 12, "2024-01-12T10:00:00Z");
-        let suggestions = suggest_subjects(&conn, "  SUBJECT  ").unwrap();
+        insert_sample(&conn, "Archive", 12, "2024-01-12T10:00:00Z").await;
+        let suggestions = suggest_subjects(&conn, "  SUBJECT  ").await.unwrap();
         assert_eq!(suggestions.len(), 8);
         assert_eq!(suggestions[0], "Subject 12");
         assert_eq!(suggestions[7], "Subject 5");
-        assert!(suggest_subjects(&conn, " ").unwrap().is_empty());
-        assert!(suggest_subjects(&conn, "s").unwrap().is_empty());
-        assert!(suggest_subjects(&conn, "%_").unwrap().is_empty());
-        conn.execute("UPDATE messages SET subject = '100%_done' WHERE uid = 1", []).unwrap();
-        assert_eq!(suggest_subjects(&conn, "%_").unwrap(), vec!["100%_done"]);
-        let other_account = open_test_db();
-        assert!(suggest_subjects(&other_account, "Subject").unwrap().is_empty());
+        assert!(suggest_subjects(&conn, " ").await.unwrap().is_empty());
+        assert!(suggest_subjects(&conn, "s").await.unwrap().is_empty());
+        assert!(suggest_subjects(&conn, "%_").await.unwrap().is_empty());
+        {
+            let mut connection = conn.acquire().await.unwrap();
+            sqlx::query("UPDATE messages SET subject='100%_done' WHERE user_hash=$1 AND uid=1")
+                .bind(conn.user_hash())
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            suggest_subjects(&conn, "%_").await.unwrap(),
+            vec!["100%_done"]
+        );
+        let other_account = open_test_db().await;
+        assert!(
+            suggest_subjects(&other_account, "Subject")
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
-    #[test]
-    fn cached_storage_tracks_all_folders_and_deletions() {
-        let conn = open_test_db();
-        assert_eq!(cached_storage_bytes(&conn).unwrap(), None);
-        ensure_folder(&conn, "INBOX");
-        ensure_folder(&conn, "Archive");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01");
-        insert_sample(&conn, "Archive", 1, "2024-01-01");
-        assert_eq!(cached_storage_bytes(&conn).unwrap(), Some(2048));
-        delete_message(&conn, "INBOX", 1).unwrap();
-        assert_eq!(cached_storage_bytes(&conn).unwrap(), Some(1024));
+    #[tokio::test]
+    async fn cached_storage_tracks_all_folders_and_deletions() {
+        let conn = open_test_db().await;
+        assert_eq!(cached_storage_bytes(&conn).await.unwrap(), None);
+        ensure_folder(&conn, "INBOX").await;
+        ensure_folder(&conn, "Archive").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01").await;
+        insert_sample(&conn, "Archive", 1, "2024-01-01").await;
+        assert_eq!(cached_storage_bytes(&conn).await.unwrap(), Some(2048));
+        delete_message(&conn, "INBOX", 1).await.unwrap();
+        assert_eq!(cached_storage_bytes(&conn).await.unwrap(), Some(1024));
     }
 
-    #[test]
-    fn test_parse_date_to_epoch() {
+    #[tokio::test]
+    async fn test_parse_date_to_epoch() {
         let e1 = parse_date_to_epoch("2024-01-01T10:00:00Z");
         let e2 = parse_date_to_epoch("2024-01-02T10:00:00Z");
         let e3 = parse_date_to_epoch("2024-01-03T10:00:00Z");
@@ -784,16 +701,16 @@ mod tests {
         assert_eq!(parse_date_to_epoch(""), 0);
     }
 
-    #[test]
-    fn test_upsert_and_get_messages() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_upsert_and_get_messages() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
-        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z");
-        insert_sample(&conn, "INBOX", 3, "2024-01-03T10:00:00Z");
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
+        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z").await;
+        insert_sample(&conn, "INBOX", 3, "2024-01-03T10:00:00Z").await;
 
-        let msgs = get_messages(&conn, "INBOX", 0, 10).unwrap();
+        let msgs = get_messages(&conn, "INBOX", 0, 10).await.unwrap();
         assert_eq!(msgs.len(), 3);
 
         // Should be date DESC: uid 3, 2, 1.
@@ -802,18 +719,24 @@ mod tests {
         assert_eq!(msgs[2].uid, 1);
     }
 
-    #[test]
-    fn test_pagination_no_overlap() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_pagination_no_overlap() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
         for uid in 1..=5 {
-            insert_sample(&conn, "INBOX", uid, &format!("2024-01-{:02}T10:00:00Z", uid));
+            insert_sample(
+                &conn,
+                "INBOX",
+                uid,
+                &format!("2024-01-{:02}T10:00:00Z", uid),
+            )
+            .await;
         }
 
-        let page0 = get_messages(&conn, "INBOX", 0, 2).unwrap();
-        let page1 = get_messages(&conn, "INBOX", 1, 2).unwrap();
-        let page2 = get_messages(&conn, "INBOX", 2, 2).unwrap();
+        let page0 = get_messages(&conn, "INBOX", 0, 2).await.unwrap();
+        let page1 = get_messages(&conn, "INBOX", 1, 2).await.unwrap();
+        let page2 = get_messages(&conn, "INBOX", 2, 2).await.unwrap();
 
         assert_eq!(page0.len(), 2);
         assert_eq!(page1.len(), 2);
@@ -833,47 +756,49 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_count_messages() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_count_messages() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
-        assert_eq!(count_messages(&conn, "INBOX").unwrap(), 0);
+        assert_eq!(count_messages(&conn, "INBOX").await.unwrap(), 0);
 
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
-        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z");
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
+        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z").await;
 
-        assert_eq!(count_messages(&conn, "INBOX").unwrap(), 2);
+        assert_eq!(count_messages(&conn, "INBOX").await.unwrap(), 2);
     }
 
-    #[test]
-    fn test_update_message_flags() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
+    #[tokio::test]
+    async fn test_update_message_flags() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
 
-        update_message_flags(&conn, "INBOX", 1, "\\Seen,\\Flagged").unwrap();
+        update_message_flags(&conn, "INBOX", 1, "\\Seen,\\Flagged")
+            .await
+            .unwrap();
 
-        let msgs = get_messages(&conn, "INBOX", 0, 10).unwrap();
+        let msgs = get_messages(&conn, "INBOX", 0, 10).await.unwrap();
         assert_eq!(msgs[0].flags, "\\Seen,\\Flagged");
     }
 
-    #[test]
-    fn test_cache_and_get_body_initially_none() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
+    #[tokio::test]
+    async fn test_cache_and_get_body_initially_none() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
 
         // Body should not be cached yet.
-        let body = get_cached_body(&conn, "INBOX", 1).unwrap();
+        let body = get_cached_body(&conn, "INBOX", 1).await.unwrap();
         assert!(body.is_none());
     }
 
-    #[test]
-    fn test_cache_and_get_body_after_caching() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
+    #[tokio::test]
+    async fn test_cache_and_get_body_after_caching() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
 
         cache_message_body(
             &conn, "INBOX", 1,
@@ -881,10 +806,10 @@ mod tests {
             Some(r#"[{"id":"0","filename":"test.pdf","content_type":"application/pdf","size":1024,"content_id":null}]"#),
             Some("From: alice@example.com"),
             Some(0),
-        )
+        ).await
             .unwrap();
 
-        let body = get_cached_body(&conn, "INBOX", 1).unwrap();
+        let body = get_cached_body(&conn, "INBOX", 1).await.unwrap();
         assert!(body.is_some());
         let cached = body.unwrap();
         assert_eq!(cached.html.unwrap(), "<h1>Hello</h1>");
@@ -894,159 +819,404 @@ mod tests {
         assert_eq!(cached.email_theme, Some(0));
     }
 
-    #[test]
-    fn test_update_email_theme() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
+    #[tokio::test]
+    async fn test_update_email_theme() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
 
-        update_email_theme(&conn, "INBOX", 1, 2).unwrap();
+        update_email_theme(&conn, "INBOX", 1, 2).await.unwrap();
 
-        let body = get_cached_body(&conn, "INBOX", 1).unwrap();
+        let body = get_cached_body(&conn, "INBOX", 1).await.unwrap();
         assert!(body.is_none());
 
         cache_message_body(
-            &conn, "INBOX", 1,
-            Some("<h1>Test</h1>"), Some("Test"),
-            None, None, Some(0),
-        ).unwrap();
+            &conn,
+            "INBOX",
+            1,
+            Some("<h1>Test</h1>"),
+            Some("Test"),
+            None,
+            None,
+            Some(0),
+        )
+        .await
+        .unwrap();
 
-        update_email_theme(&conn, "INBOX", 1, 1).unwrap();
+        update_email_theme(&conn, "INBOX", 1, 1).await.unwrap();
 
-        let cached = get_cached_body(&conn, "INBOX", 1).unwrap().unwrap();
+        let cached = get_cached_body(&conn, "INBOX", 1).await.unwrap().unwrap();
         assert_eq!(cached.email_theme, Some(1));
     }
 
-    #[test]
-    fn test_delete_message() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
-        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z");
-        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z");
+    #[tokio::test]
+    async fn test_delete_message() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
+        insert_sample(&conn, "INBOX", 1, "2024-01-01T10:00:00Z").await;
+        insert_sample(&conn, "INBOX", 2, "2024-01-02T10:00:00Z").await;
 
-        delete_message(&conn, "INBOX", 1).unwrap();
+        delete_message(&conn, "INBOX", 1).await.unwrap();
 
-        let msgs = get_messages(&conn, "INBOX", 0, 10).unwrap();
+        let msgs = get_messages(&conn, "INBOX", 0, 10).await.unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].uid, 2);
     }
 
-    #[test]
-    fn test_get_thread_messages_by_message_id() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_get_thread_messages_by_message_id() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
         // Original message.
         upsert_message(
-            &conn, "INBOX", 1,
-            Some("<thread-1@example.com>"), None, None,
-            "Hello", "alice@example.com", "Alice", "[]", "[]",
-            "2024-01-01T10:00:00Z", "", 100, false, "", None,
-        ).unwrap();
+            &conn,
+            "INBOX",
+            1,
+            Some("<thread-1@example.com>"),
+            None,
+            None,
+            "Hello",
+            "alice@example.com",
+            "Alice",
+            "[]",
+            "[]",
+            "2024-01-01T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
         // Reply referencing original via in_reply_to.
         upsert_message(
-            &conn, "INBOX", 2,
+            &conn,
+            "INBOX",
+            2,
             Some("<reply-1@example.com>"),
             Some("<thread-1@example.com>"),
             None,
-            "Re: Hello", "bob@example.com", "Bob", "[]", "[]",
-            "2024-01-02T10:00:00Z", "", 200, false, "", None,
-        ).unwrap();
+            "Re: Hello",
+            "bob@example.com",
+            "Bob",
+            "[]",
+            "[]",
+            "2024-01-02T10:00:00Z",
+            "",
+            200,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
-        let thread = get_thread_messages(&conn, "<thread-1@example.com>").unwrap();
+        let thread = get_thread_messages(&conn, "<thread-1@example.com>")
+            .await
+            .unwrap();
         assert_eq!(thread.len(), 2);
         // ASC order: uid 1 first, uid 2 second.
         assert_eq!(thread[0].uid, 1);
         assert_eq!(thread[1].uid, 2);
     }
 
-    #[test]
-    fn test_get_thread_messages_by_references_header() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_get_thread_messages_by_references_header() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
         // Original message.
         upsert_message(
-            &conn, "INBOX", 1,
-            Some("<orig@example.com>"), None, None,
-            "Hello", "alice@example.com", "Alice", "[]", "[]",
-            "2024-01-01T10:00:00Z", "", 100, false, "", None,
-        ).unwrap();
+            &conn,
+            "INBOX",
+            1,
+            Some("<orig@example.com>"),
+            None,
+            None,
+            "Hello",
+            "alice@example.com",
+            "Alice",
+            "[]",
+            "[]",
+            "2024-01-01T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
         // A message that references the original only via references_header.
         upsert_message(
-            &conn, "INBOX", 3,
+            &conn,
+            "INBOX",
+            3,
             Some("<deep-reply@example.com>"),
             Some("<mid@example.com>"),
             Some("<orig@example.com> <mid@example.com>"),
-            "Re: Re: Hello", "carol@example.com", "Carol", "[]", "[]",
-            "2024-01-03T10:00:00Z", "", 300, false, "", None,
-        ).unwrap();
+            "Re: Re: Hello",
+            "carol@example.com",
+            "Carol",
+            "[]",
+            "[]",
+            "2024-01-03T10:00:00Z",
+            "",
+            300,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
-        let thread = get_thread_messages(&conn, "<orig@example.com>").unwrap();
+        let thread = get_thread_messages(&conn, "<orig@example.com>")
+            .await
+            .unwrap();
         assert_eq!(thread.len(), 2);
         assert_eq!(thread[0].uid, 1); // matched by message_id
         assert_eq!(thread[1].uid, 3); // matched by references_header LIKE
     }
 
-    #[test]
-    fn test_get_full_thread_walks_references_chain() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_get_full_thread_walks_references_chain() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
         // Message 1: original
-        upsert_message(&conn, "INBOX", 1, Some("<a@ex>"), None, None,
-            "Hello", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            1,
+            Some("<a@ex>"),
+            None,
+            None,
+            "Hello",
+            "alice@ex",
+            "Alice",
+            "[]",
+            "[]",
+            "2024-01-01T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
         // Message 2: reply to 1
-        upsert_message(&conn, "INBOX", 2, Some("<b@ex>"), Some("<a@ex>"), Some("<a@ex>"),
-            "Re: Hello", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "", None).unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            2,
+            Some("<b@ex>"),
+            Some("<a@ex>"),
+            Some("<a@ex>"),
+            "Re: Hello",
+            "bob@ex",
+            "Bob",
+            "[]",
+            "[]",
+            "2024-01-02T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
         // Message 3: reply to 2, references both
-        upsert_message(&conn, "INBOX", 3, Some("<c@ex>"), Some("<b@ex>"), Some("<a@ex> <b@ex>"),
-            "Re: Re: Hello", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "", None).unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            3,
+            Some("<c@ex>"),
+            Some("<b@ex>"),
+            Some("<a@ex> <b@ex>"),
+            "Re: Re: Hello",
+            "carol@ex",
+            "Carol",
+            "[]",
+            "[]",
+            "2024-01-03T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
         // Starting from message 2, should find the entire thread (1, 2, 3).
-        let thread = get_full_thread(&conn, "<b@ex>", Some("<a@ex>")).unwrap();
+        let thread = get_full_thread(&conn, "<b@ex>", Some("<a@ex>"))
+            .await
+            .unwrap();
         assert_eq!(thread.len(), 3);
         assert_eq!(thread[0].uid, 1);
         assert_eq!(thread[1].uid, 2);
         assert_eq!(thread[2].uid, 3);
     }
 
-    #[test]
-    fn test_get_full_thread_from_leaf_message() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_get_full_thread_from_leaf_message() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
-        upsert_message(&conn, "INBOX", 1, Some("<root@ex>"), None, None,
-            "Start", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
-        upsert_message(&conn, "INBOX", 2, Some("<mid@ex>"), Some("<root@ex>"), Some("<root@ex>"),
-            "Re: Start", "bob@ex", "Bob", "[]", "[]", "2024-01-02T10:00:00Z", "", 100, false, "", None).unwrap();
-        upsert_message(&conn, "INBOX", 3, Some("<leaf@ex>"), Some("<mid@ex>"), Some("<root@ex> <mid@ex>"),
-            "Re: Re: Start", "carol@ex", "Carol", "[]", "[]", "2024-01-03T10:00:00Z", "", 100, false, "", None).unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            1,
+            Some("<root@ex>"),
+            None,
+            None,
+            "Start",
+            "alice@ex",
+            "Alice",
+            "[]",
+            "[]",
+            "2024-01-01T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            2,
+            Some("<mid@ex>"),
+            Some("<root@ex>"),
+            Some("<root@ex>"),
+            "Re: Start",
+            "bob@ex",
+            "Bob",
+            "[]",
+            "[]",
+            "2024-01-02T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            3,
+            Some("<leaf@ex>"),
+            Some("<mid@ex>"),
+            Some("<root@ex> <mid@ex>"),
+            "Re: Re: Start",
+            "carol@ex",
+            "Carol",
+            "[]",
+            "[]",
+            "2024-01-03T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
         // Starting from the leaf message, should still find entire thread.
-        let thread = get_full_thread(&conn, "<leaf@ex>", Some("<root@ex> <mid@ex>")).unwrap();
+        let thread = get_full_thread(&conn, "<leaf@ex>", Some("<root@ex> <mid@ex>"))
+            .await
+            .unwrap();
         assert_eq!(thread.len(), 3);
     }
 
-    #[test]
-    fn test_get_full_thread_single_message() {
-        let conn = open_test_db();
-        ensure_folder(&conn, "INBOX");
+    #[tokio::test]
+    async fn test_get_full_thread_single_message() {
+        let conn = open_test_db().await;
+        ensure_folder(&conn, "INBOX").await;
 
-        upsert_message(&conn, "INBOX", 1, Some("<solo@ex>"), None, None,
-            "Solo", "alice@ex", "Alice", "[]", "[]", "2024-01-01T10:00:00Z", "", 100, false, "", None).unwrap();
+        upsert_message(
+            &conn,
+            "INBOX",
+            1,
+            Some("<solo@ex>"),
+            None,
+            None,
+            "Solo",
+            "alice@ex",
+            "Alice",
+            "[]",
+            "[]",
+            "2024-01-01T10:00:00Z",
+            "",
+            100,
+            false,
+            "",
+            None,
+        )
+        .await
+        .unwrap();
 
-        let thread = get_full_thread(&conn, "<solo@ex>", None).unwrap();
+        let thread = get_full_thread(&conn, "<solo@ex>", None).await.unwrap();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].uid, 1);
     }
-}
 
-/// Cached storage is an estimate while folders are still being synchronized.
-/// None distinguishes an empty cache from cached zero-byte messages.
-pub fn cached_storage_bytes(conn: &Connection) -> Result<Option<u64>, String> {
-    conn.query_row("SELECT SUM(size) FROM messages", [], |row| row.get(0))
-        .map_err(|e| e.to_string())
+    #[tokio::test]
+    async fn header_upserts_preserve_bodies_and_tags_and_full_uid_range() {
+        let db = open_test_db().await;
+        ensure_folder(&db, "INBOX").await;
+        insert_sample(&db, "INBOX", u32::MAX, "2024-01-01").await;
+        cache_message_body(
+            &db,
+            "INBOX",
+            u32::MAX,
+            None,
+            Some("cached"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        {
+            let mut connection = db.acquire().await.unwrap();
+            sqlx::query("INSERT INTO tags (user_hash,id,name) VALUES ($1,'tag','Tag')")
+                .bind(db.user_hash())
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO message_tags (user_hash,tag_id,message_uid,message_folder) VALUES ($1,'tag',$2,'INBOX')")
+                .bind(db.user_hash()).bind(i64::from(u32::MAX)).execute(&mut *connection).await.unwrap();
+        }
+        insert_sample(&db, "INBOX", u32::MAX, "2024-01-02").await;
+        ensure_folder(&db, "INBOX").await;
+        assert_eq!(max_uid(&db, "INBOX").await.unwrap(), u32::MAX);
+        assert_eq!(
+            get_cached_body(&db, "INBOX", u32::MAX)
+                .await
+                .unwrap()
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("cached")
+        );
+        let mut connection = db.acquire().await.unwrap();
+        let row = sqlx::query("SELECT COUNT(*) FROM message_tags WHERE user_hash=$1")
+            .bind(db.user_hash())
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap();
+        assert_eq!(row.try_get::<i64, _>(0).unwrap(), 1);
+    }
 }

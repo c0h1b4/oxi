@@ -71,6 +71,22 @@ The Nix frontend build uses Bun for offline dependency installation and Node.js
 failure in the pinned Bun runtime during static export. Node is a build-time
 dependency only; the deployed server still serves static assets from Rust.
 
+## PostgreSQL
+
+SQLite remains the default. For PostgreSQL, supply the connection URL through a
+runtime secret file, not a Nix string containing the password:
+
+```nix
+services.oxi.environmentFile = "/run/secrets/oxi.env";
+services.oxi.databaseMaxConnections = 10;
+```
+
+The root-readable environment file contains `DATABASE_URL=postgres://...`.
+Use `sslmode=verify-full` and `sslrootcert=/run/secrets/postgres-ca.crt` for a
+private CA. PostgreSQL support still requires persistent `dataDir` for indexes
+and draft attachment files. Sessions remain process-local. See the main README
+for migration limits, backups, and the single-replica deployment scope.
+
 ## Checks
 
 ```console

@@ -79,17 +79,19 @@ async fn edited_draft_replaces_only_its_previous_imap_copies() {
         *client.expunged.lock().unwrap(),
         vec![("Drafts".into(), 1), ("Drafts".into(), 2)]
     );
-    let appended = client.appended.lock().unwrap();
-    assert_eq!(appended.len(), 1);
-    let parsed = mail_parser::MessageParser::default()
-        .parse(&appended[0].1)
-        .unwrap();
-    assert_eq!(
-        format!("<{}>", parsed.message_id().unwrap()),
-        draft_message_id("draft-1")
-    );
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash).unwrap();
-    assert_eq!(db::drafts::list_drafts(&conn).unwrap().len(), 1);
+    {
+        let appended = client.appended.lock().unwrap();
+        assert_eq!(appended.len(), 1);
+        let parsed = mail_parser::MessageParser::default()
+            .parse(&appended[0].1)
+            .unwrap();
+        assert_eq!(
+            format!("<{}>", parsed.message_id().unwrap()),
+            draft_message_id("draft-1")
+        );
+    }
+    let conn = config.user_db(&session.user_hash).await.unwrap();
+    assert_eq!(db::drafts::list_drafts(&conn).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -98,7 +100,7 @@ async fn sending_reopened_draft_removes_local_and_imap_copies() {
     let (config, session) = setup(&dir);
     let client =
         Arc::new(MockImapClient::new().with_headers(vec![header(8, &draft_message_id("draft-1"))]));
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash).unwrap();
+    let conn = config.user_db(&session.user_hash).await.unwrap();
     db::drafts::upsert_draft(
         &conn,
         "draft-1",
@@ -111,6 +113,7 @@ async fn sending_reopened_draft_removes_local_and_imap_copies() {
         None,
         None,
     )
+    .await
     .unwrap();
     let req = super::super::send::SendRequest {
         to: vec!["bob@example.com".into()],
@@ -133,7 +136,7 @@ async fn sending_reopened_draft_removes_local_and_imap_copies() {
     )
     .await
     .unwrap();
-    assert!(db::drafts::list_drafts(&conn).unwrap().is_empty());
+    assert!(db::drafts::list_drafts(&conn).await.unwrap().is_empty());
     assert_eq!(*client.expunged.lock().unwrap(), vec![("Drafts".into(), 8)]);
 }
 
@@ -152,9 +155,10 @@ async fn failed_imap_sync_keeps_the_local_draft_and_does_not_delete_server_copie
     )
     .await
     .unwrap();
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash).unwrap();
+    let conn = config.user_db(&session.user_hash).await.unwrap();
     assert_eq!(
         db::drafts::get_draft(&conn, "draft-1")
+            .await
             .unwrap()
             .unwrap()
             .subject,
@@ -169,7 +173,7 @@ async fn discarding_a_draft_removes_its_server_copy() {
     let (config, session) = setup(&dir);
     let client =
         Arc::new(MockImapClient::new().with_headers(vec![header(8, &draft_message_id("draft-1"))]));
-    let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash).unwrap();
+    let conn = config.user_db(&session.user_hash).await.unwrap();
     db::drafts::upsert_draft(
         &conn,
         "draft-1",
@@ -182,6 +186,7 @@ async fn discarding_a_draft_removes_its_server_copy() {
         None,
         None,
     )
+    .await
     .unwrap();
     delete_draft_handler(
         Extension(session),
@@ -191,6 +196,6 @@ async fn discarding_a_draft_removes_its_server_copy() {
     )
     .await
     .unwrap();
-    assert!(db::drafts::list_drafts(&conn).unwrap().is_empty());
+    assert!(db::drafts::list_drafts(&conn).await.unwrap().is_empty());
     assert_eq!(*client.expunged.lock().unwrap(), vec![("Drafts".into(), 8)]);
 }
