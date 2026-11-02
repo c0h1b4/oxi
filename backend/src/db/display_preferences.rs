@@ -1,6 +1,10 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// Interface languages the frontend ships a catalog for.
+/// Keep in sync with `SUPPORTED_LOCALES` in `frontend/src/lib/i18n/index.ts`.
+const SUPPORTED_LANGUAGES: [&str; 2] = ["en", "es"];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DisplayPreferences {
     pub density: String,
@@ -102,6 +106,9 @@ pub fn update_preferences(
         idx += 1;
     }
     if let Some(ref language) = data.language {
+        if !SUPPORTED_LANGUAGES.contains(&language.as_str()) {
+            return Err(format!("Invalid language: {language}"));
+        }
         sets.push(format!("language = ?{idx}"));
         values.push(Box::new(language.clone()));
         idx += 1;
@@ -269,6 +276,46 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid theme"));
+    }
+
+    #[test]
+    fn test_update_language() {
+        let conn = open_test_db();
+
+        let prefs = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: Some("es".to_string()),
+                compose_format: None,
+                deep_index: None,
+                animation_mode: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(prefs.language, "es");
+    }
+
+    #[test]
+    fn test_invalid_language_rejected() {
+        let conn = open_test_db();
+
+        let result = update_preferences(
+            &conn,
+            &UpdateDisplayPreferences {
+                density: None,
+                theme: None,
+                language: Some("klingon".to_string()),
+                compose_format: None,
+                deep_index: None,
+                animation_mode: None,
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid language"));
     }
 
     #[test]

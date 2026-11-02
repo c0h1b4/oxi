@@ -5,6 +5,11 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+### Added
+
+- English and Spanish interface catalogs, a language selector, localized login,
+  navigation and display settings, and locale-aware dates throughout the app.
+
 ### Fixed
 
 - Declare the editor's ProseMirror dependency directly so isolated Nix builds can

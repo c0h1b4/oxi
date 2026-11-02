@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/i18n/format";
+
 /**
  * Calendar utility functions for date manipulation and formatting.
  */
@@ -151,13 +153,13 @@ export function formatTime(
 }
 
 /** Format month and year for header display. */
-export function formatMonthYear(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+export function formatMonthYear(locale: string, date: Date): string {
+  return formatDate(locale, date, { month: "long", year: "numeric" });
 }
 
 /** Format a date for day view header. */
-export function formatDayHeader(date: Date): string {
-  return date.toLocaleDateString("en-US", {
+export function formatDayHeader(locale: string, date: Date): string {
+  return formatDate(locale, date, {
     weekday: "long",
     month: "long",
     day: "numeric",

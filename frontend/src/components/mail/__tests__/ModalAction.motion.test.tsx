@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, useRef, type Key, type ReactNode } from "react";
 
+vi.mock("@/hooks/useI18n", () => ({ useLocale: () => "en" }));
+
 vi.mock("framer-motion", async () => {
   const React = await import("react");
 

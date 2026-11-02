@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { useCalendarStore } from "@/stores/useCalendarStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { useCalendarEvent, useDeleteEvent } from "@/hooks/useCalendar";
+import { useLocale } from "@/hooks/useI18n";
+import { formatDate } from "@/lib/i18n/format";
 import { formatTime, getEventColorClasses } from "./calendarUtils";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
@@ -26,7 +28,14 @@ interface EventDetailProps {
   timeFormat: string;
 }
 
+const ALL_DAY_DATE: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+};
+
 export function EventDetail({ timeFormat }: EventDetailProps) {
+  const locale = useLocale();
   const selectedEvent = useCalendarStore((s) => s.selectedEvent);
   const selectEvent = useCalendarStore((s) => s.selectEvent);
   const openEventForm = useCalendarStore((s) => s.openEventForm);
@@ -79,25 +88,13 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
     if (event.all_day) {
       const start = new Date(event.start_time);
       const end = new Date(event.end_time);
-      const startStr = start.toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
-      const endStr = end.toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
+      const startStr = formatDate(locale, start, ALL_DAY_DATE);
+      const endStr = formatDate(locale, end, ALL_DAY_DATE);
       return startStr === endStr ? startStr : `${startStr} - ${endStr}`;
     }
 
     const start = new Date(event.start_time);
-    const dateStr = start.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
+    const dateStr = formatDate(locale, start, ALL_DAY_DATE);
     return `${dateStr}, ${formatTime(event.start_time, timeFormat)} - ${formatTime(event.end_time, timeFormat)}`;
   };
 

@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Children, isValidElement, type Key, type ReactNode } from "react";
 
+vi.mock("@/hooks/useI18n", () => ({ useLocale: () => "en" }));
+
 vi.mock("framer-motion", async () => {
   const React = await import("react");
   const { useRef, useEffect, useState } = React;
@@ -238,6 +240,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
         effectiveAnimationMode="medium"
+        locale="en"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();
@@ -253,6 +256,7 @@ describe("MessageList and MessageListItem motion transitions", () => {
         isBulkSelected={false}
         onBulkToggle={vi.fn()}
         effectiveAnimationMode="rich"
+        locale="en"
       />,
     );
     expect(screen.getByTestId("message-list-item-selection-transition")).toBeTruthy();

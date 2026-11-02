@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useDisplayPreferences } from "@/hooks/useDisplayPreferences";
+import { normalizeLocale } from "@/lib/i18n";
 import { resolveMotionConfig } from "@/lib/motion/config";
 import { clearThemeTransitionArtifacts } from "@/lib/motion/theme-spread";
 import { useUiStore } from "@/stores/useUiStore";
@@ -27,6 +28,7 @@ export function PreferencesLoader() {
   const setTheme = useUiStore((s) => s.setTheme);
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
   const setAnimationModeState = useUiStore((s) => s.setAnimationModeState);
+  const setLocale = useUiStore((s) => s.setLocale);
   const theme = useUiStore((s) => s.theme);
 
   useEffect(() => {
@@ -38,6 +40,7 @@ export function PreferencesLoader() {
     setDensity(data.density);
     setTheme(data.theme);
     if (data.compose_format) setComposeFormat(data.compose_format);
+    if (data.language) setLocale(normalizeLocale(data.language));
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const motionConfig = resolveMotionConfig(
       data.animation_mode ?? null,
@@ -48,7 +51,7 @@ export function PreferencesLoader() {
       effectiveMode: motionConfig.effectiveMode,
     });
     localStorage.setItem(THEME_STORAGE_KEY, data.theme);
-  }, [data, setDensity, setTheme, setComposeFormat, setAnimationModeState]);
+  }, [data, setDensity, setTheme, setComposeFormat, setAnimationModeState, setLocale]);
 
   useEffect(() => {
     applyTheme(theme);

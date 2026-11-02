@@ -1,0 +1,106 @@
+{
+  "common": {
+    "host": "Servidor",
+    "port": "Puerto",
+    "useTls": "Usar TLS"
+  },
+  "login": {
+    "tagline": "Inicia sesión en tu cuenta",
+    "title": "Hola de nuevo",
+    "subtitle": "Introduce tus credenciales para continuar",
+    "email": "Correo electrónico",
+    "emailPlaceholder": "tu@ejemplo.com",
+    "password": "Contraseña",
+    "passwordPlaceholder": "Introduce tu contraseña",
+    "rememberMe": "Mantener la sesión iniciada",
+    "serverConfig": "Configuración del servidor (opcional)",
+    "imapSettings": "Configuración IMAP",
+    "smtpSettings": "Configuración SMTP",
+    "imapHostPlaceholder": "imap.ejemplo.com",
+    "smtpHostPlaceholder": "smtp.ejemplo.com",
+    "submit": "Iniciar sesión",
+    "submitting": "Iniciando sesión...",
+    "footer": "Correo seguro, privado y rápido."
+  },
+  "nav": {
+    "compose": "Redactar",
+    "mail": "Correo",
+    "contacts": "Contactos",
+    "calendar": "Calendario",
+    "settings": "Ajustes",
+    "lightMode": "Modo claro",
+    "darkMode": "Modo oscuro",
+    "shortcuts": "Atajos de teclado",
+    "logout": "Cerrar sesión",
+    "comingSoon": "{label} (próximamente)",
+    "connection": {
+      "connected": "Conectado",
+      "syncing": "Sincronizando...",
+      "reconnecting": "Reconectando...",
+      "disconnected": "Desconectado"
+    }
+  },
+  "settings": {
+    "display": {
+      "title": "Apariencia",
+      "subtitle": "Personaliza el aspecto y la disposición de la aplicación.",
+      "loading": "Cargando los ajustes de apariencia...",
+      "reset": "Restablecer valores predeterminados",
+      "updateFailed": "No se ha podido actualizar: {message}",
+      "resetFailed": "No se ha podido restablecer: {message}",
+      "density": {
+        "label": "Densidad",
+        "description": "Controla el espaciado de la lista de mensajes",
+        "compact": "Compacta",
+        "comfortable": "Cómoda"
+      },
+      "theme": {
+        "label": "Tema",
+        "description": "Elige claro, oscuro o el del sistema",
+        "light": "Claro",
+        "dark": "Oscuro",
+        "system": "Sistema"
+      },
+      "composeFormat": {
+        "label": "Formato de redacción",
+        "description": "Formato predeterminado para los correos nuevos",
+        "html": "HTML",
+        "text": "Texto plano"
+      },
+      "animations": {
+        "label": "Animaciones",
+        "description": "Elige cuánto movimiento quieres en la interfaz",
+        "rich": "Máximas",
+        "medium": "Medias",
+        "subtle": "Sutiles",
+        "off": "Ninguna"
+      },
+      "deepIndex": {
+        "label": "Indexación de búsqueda",
+        "description": "Indexa el cuerpo de los mensajes para la búsqueda de texto completo (consume más ancho de banda)",
+        "off": "Solo cabeceras",
+        "on": "Texto completo"
+      },
+      "language": {
+        "label": "Idioma",
+        "description": "Idioma de la interfaz"
+      }
+    }
+  },
+  "locales": {
+    "en": "English",
+    "es": "Español"
+  },
+  "errors": {
+    "unexpected": "Se ha producido un error inesperado",
+    "UNAUTHORIZED": "Correo electrónico o contraseña incorrectos",
+    "SERVER_UNREACHABLE": "No se ha podido conectar con el servidor de correo ({message})",
+    "DUPLICATE_ACCOUNT": "Esta cuenta ya tiene la sesión iniciada",
+    "BAD_REQUEST": "El servidor ha rechazado la petición",
+    "CSRF_REJECTED": "La petición se ha bloqueado por seguridad. Recarga la página e inténtalo de nuevo.",
+    "ACCOUNT_EXPIRED": "La sesión de la cuenta ha caducado",
+    "NOT_FOUND": "No encontrado",
+    "SERVICE_UNAVAILABLE": "El servicio no está disponible. Inténtalo de nuevo en un momento.",
+    "INTERNAL_ERROR": "Se ha producido un error en el servidor"
+  }
+}

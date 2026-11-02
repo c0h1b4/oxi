@@ -7,6 +7,14 @@ import {
   useDisplayPreferences,
   useUpdateDisplayPreferences,
 } from "@/hooks/useDisplayPreferences";
+import { useT } from "@/hooks/useI18n";
+import {
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  localeName,
+  normalizeLocale,
+  type Locale,
+} from "@/lib/i18n";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { useUiStore } from "@/stores/useUiStore";
 import type { ThemeMode } from "@/stores/useUiStore";
@@ -28,7 +36,7 @@ function SegmentedControl<T extends string>({
 }) {
   return (
     <div className="flex flex-col items-start justify-between gap-3 lg:flex-row lg:items-center rounded-lg border border-border p-4">
-      <div>
+      <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
@@ -61,17 +69,22 @@ export function DisplaySettings() {
   const setDensity = useUiStore((s) => s.setDensity);
   const setTheme = useUiStore((s) => s.setTheme);
   const setComposeFormat = useUiStore((s) => s.setComposeFormat);
+  const setLocale = useUiStore((s) => s.setLocale);
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
+  const t = useT();
 
   const handleDensityChange = useCallback(
     (density: "compact" | "comfortable") => {
       setDensity(density);
       updatePrefs.mutate(
         { density },
-        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+        {
+          onError: (e) =>
+            toast.error(t("settings.display.updateFailed", { message: e.message })),
+        },
       );
     },
-    [setDensity, updatePrefs],
+    [setDensity, t, updatePrefs],
   );
 
   const handleThemeChange = useCallback(
@@ -84,10 +97,13 @@ export function DisplaySettings() {
       });
       updatePrefs.mutate(
         { theme },
-        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+        {
+          onError: (e) =>
+            toast.error(t("settings.display.updateFailed", { message: e.message })),
+        },
       );
     },
-    [effectiveAnimationMode, setTheme, updatePrefs],
+    [effectiveAnimationMode, setTheme, t, updatePrefs],
   );
 
   const handleComposeFormatChange = useCallback(
@@ -95,44 +111,68 @@ export function DisplaySettings() {
       setComposeFormat(compose_format);
       updatePrefs.mutate(
         { compose_format },
-        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+        {
+          onError: (e) =>
+            toast.error(t("settings.display.updateFailed", { message: e.message })),
+        },
       );
     },
-    [setComposeFormat, updatePrefs],
+    [setComposeFormat, t, updatePrefs],
   );
 
   const handleAnimationModeChange = useCallback(
     (animation_mode: AnimationMode) => {
       updatePrefs.mutate(
         { animation_mode },
-        { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+        {
+          onError: (e) =>
+            toast.error(t("settings.display.updateFailed", { message: e.message })),
+        },
       );
     },
-    [updatePrefs],
+    [t, updatePrefs],
+  );
+
+  const handleLanguageChange = useCallback(
+    (language: Locale) => {
+      setLocale(language);
+      updatePrefs.mutate(
+        { language },
+        {
+          onError: (e) =>
+            toast.error(t("settings.display.updateFailed", { message: e.message })),
+        },
+      );
+    },
+    [setLocale, t, updatePrefs],
   );
 
   const handleReset = useCallback(() => {
     setDensity("comfortable");
     setTheme("system");
     setComposeFormat("html");
+    setLocale(DEFAULT_LOCALE);
     updatePrefs.mutate(
       {
         density: "comfortable",
         theme: "system",
-        language: "en",
+        language: DEFAULT_LOCALE,
         compose_format: "html",
         animation_mode: null,
         deep_index: false,
       },
-      { onError: (e) => toast.error(`Failed to reset: ${e.message}`) },
+      {
+        onError: (e) =>
+          toast.error(t("settings.display.resetFailed", { message: e.message })),
+      },
     );
-  }, [setDensity, setTheme, setComposeFormat, updatePrefs]);
+  }, [setDensity, setTheme, setComposeFormat, setLocale, t, updatePrefs]);
 
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
-        Loading display settings...
+        {t("settings.display.loading")}
       </div>
     );
   }
@@ -142,90 +182,117 @@ export function DisplaySettings() {
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold">Display</h2>
+        <h2 className="text-base font-semibold">{t("settings.display.title")}</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Customize the appearance and layout of the app.
+          {t("settings.display.subtitle")}
         </p>
       </div>
 
       <div className="space-y-3">
         <SegmentedControl
-          label="Density"
-          description="Controls the spacing of the message list"
+          label={t("settings.display.density.label")}
+          description={t("settings.display.density.description")}
           value={prefs.density}
           options={[
-            { value: "compact", label: "Compact" },
-            { value: "comfortable", label: "Comfortable" },
+            { value: "compact", label: t("settings.display.density.compact") },
+            { value: "comfortable", label: t("settings.display.density.comfortable") },
           ]}
           onChange={handleDensityChange}
         />
 
         <SegmentedControl
-          label="Theme"
-          description="Choose light, dark, or match your system"
+          label={t("settings.display.theme.label")}
+          description={t("settings.display.theme.description")}
           value={prefs.theme}
           options={[
-            { value: "light", label: "Light", icon: <Sun className="size-3.5" /> },
-            { value: "dark", label: "Dark", icon: <Moon className="size-3.5" /> },
-            { value: "system", label: "System", icon: <Monitor className="size-3.5" /> },
+            {
+              value: "light",
+              label: t("settings.display.theme.light"),
+              icon: <Sun className="size-3.5" />,
+            },
+            {
+              value: "dark",
+              label: t("settings.display.theme.dark"),
+              icon: <Moon className="size-3.5" />,
+            },
+            {
+              value: "system",
+              label: t("settings.display.theme.system"),
+              icon: <Monitor className="size-3.5" />,
+            },
           ]}
           onChange={handleThemeChange}
         />
 
         <SegmentedControl
-          label="Compose format"
-          description="Default format for new emails"
+          label={t("settings.display.composeFormat.label")}
+          description={t("settings.display.composeFormat.description")}
           value={prefs.compose_format}
           options={[
-            { value: "html", label: "HTML", icon: <Code2 className="size-3.5" /> },
-            { value: "text", label: "Plain text", icon: <FileText className="size-3.5" /> },
+            {
+              value: "html",
+              label: t("settings.display.composeFormat.html"),
+              icon: <Code2 className="size-3.5" />,
+            },
+            {
+              value: "text",
+              label: t("settings.display.composeFormat.text"),
+              icon: <FileText className="size-3.5" />,
+            },
           ]}
           onChange={handleComposeFormatChange}
         />
 
         <SegmentedControl
-          label="Animations"
-          description="Choose how much motion to use in the interface"
+          label={t("settings.display.animations.label")}
+          description={t("settings.display.animations.description")}
           value={prefs.animation_mode ?? "medium"}
           options={[
-            { value: "rich", label: "Rich" },
-            { value: "medium", label: "Medium" },
-            { value: "subtle", label: "Subtle" },
-            { value: "off", label: "Off" },
+            { value: "rich", label: t("settings.display.animations.rich") },
+            { value: "medium", label: t("settings.display.animations.medium") },
+            { value: "subtle", label: t("settings.display.animations.subtle") },
+            { value: "off", label: t("settings.display.animations.off") },
           ]}
           onChange={handleAnimationModeChange}
         />
 
         <SegmentedControl
-          label="Search indexing"
-          description="Index message bodies for full-text search (uses more bandwidth)"
+          label={t("settings.display.deepIndex.label")}
+          description={t("settings.display.deepIndex.description")}
           value={prefs.deep_index ? "on" : "off"}
           options={[
-            { value: "off", label: "Headers only", icon: <Search className="size-3.5" /> },
-            { value: "on", label: "Full text", icon: <Search className="size-3.5" /> },
+            {
+              value: "off",
+              label: t("settings.display.deepIndex.off"),
+              icon: <Search className="size-3.5" />,
+            },
+            {
+              value: "on",
+              label: t("settings.display.deepIndex.on"),
+              icon: <Search className="size-3.5" />,
+            },
           ]}
           onChange={(v) =>
             updatePrefs.mutate(
               { deep_index: v === "on" },
-              { onError: (e) => toast.error(`Failed to update: ${e.message}`) },
+              {
+                onError: (e) =>
+                  toast.error(t("settings.display.updateFailed", { message: e.message })),
+              },
             )
           }
         />
 
-        <div className="flex flex-col items-start justify-between gap-3 lg:flex-row lg:items-center rounded-lg border border-border p-4">
-          <div>
-            <div className="text-sm font-medium">Language</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Interface language
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">English</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-              More coming soon
-            </span>
-          </div>
-        </div>
+        <SegmentedControl
+          label={t("settings.display.language.label")}
+          description={t("settings.display.language.description")}
+          value={normalizeLocale(prefs.language)}
+          options={SUPPORTED_LOCALES.map((locale) => ({
+            value: locale,
+            label: localeName(locale),
+          }))}
+          onChange={handleLanguageChange}
+        />
       </div>
 
       <button
@@ -233,7 +300,7 @@ export function DisplaySettings() {
         onClick={handleReset}
         className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
-        Reset to defaults
+        {t("settings.display.reset")}
       </button>
     </div>
   );

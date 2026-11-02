@@ -15,6 +15,23 @@ interface ErrorResponse {
   error?: ApiError;
 }
 
+/**
+ * Carries the machine-readable error code alongside the server's English
+ * message, so callers can show a translated string and fall back to `message`
+ * for codes they do not handle.
+ */
+export class ApiRequestError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+
+  constructor(error: ApiError) {
+    super(error.message ?? "An unexpected error occurred");
+    this.name = "ApiRequestError";
+    this.code = error.code;
+    this.status = error.status;
+  }
+}
+
 interface AccountsResponse {
   accounts: Array<{
     id: string;
@@ -37,11 +54,11 @@ function handleAccountSessionExpired(error: ApiError): void {
   }
 }
 
-async function parseErrorResponse(res: Response): Promise<Error> {
+async function parseErrorResponse(res: Response): Promise<ApiRequestError> {
   const data: ErrorResponse = await res.json();
   const error = data.error ?? {};
   handleAccountSessionExpired(error);
-  return new Error(error.message ?? "An unexpected error occurred");
+  return new ApiRequestError(error);
 }
 
 function getActiveAccountHeader(): Record<string, string> {
