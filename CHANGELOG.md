@@ -5,6 +5,11 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ## [Unreleased]
 
+### Fixed
+
+- Declare the editor's ProseMirror dependency directly so isolated Nix builds can
+  resolve its runtime modules and TypeScript declarations.
+
 ## [0.1.4] - 2026-10-31
 
 ### Fixed
