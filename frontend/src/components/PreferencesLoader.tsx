@@ -30,7 +30,6 @@ export function PreferencesLoader() {
   const setAnimationModeState = useUiStore((s) => s.setAnimationModeState);
   const setLocale = useUiStore((s) => s.setLocale);
   const theme = useUiStore((s) => s.theme);
-  const locale = useUiStore((s) => s.locale);
 
   useEffect(() => {
     clearThemeTransitionArtifacts();
@@ -53,10 +52,6 @@ export function PreferencesLoader() {
     });
     localStorage.setItem(THEME_STORAGE_KEY, data.theme);
   }, [data, setDensity, setTheme, setComposeFormat, setAnimationModeState, setLocale]);
-
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
 
   useEffect(() => {
     applyTheme(theme);

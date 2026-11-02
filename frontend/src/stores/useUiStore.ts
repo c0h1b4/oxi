@@ -45,9 +45,9 @@ function saveSettings(settings: Partial<PersistedSettings>) {
 }
 
 /**
- * Read synchronously at module scope so the first render already uses the right
- * locale. The stored value is a mirror of the `language` display preference;
- * PreferencesLoader corrects it once the API responds.
+ * Keep the browser locale ready for the first client update. useLocale supplies
+ * the English server snapshot during hydration of the static export.
+ * PreferencesLoader then confirms the account's saved language from the API.
  */
 function loadLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;

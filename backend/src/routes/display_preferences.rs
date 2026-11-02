@@ -12,6 +12,7 @@ use crate::error::AppError;
 fn map_update_error(message: String) -> AppError {
     let is_invalid_preference = message.starts_with("Invalid density:")
         || message.starts_with("Invalid theme:")
+        || message.starts_with("Invalid language:")
         || message.starts_with("Invalid compose_format:")
         || message.starts_with("Invalid animation_mode:");
 
@@ -164,6 +165,28 @@ mod tests {
             .into_response();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_language_returns_http_400_without_changing_preferences() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(tmp.path().to_str().unwrap());
+        let session = test_session();
+        let result = update_display_preferences(
+            Extension(session.clone()),
+            Extension(config.clone()),
+            Json(serde_json::from_value(json!({
+                "language": "klingon",
+                "theme": "dark"
+            })).unwrap()),
+        ).await;
+
+        let response = result.expect_err("unsupported language must fail").into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let conn = db::pool::open_user_db(&config.data_dir, &session.user_hash).unwrap();
+        let prefs = db::display_preferences::get_preferences(&conn).unwrap();
+        assert_eq!(prefs.language, "en");
+        assert_eq!(prefs.theme, "system");
     }
 
     #[test]

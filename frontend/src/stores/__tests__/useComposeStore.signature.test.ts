@@ -14,7 +14,7 @@ beforeEach(() => useComposeStore.getState().reset());
 describe("reply signature initialization", () => {
   it.each(["", "other@example.com"])("uses the matched identity for reply/reply-all (cc=%s)", (cc) => {
     const store = useComposeStore.getState();
-    store.openReply({ to: "sender@example.com", cc, subject: "Re: Hello", body: buildReplyBodyHtml("<p>Original</p>", "sender@example.com", date), inReplyTo: "<original>", references: null, fromIdentityId: 2 });
+    store.openReply({ to: "sender@example.com", cc, subject: "Re: Hello", body: buildReplyBodyHtml("en", "<p>Original</p>", "sender@example.com", date), inReplyTo: "<original>", references: null, fromIdentityId: 2 });
     store.initializeSignature(identities);
     const { body, signatureHtml } = useComposeStore.getState();
     expect(body).toContain("Alias signature");
@@ -41,7 +41,7 @@ describe("reply signature initialization", () => {
 
   it("adds readable plain-text signature before the quote", () => {
     const store = useComposeStore.getState();
-    store.openReply({ to: "sender@example.com", cc: "", subject: "Re: Hello", body: buildReplyBody("Original", "sender@example.com", date), inReplyTo: null, references: null, fromIdentityId: 2, isHtml: false });
+    store.openReply({ to: "sender@example.com", cc: "", subject: "Re: Hello", body: buildReplyBody("en", "Original", "sender@example.com", date), inReplyTo: null, references: null, fromIdentityId: 2, isHtml: false });
     store.initializeSignature(identities);
     const { body } = useComposeStore.getState();
     expect(body).toContain("-- \nAlias signature\nCompany");

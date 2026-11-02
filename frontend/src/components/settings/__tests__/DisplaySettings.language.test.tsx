@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUiStore } from "@/stores/useUiStore";
@@ -41,7 +41,9 @@ describe("DisplaySettings language", () => {
   });
 
   afterEach(() => {
+    cleanup();
     useUiStore.setState({ locale: "en" });
+    localStorage.removeItem("oxi-locale");
   });
 
   it("offers every supported locale by its own name", () => {

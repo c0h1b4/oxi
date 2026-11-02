@@ -276,9 +276,9 @@ export function DisplaySettings() {
             updatePrefs.mutate(
               { deep_index: v === "on" },
               {
-          onError: (e) =>
-            toast.error(t("settings.display.updateFailed", { message: e.message })),
-        },
+                onError: (e) =>
+                  toast.error(t("settings.display.updateFailed", { message: e.message })),
+              },
             )
           }
         />

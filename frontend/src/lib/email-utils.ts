@@ -139,5 +139,6 @@ function quoteText(text: string): string {
 }
 
 function formatQuoteDate(locale: string, iso: string): string {
+  if (isNaN(new Date(iso).getTime())) return "";
   return formatDateTime(locale, iso, { withYear: true });
 }
