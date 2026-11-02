@@ -33,6 +33,7 @@ export function formatDate(
   date: Date,
   options: Intl.DateTimeFormatOptions,
 ): string {
+  if (isNaN(date.getTime())) return date.toString();
   return dateTimeFormat(locale, options).format(date);
 }
 

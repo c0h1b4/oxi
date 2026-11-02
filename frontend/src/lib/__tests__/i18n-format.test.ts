@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  formatDate,
   formatListDate,
   formatShortDate,
   humanizeDate,
@@ -20,6 +21,16 @@ function freeze() {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
 }
+
+describe("formatDate", () => {
+  it("preserves invalid-date tolerance for imported calendar events", () => {
+    const invalid = new Date("malformed calendar date");
+    for (const locale of ["en", "es"]) {
+      expect(formatDate(locale, invalid, { weekday: "short", month: "short", day: "numeric" }))
+        .toBe(invalid.toLocaleDateString(locale));
+    }
+  });
+});
 
 describe("humanizeDate", () => {
   it("uses relative time for the last day", () => {
