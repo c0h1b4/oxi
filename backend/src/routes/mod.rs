@@ -379,6 +379,10 @@ pub fn create_router(
                 .delete(calendar::delete_event),
         )
         .route(
+            "/calendar/events/{id}/invitations",
+            post(calendar::send_invitations),
+        )
+        .route(
             "/calendar/settings",
             get(calendar::get_calendar_settings)
                 .put(calendar::update_calendar_settings),

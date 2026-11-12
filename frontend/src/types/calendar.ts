@@ -19,6 +19,10 @@ export interface CalendarEvent {
   updated_at: string;
 }
 
+export interface EventSaveResponse extends CalendarEvent {
+  invitation_error?: string;
+}
+
 export interface CreateEventRequest {
   title: string;
   description?: string;
@@ -33,6 +37,7 @@ export interface CreateEventRequest {
 }
 
 export interface UpdateEventRequest {
+  send_invitations?: boolean;
   title?: string;
   description?: string;
   location?: string;

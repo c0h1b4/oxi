@@ -29,6 +29,8 @@ pub struct CalendarEvent {
     pub reminder_minutes: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip)]
+    pub invitation_sequence: i64,
 }
 
 /// Fields for creating a new calendar event.
@@ -142,7 +144,7 @@ pub struct MeetingTemplate {
 const EVENT_SELECT_COLS: &str = "id, title, description, location, start_time, end_time, \
     all_day, recurrence_rule, attendees, organizer, status, source, source_uid, \
     source_message_uid, source_message_folder, meeting_url, color, reminder_minutes, \
-    created_at, updated_at";
+    created_at, updated_at, invitation_sequence";
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarEvent> {
     let all_day_int: i32 = row.get(6)?;
@@ -167,6 +169,7 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<CalendarEvent> {
         reminder_minutes: row.get(17)?,
         created_at: row.get(18)?,
         updated_at: row.get(19)?,
+        invitation_sequence: row.get(20)?,
     })
 }
 
@@ -333,6 +336,7 @@ pub fn update_event(
     }
 
     sets.push("updated_at = datetime('now')".to_string());
+    sets.push("invitation_sequence = invitation_sequence + 1".to_string());
 
     let sql = format!(
         "UPDATE calendar_events SET {} WHERE id = ?{idx}",

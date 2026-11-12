@@ -7,6 +7,10 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ### Added
 
+- Calendar email invitations on event creation, an invitation resend action, an
+  optional email update when editing events, and attendee suggestions from
+  contacts and known email addresses.
+
 - English and Spanish interface catalogs, a language selector, localized login,
   navigation and display settings, and locale-aware dates throughout the app.
 

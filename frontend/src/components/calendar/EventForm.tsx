@@ -4,11 +4,16 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
+import { AlertDialog } from "radix-ui";
+import { toast } from "sonner";
+import { RecipientInput } from "@/components/mail/ComposeDialog/RecipientInput";
+import type { EventSaveResponse } from "@/types/calendar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCalendarStore } from "@/stores/useCalendarStore";
 import { useUiStore } from "@/stores/useUiStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 import {
   useCreateEvent,
   useUpdateEvent,
@@ -33,6 +38,7 @@ export function EventForm() {
   const contentMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
 
   const { data: editingEvent } = useCalendarEvent(editingEventId);
+  const accountEmail = useAuthStore((s) => s.accounts.find((a) => a.id === s.activeAccountId)?.email);
   const createEvent = useCreateEvent();
   const updateEvent = useUpdateEvent();
 
@@ -50,13 +56,15 @@ export function EventForm() {
   const [color, setColor] = useState("blue");
   const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const [attendees, setAttendees] = useState("");
+  const [confirmSend, setConfirmSend] = useState(false);
 
   // Reset/populate form when dialog opens
   useEffect(() => {
     if (!showEventForm) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset form state when dialog opens with new event data
+    setConfirmSend(false);
     if (editingEvent) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset form state when dialog opens with new event data
       setTitle(editingEvent.title);
       setDescription(editingEvent.description);
       setLocation(editingEvent.location);
@@ -106,15 +114,14 @@ export function EventForm() {
   useEffect(() => {
     if (!showEventForm) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") closeEventForm();
+      if (e.key === "Escape" && !e.defaultPrevented && !confirmSend) closeEventForm();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showEventForm, closeEventForm]);
+  }, [showEventForm, closeEventForm, confirmSend]);
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
+  const saveEvent = useCallback(
+    (sendInvitations: boolean) => {
       if (!title.trim()) return;
 
       const attendeesList = attendees
@@ -130,10 +137,19 @@ export function EventForm() {
         ? `${endTime}T23:59:59`
         : `${endTime}:00`;
 
+      const onSuccess = (event: EventSaveResponse) => {
+        if (event.invitation_error) {
+          toast.warning(`Event saved, but invitations could not be sent: ${event.invitation_error}. Open the event to resend.`);
+        }
+        closeEventForm();
+      };
+
+      setConfirmSend(false);
       if (isEditing && editingEventId) {
         updateEvent.mutate(
           {
             id: editingEventId,
+            send_invitations: sendInvitations,
             title: title.trim(),
             description: description.trim(),
             location: location.trim(),
@@ -145,7 +161,7 @@ export function EventForm() {
             reminder_minutes: reminderMinutes ?? undefined,
             attendees: attendeesJson,
           },
-          { onSuccess: () => closeEventForm() },
+          { onSuccess },
         );
       } else {
         createEvent.mutate(
@@ -161,7 +177,7 @@ export function EventForm() {
             reminder_minutes: reminderMinutes ?? undefined,
             attendees: attendeesJson,
           },
-          { onSuccess: () => closeEventForm() },
+          { onSuccess },
         );
       }
     },
@@ -183,6 +199,18 @@ export function EventForm() {
       closeEventForm,
     ],
   );
+
+  const canInvite = !isEditing || (editingEvent?.source === "manual" &&
+    (!editingEvent.organizer || editingEvent.organizer.toLowerCase() === accountEmail?.toLowerCase()));
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isPending || !title.trim()) return;
+    if (isEditing && canInvite && attendees.split(",").some((email) => email.trim())) {
+      setConfirmSend(true);
+    } else {
+      saveEvent(false);
+    }
+  };
 
   if (!showEventForm) return null;
   if (typeof document === "undefined") return null;
@@ -318,12 +346,19 @@ export function EventForm() {
             <Label htmlFor="event-attendees">
               Attendees (comma-separated emails)
             </Label>
-            <Input
+            <RecipientInput
               id="event-attendees"
               value={attendees}
-              onChange={(e) => setAttendees(e.target.value)}
+              onChange={setAttendees}
               placeholder="alice@example.com, bob@example.com"
+              emailOnly
+              className="rounded-md border border-input px-3 shadow-xs focus-within:border-ring"
             />
+            {!isEditing && (
+              <p className="text-xs text-muted-foreground">
+                An email invitation will be sent to each attendee when you create the event.
+              </p>
+            )}
           </div>
 
           {/* Color */}
@@ -369,6 +404,12 @@ export function EventForm() {
             </select>
           </div>
 
+          {(createEvent.error || updateEvent.error) && (
+            <p role="alert" className="text-sm text-destructive">
+              {(createEvent.error || updateEvent.error)?.message}
+            </p>
+          )}
+
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
             <Button
@@ -379,7 +420,7 @@ export function EventForm() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending || !title.trim()}>
+            <Button type="submit" disabled={isPending || !title.trim() || (isEditing && !editingEvent)}>
               {isPending
                 ? "Saving..."
                 : isEditing
@@ -388,6 +429,30 @@ export function EventForm() {
             </Button>
           </div>
         </form>
+        <AlertDialog.Root open={confirmSend} onOpenChange={setConfirmSend}>
+          <AlertDialog.Portal>
+            <AlertDialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
+            <AlertDialog.Content className="fixed left-1/2 top-1/2 z-[60] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-background p-5 shadow-xl">
+              <AlertDialog.Title className="text-lg font-semibold">
+                Send updated invitations?
+              </AlertDialog.Title>
+              <AlertDialog.Description className="mt-2 text-sm text-muted-foreground">
+                Email the updated event to all current attendees, or save without sending an email.
+              </AlertDialog.Description>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <AlertDialog.Cancel asChild>
+                  <Button variant="outline">Cancel</Button>
+                </AlertDialog.Cancel>
+                <Button variant="outline" onClick={() => saveEvent(false)} disabled={isPending}>
+                  Save without sending
+                </Button>
+                <Button onClick={() => saveEvent(true)} disabled={isPending}>
+                  Save and send
+                </Button>
+              </div>
+            </AlertDialog.Content>
+          </AlertDialog.Portal>
+        </AlertDialog.Root>
       </AnimatedDiv>
     </div>
     </AnimatePresence>,
