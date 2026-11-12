@@ -8,6 +8,9 @@ interface RecipientInputProps {
   onChange: (value: string) => void;
   placeholder?: string;
   inputRef?: React.Ref<HTMLTextAreaElement>;
+  id?: string;
+  emailOnly?: boolean;
+  className?: string;
 }
 
 function HighlightedText({ html }: { html: string }) {
@@ -57,6 +60,9 @@ export function RecipientInput({
   onChange,
   placeholder,
   inputRef,
+  id,
+  emailOnly = false,
+  className,
 }: RecipientInputProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   // Track the query for which the dropdown was dismissed, so typing a new
@@ -92,14 +98,14 @@ export function RecipientInput({
     (suggestion: { email: string; name?: string }) => {
       const parts = value.split(",");
       parts.pop();
-      const formatted = suggestion.name
+      const formatted = suggestion.name && !emailOnly
         ? `${suggestion.name} <${suggestion.email}>`
         : suggestion.email;
       parts.push(formatted);
       onChange(parts.join(", ") + ", ");
       setDismissedQuery(query);
     },
-    [value, onChange, query],
+    [value, onChange, query, emailOnly],
   );
 
   const handleKeyDown = useCallback(
@@ -122,6 +128,8 @@ export function RecipientInput({
           selectSuggestion(results[Math.min(selectedIndex, results.length - 1)].item);
         }
       } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
         setDismissedQuery(query);
       }
     },
@@ -140,11 +148,12 @@ export function RecipientInput({
   }, [query]);
 
   return (
-    <div ref={containerRef} className="relative min-w-0 flex-1">
+    <div ref={containerRef} className={`relative min-w-0 flex-1 ${className ?? ""}`}>
       <textarea
+        id={id}
         ref={textareaRef}
         rows={1}
-        aria-label={placeholder ?? "Recipients"}
+        aria-label={id ? undefined : placeholder ?? "Recipients"}
         value={value}
         onChange={(e) => {
           onChange(e.target.value.replace(/\r?\n/g, " "));

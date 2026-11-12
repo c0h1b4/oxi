@@ -42,6 +42,10 @@ vi.mock("@/hooks/useCalendar", () => ({
   useUpdateEvent: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
+vi.mock("@/hooks/useAutocomplete", () => ({
+  useAutocomplete: () => ({ results: [], isLoading: false }),
+}));
+
 import { EventForm } from "../EventForm";
 
 describe("EventForm motion transitions", () => {

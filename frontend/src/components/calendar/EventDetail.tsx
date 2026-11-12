@@ -12,11 +12,14 @@ import {
   Pencil,
   Trash2,
   ExternalLink,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCalendarStore } from "@/stores/useCalendarStore";
 import { useUiStore } from "@/stores/useUiStore";
-import { useCalendarEvent, useDeleteEvent } from "@/hooks/useCalendar";
+import { useCalendarEvent, useDeleteEvent, useSendEventInvitations } from "@/hooks/useCalendar";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { toast } from "sonner";
 import { useLocale } from "@/hooks/useI18n";
 import { formatDate } from "@/lib/i18n/format";
 import { formatTime, getEventColorClasses } from "./calendarUtils";
@@ -45,6 +48,8 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
 
   const { data: event } = useCalendarEvent(selectedEvent);
   const deleteEvent = useDeleteEvent();
+  const sendInvitations = useSendEventInvitations();
+  const accountEmail = useAuthStore((s) => s.accounts.find((a) => a.id === s.activeAccountId)?.email);
 
   // Close on Escape
   useEffect(() => {
@@ -83,6 +88,8 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
   if (typeof document === "undefined") return null;
 
   const colors = getEventColorClasses(event.color);
+  const canInvite = event.source === "manual" && attendees.length > 0 &&
+    (!event.organizer || event.organizer.toLowerCase() === accountEmail?.toLowerCase());
 
   const formatDateRange = () => {
     if (event.all_day) {
@@ -212,8 +219,26 @@ export function EventDetail({ timeFormat }: EventDetailProps) {
             )}
           </div>
 
+          {sendInvitations.error && (
+            <p role="alert" className="mt-4 text-sm text-destructive">{sendInvitations.error.message}</p>
+          )}
+
           {/* Actions */}
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {canInvite && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => sendInvitations.mutate(event.id, {
+                  onSuccess: () => toast.success("Invitations sent to attendees"),
+                })}
+                disabled={sendInvitations.isPending}
+                className="gap-1.5"
+              >
+                <Send className="size-3.5" />
+                {sendInvitations.isPending ? "Sending..." : "Resend invitation"}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

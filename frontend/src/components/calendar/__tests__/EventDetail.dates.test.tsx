@@ -8,6 +8,7 @@ const { useCalendarEvent } = vi.hoisted(() => ({ useCalendarEvent: vi.fn() }));
 vi.mock("@/hooks/useCalendar", () => ({
   useCalendarEvent,
   useDeleteEvent: () => ({ mutate: vi.fn(), isPending: false }),
+  useSendEventInvitations: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 afterEach(() => {

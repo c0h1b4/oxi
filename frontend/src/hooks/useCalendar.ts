@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import type {
   CalendarEvent,
+  EventSaveResponse,
   CalendarEventsResponse,
   CalendarSettings,
   CreateEventRequest,
@@ -35,7 +36,7 @@ export function useCreateEvent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateEventRequest) =>
-      apiPost<CalendarEvent>(
+      apiPost<EventSaveResponse>(
         "/calendar/events",
         body as unknown as Record<string, unknown>,
       ),
@@ -49,7 +50,7 @@ export function useUpdateEvent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: UpdateEventRequest & { id: string }) =>
-      apiPut<CalendarEvent>(
+      apiPut<EventSaveResponse>(
         `/calendar/events/${id}`,
         body as unknown as Record<string, unknown>,
       ),
@@ -57,6 +58,13 @@ export function useUpdateEvent() {
       queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
       queryClient.invalidateQueries({ queryKey: ["calendar-event"] });
     },
+  });
+}
+
+export function useSendEventInvitations() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiPost<{ sent: number }>(`/calendar/events/${id}/invitations`, {}),
   });
 }
 
