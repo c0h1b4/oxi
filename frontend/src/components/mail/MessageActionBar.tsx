@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { toast } from "sonner";
 import { useFolders } from "@/hooks/useFolders";
 import { findJunkFolder } from "@/lib/mail-folders";
@@ -24,6 +24,7 @@ import {
   useMoveMessage,
   useDeleteMessage,
 } from "@/hooks/useMessages";
+import { useMessageRemovals } from "@/hooks/pending-message-removals";
 import { MoveToFolderMenu } from "./MoveToFolderMenu";
 import { TagPicker } from "./TagPicker";
 import { Button } from "@/components/ui/button";
@@ -73,21 +74,29 @@ export function MessageActionBar() {
   const activeFolder = useUiStore((s) => s.activeFolder);
   const selectedMessageUid = useUiStore((s) => s.selectedMessageUid);
   const updateFlags = useUpdateFlags();
-  const moveMessage = useMoveMessage();
-  const junkQueue = useMoveMessage({ queued: true });
+  const moveMessage = useMoveMessage({ confirmation: true });
   const { data: folderData } = useFolders();
-  const deleteMessage = useDeleteMessage();
+  const deleteMessage = useDeleteMessage({ confirmation: true });
+  const removals = useMessageRemovals({ includeUnconfirmed: true });
 
   const { data } = useMessage(activeFolder, selectedMessageUid ?? 0);
   const { data: identities } = useIdentities();
 
-  const disabled = !data;
+  const pendingRemoval = removals.find(removal =>
+    removal.fromFolder === activeFolder && removal.uid === selectedMessageUid);
+  const junkFolder = findJunkFolder(folderData?.folders ?? []);
+  const actionFeedback = pendingRemoval
+    ? !pendingRemoval.toFolder || pendingRemoval.toFolder === "Trash" ? "delete"
+      : pendingRemoval.toFolder === "Archive" ? "archive"
+      : pendingRemoval.toFolder === junkFolder ? "junk" : "move"
+    : null;
+  const removalDisabled = selectedMessageUid == null || !!pendingRemoval;
+  const disabled = !data || !!pendingRemoval;
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const shouldAnimate = effectiveAnimationMode !== "off";
   const barMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
   const feedbackMotionProps = useMemo(() => createScaleFadeVariants(effectiveAnimationMode), [effectiveAnimationMode]);
   const serializedFeedbackMotionProps = useMemo(() => JSON.stringify(feedbackMotionProps), [feedbackMotionProps]);
-  const [actionFeedback, setActionFeedback] = useState<"delete" | "archive" | "move" | null>(null);
 
   const isSeen = data?.flags.includes("\\Seen") ?? false;
   const isFlagged = data?.flags.includes("\\Flagged") ?? false;
@@ -169,39 +178,28 @@ export function MessageActionBar() {
   };
 
   const handleDelete = () => {
-    if (!data) return;
-    setActionFeedback("delete");
+    if (removalDisabled || selectedMessageUid == null) return;
     if (activeFolder === "Trash") {
-      deleteMessage.mutate(
-        { folder: activeFolder, uid: data.uid },
-        { onSettled: () => setActionFeedback(null) },
-      );
+      deleteMessage.mutate({ folder: activeFolder, uid: selectedMessageUid });
     } else {
-      moveMessage.mutate(
-        { fromFolder: activeFolder, toFolder: "Trash", uid: data.uid },
-        { onSettled: () => setActionFeedback(null) },
-      );
+      moveMessage.mutate({ fromFolder: activeFolder, toFolder: "Trash", uid: selectedMessageUid });
     }
   };
 
-  const handleArchive = () => {
-    if (!data) return;
-    setActionFeedback("archive");
-    moveMessage.mutate(
-      { fromFolder: activeFolder, toFolder: "Archive", uid: data.uid },
-      { onSettled: () => setActionFeedback(null) },
-    );
+  const handleMove = (toFolder: string) => {
+    if (removalDisabled || selectedMessageUid == null || toFolder === activeFolder) return;
+    moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: selectedMessageUid });
   };
 
+  const handleArchive = () => handleMove("Archive");
+
   const handleJunk = () => {
-    if (!data) return;
-    const toFolder = findJunkFolder(folderData?.folders ?? []);
-    if (!toFolder) {
+    if (removalDisabled || selectedMessageUid == null) return;
+    if (!junkFolder) {
       toast.error("No Spam or Junk folder found. Select a destination using Move to folder.");
       return;
     }
-    if (toFolder === activeFolder || data.uid !== selectedMessageUid || data.folder !== activeFolder) return;
-    junkQueue.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
+    handleMove(junkFolder);
   };
 
   const handleToggleStar = () => {
@@ -254,7 +252,7 @@ export function MessageActionBar() {
       <div className="mx-0.5 h-5 w-px shrink-0 bg-border" />
 
       {/* Delete */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleDelete} aria-label="Delete">
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={removalDisabled} aria-busy={actionFeedback === "delete"} onClick={handleDelete} aria-label="Delete">
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
@@ -274,6 +272,8 @@ export function MessageActionBar() {
               )}
             </motion.span>
           </AnimatePresence>
+        ) : actionFeedback === "delete" ? (
+          <Loader2 className="size-4 animate-spin" />
         ) : (
           <Trash2 className="size-4" />
         )}
@@ -281,7 +281,7 @@ export function MessageActionBar() {
       </Button>
 
       {/* Archive */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === "Archive"} onClick={handleArchive} aria-label="Archive">
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={removalDisabled || activeFolder === "Archive"} aria-busy={actionFeedback === "archive"} onClick={handleArchive} aria-label="Archive">
         {shouldAnimate ? (
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
@@ -301,6 +301,8 @@ export function MessageActionBar() {
               )}
             </motion.span>
           </AnimatePresence>
+        ) : actionFeedback === "archive" ? (
+          <Loader2 className="size-4 animate-spin" />
         ) : (
           <Archive className="size-4" />
         )}
@@ -320,45 +322,28 @@ export function MessageActionBar() {
             variants={feedbackMotionProps}
             className="inline-flex"
           >
-            {actionFeedback === "move" ? (
-              <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
-                <Loader2 className="size-4 animate-spin" />
-                <span className="hidden xl:inline">Move to...</span>
-              </Button>
-            ) : disabled ? (
-              <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
+            {removalDisabled ? (
+              <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled aria-label="Move to folder" aria-busy={actionFeedback === "move"}>
+                {actionFeedback === "move" && <Loader2 className="size-4 animate-spin" />}
                 <span className="hidden xl:inline">Move to...</span>
               </Button>
             ) : (
-              <MoveToFolderMenu
-                currentFolder={activeFolder}
-                onMove={(toFolder) => {
-                  setActionFeedback("move");
-                  moveMessage.mutate(
-                    { fromFolder: activeFolder, toFolder, uid: data.uid },
-                    { onSettled: () => setActionFeedback(null) },
-                  );
-                }}
-              />
+              <MoveToFolderMenu currentFolder={activeFolder} onMove={handleMove} />
             )}
           </motion.span>
         </AnimatePresence>
-      ) : disabled ? (
-        <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled>
+      ) : removalDisabled ? (
+        <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled aria-label="Move to folder" aria-busy={actionFeedback === "move"}>
+          {actionFeedback === "move" && <Loader2 className="size-4 animate-spin" />}
           <span className="hidden xl:inline">Move to...</span>
         </Button>
       ) : (
-        <MoveToFolderMenu
-          currentFolder={activeFolder}
-          onMove={(toFolder) => {
-            moveMessage.mutate({ fromFolder: activeFolder, toFolder, uid: data.uid });
-          }}
-        />
+        <MoveToFolderMenu currentFolder={activeFolder} onMove={handleMove} />
       )}
 
       {/* Junk */}
-      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled || activeFolder === findJunkFolder(folderData?.folders ?? [])} onClick={handleJunk} aria-label="Junk">
-        <AlertCircle className="size-4" />
+      <Button variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={removalDisabled || activeFolder === junkFolder} aria-busy={actionFeedback === "junk"} onClick={handleJunk} aria-label="Junk">
+        {actionFeedback === "junk" ? <Loader2 className="size-4 animate-spin" /> : <AlertCircle className="size-4" />}
         <span className="hidden xl:inline">Junk</span>
       </Button>
 
@@ -421,7 +406,7 @@ export function MessageActionBar() {
       </Button>
 
       {/* Tags */}
-      {data && (
+      {data && !pendingRemoval && (
         <TagPicker folder={activeFolder} uid={data.uid} />
       )}
     </AnimatedDiv>

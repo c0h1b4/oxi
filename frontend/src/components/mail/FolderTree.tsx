@@ -196,7 +196,7 @@ function FolderItem({
   const clearSearch = useUiStore((s) => s.clearSearch);
   const isActive = activeFolder === folder.name;
   const isFetching = useIsFetching({ queryKey: ["messages", folder.name] });
-  const moveMessage = useMoveMessage();
+  const moveMessage = useMoveMessage({ confirmation: true });
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
 

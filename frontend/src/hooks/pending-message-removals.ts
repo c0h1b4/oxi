@@ -10,13 +10,15 @@ export interface MessageRemoval {
   accountId: string | null;
   cancelled: boolean;
   removed: boolean;
+  confirmation?: boolean;
+  toFolder?: string;
 }
 
 export function isCurrentRemoval(removal: MessageRemoval) {
   return !removal.cancelled && removal.accountId === useAuthStore.getState().activeAccountId;
 }
 
-export function useMessageRemovals({ includeSuccessful = false }: { includeSuccessful?: boolean } = {}) {
+export function useMessageRemovals({ includeSuccessful = false, includeUnconfirmed = false }: { includeSuccessful?: boolean; includeUnconfirmed?: boolean } = {}) {
   const accountId = useAuthStore(state => state.activeAccountId);
   const removals = useMutationState<MessageRemoval>({
     filters: {
@@ -26,7 +28,8 @@ export function useMessageRemovals({ includeSuccessful = false }: { includeSucce
     },
     select: mutation => mutation.state.variables as MessageRemoval,
   });
-  return removals.filter(removal => !removal.cancelled && removal.accountId === accountId);
+  return removals.filter(removal => !removal.cancelled && removal.accountId === accountId
+    && (includeUnconfirmed || !removal.confirmation || removal.removed));
 }
 
 export function hideRemovedSearchResults(data: SearchResponse, removals: readonly Pick<MessageRemoval, "fromFolder" | "uid">[]): SearchResponse {

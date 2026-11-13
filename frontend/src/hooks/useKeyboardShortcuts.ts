@@ -37,8 +37,8 @@ export function useKeyboardShortcuts() {
   const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
 
   const updateFlags = useUpdateFlags();
-  const moveMessage = useMoveMessage();
-  const deleteMessage = useDeleteMessage();
+  const moveMessage = useMoveMessage({ confirmation: true });
+  const deleteMessage = useDeleteMessage({ confirmation: true });
   const { data } = useMessages(activeFolder);
 
   const normalizedQuery = normalizeSearchQuery(searchQuery);

@@ -106,8 +106,9 @@ export async function apiPost<T>(
   return res.json();
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(apiUrl(path), {
+    signal,
     headers: {
       ...getActiveAccountHeader(),
     },

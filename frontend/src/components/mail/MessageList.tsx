@@ -4,8 +4,9 @@ import { useRef, useCallback, useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence } from "framer-motion";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
-import { PenLine, X, PanelRight } from "lucide-react";
+import { PenLine, X, PanelRight, Loader2 } from "lucide-react";
 import { useMessages } from "@/hooks/useMessages";
+import { useMessageRemovals } from "@/hooks/pending-message-removals";
 import { useTags, useTagMessages } from "@/hooks/useTags";
 import { useListDrafts, useGetDraft, useDeleteDraft } from "@/hooks/useCompose";
 import { createFadeSlideVariants, type MotionVariants } from "@/lib/motion/variants";
@@ -154,6 +155,7 @@ function ToggleReadingPaneButton() {
 }
 
 export function MessageList() {
+  const pendingRemovals = useMessageRemovals({ includeUnconfirmed: true });
   const activeFolder = useUiStore((s) => s.activeFolder);
   const activeTagId = useUiStore((s) => s.activeTagId);
   const density = useUiStore((s) => s.density);
@@ -476,6 +478,11 @@ export function MessageList() {
                         height: virtualRow.size,
                       }}
                     >
+                      {pendingRemovals.some(operation => operation.fromFolder === message.folder && operation.uid === message.uid) && (
+                        <span role="status" aria-label="Message action pending" className="pointer-events-none absolute right-2 top-1 z-10 rounded bg-background p-0.5">
+                          <Loader2 className="size-3 animate-spin" />
+                        </span>
+                      )}
                       <MessageListItem
                         message={message}
                         isSelected={selectedMessageUid === message.uid}
