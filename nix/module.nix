@@ -15,9 +15,9 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.system}.default.override { inherit basePath; };
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.default.override { inherit basePath; };
       defaultText = lib.literalExpression ''
-        self.packages.''${pkgs.system}.default.override {
+        self.packages.''${pkgs.stdenv.hostPlatform.system}.default.override {
           basePath = if config.services.oxi.basePath == null then "" else config.services.oxi.basePath;
         }
       '';
