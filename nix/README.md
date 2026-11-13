@@ -44,10 +44,10 @@ Both the combined package and the frontend are overridable:
 
 ```nix
 let
-  oxi = inputs.oxi.packages.${pkgs.system}.default.override {
+  oxi = inputs.oxi.packages.${pkgs.stdenv.hostPlatform.system}.default.override {
     basePath = "/oxi";
   };
-  frontend = inputs.oxi.packages.${pkgs.system}.frontend.override {
+  frontend = inputs.oxi.packages.${pkgs.stdenv.hostPlatform.system}.frontend.override {
     basePath = "/oxi";
   };
 in {
