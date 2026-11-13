@@ -115,6 +115,8 @@ vi.mock("../BulkActionBar", () => ({
 
 const mockUpdateFlags = vi.fn();
 
+vi.mock("@/hooks/pending-message-removals", () => ({ useMessageRemovals: () => [] }));
+
 vi.mock("@/hooks/useMessages", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/useMessages")>("@/hooks/useMessages");
   return {

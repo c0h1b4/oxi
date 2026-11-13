@@ -31,8 +31,8 @@ export function BulkActionBar() {
   const clearBulkSelection = useUiStore((s) => s.clearBulkSelection);
 
   const updateFlags = useUpdateFlags();
-  const moveMessage = useMoveMessage();
-  const deleteMessage = useDeleteMessage();
+  const moveMessage = useMoveMessage({ confirmation: true });
+  const deleteMessage = useDeleteMessage({ confirmation: true });
 
   const [isBusy, setIsBusy] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
