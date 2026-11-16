@@ -11,8 +11,9 @@
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS frontend-build
 
-ARG NEXT_PUBLIC_BASE_PATH
-ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
+# The backend replaces this reserved prefix with BASE_PATH at startup.
+# Do not bake a deployment-specific path into the published image.
+ENV NEXT_PUBLIC_BASE_PATH=/__OXI_BASE_PATH__
 
 WORKDIR /app/frontend
 
@@ -77,6 +78,6 @@ ENV BASE_PATH=
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-    CMD curl -f http://localhost:${PORT:-3001}${BASE_PATH:-}/api/health || exit 1
+    CMD prefix="$(printf '%s' "${BASE_PATH:-}" | sed 's:/*$::')" && curl -f "http://localhost:${PORT:-3001}${prefix}/api/health" || exit 1
 
 CMD ["./oxi-email-server"]

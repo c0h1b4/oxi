@@ -449,7 +449,9 @@ pub fn create_router(
     // Use the same base path for routing and authentication cookies.
     let router = match config.normalized_base_path() {
         "/" => inner,
-        base_path => Router::new().nest(base_path, inner),
+        // nest() does not mount a fallback at /prefix or /prefix/ in Axum 0.8.
+        // Mount the whole service so direct loads of the app root also work.
+        base_path => Router::new().nest_service(base_path, inner),
     };
 
     let router = router

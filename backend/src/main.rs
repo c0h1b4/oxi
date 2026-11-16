@@ -9,6 +9,7 @@ mod realtime;
 mod routes;
 mod search;
 mod smtp;
+mod static_assets;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Load configuration via figment (serde defaults + env vars).
-    let config = Arc::new(AppConfig::load()?);
+    let mut config = AppConfig::load()?;
+    // Keep the temporary export alive until the HTTP server shuts down.
+    let runtime_assets = static_assets::prepare(&mut config)?;
+    let config = Arc::new(config);
 
     // Create the in-memory session store with the configured timeout.
     let store = Arc::new(SessionStore::new(Duration::from_secs(
@@ -78,6 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = format!("{}:{}", config.host, config.port);
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
 
+    // Install handlers before announcing readiness, including for immediate shutdowns.
+    let shutdown = shutdown_signal()?;
     tracing::info!(
         host = %config.host,
         port = %config.port,
@@ -85,11 +91,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "oxi-email server starting"
     );
 
-    axum::serve(
+    let result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .await?;
+    .with_graceful_shutdown(shutdown)
+    .await;
+    drop(runtime_assets);
+    result?;
 
     Ok(())
+}
+
+fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    #[cfg(unix)]
+    let (interrupt, terminate) = {
+        use tokio::signal::unix::{signal, SignalKind};
+        (signal(SignalKind::interrupt())?, signal(SignalKind::terminate())?)
+    };
+
+    Ok(async move {
+        #[cfg(unix)]
+        {
+            let (mut interrupt, mut terminate) = (interrupt, terminate);
+            tokio::select! {
+                _ = interrupt.recv() => {},
+                _ = terminate.recv() => {},
+            }
+        }
+        #[cfg(not(unix))]
+        tokio::signal::ctrl_c().await.expect("install shutdown handler");
+    })
 }

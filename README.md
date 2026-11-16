@@ -116,10 +116,68 @@ fine). Development cookies are SameSite=Lax, so unrelated cross-site hosts are
 not supported; production uses SameSite=Strict and should serve the frontend and
 API from the same origin. Cookie/browser third-party policies still apply.
 
-For a same-origin subpath deployment, build the frontend with
-`NEXT_PUBLIC_BASE_PATH=/oxi` and run the backend with `BASE_PATH=/oxi`.
-An unset or empty `BASE_PATH` means the root path `/`. See [Nix deployment](nix/README.md)
-for packages that build the matching prefix automatically.
+### Configurable subpath deployment (Docker)
+
+Published images built with runtime-prefix support use **`BASE_PATH` at container
+startup**. Use the same image for `/`, `/mail`, or a nested path such as
+`/apps/mail`; no frontend rebuild is needed when changing the runtime prefix.
+To test this implementation before a supporting image is published, build once
+from this checkout (do not assume an older published tag contains this change):
+
+```bash
+docker build -t oxi:runtime-base-path .
+docker run -d --name oxi -p 3001:3001 \
+  -e BASE_PATH=/apps/mail \
+  -e IMAP_HOST=mail.example.com -e SMTP_HOST=mail.example.com \
+  -v oxi-data:/data oxi:runtime-base-path
+```
+
+Then open `https://mail.example.com/apps/mail/`. With the repository's Compose
+file, set `BASE_PATH=/apps/mail` in `.env` or the shell before starting it.
+Restart/recreate the container to change the prefix. Unset, empty, and `/` mean
+the origin root. Trailing slashes are removed. Non-root paths must start with
+`/`; each segment may contain ASCII letters, digits, `_`, and `-`. Empty interior
+segments, dot segments, URL encoding, whitespace, queries, and fragments are
+rejected at startup.
+
+The reverse proxy must **preserve the prefix**, forward WebSocket upgrades, and
+send all paths below it to Oxi. For example, with nginx (TLS configuration omitted):
+
+```nginx
+location = /apps/mail {
+    return 308 /apps/mail/;
+}
+location /apps/mail/ {
+    # No trailing URI slash: preserve /apps/mail/ in the upstream request.
+    proxy_pass http://127.0.0.1:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+Replace `/apps/mail` in the proxy configuration with your chosen `BASE_PATH`.
+Assets, pages, API calls, auth cookies, redirects, notification icons, and
+WebSockets stay under that prefix; no origin-root asset routes are required.
+
+**Build-time versus runtime settings:** Next.js static export still bakes
+`NEXT_PUBLIC_BASE_PATH` into its output. The Docker build sets it to the reserved
+placeholder `/__OXI_BASE_PATH__`. At startup the Rust server resolves that
+placeholder in a temporary copy of the frontend using `BASE_PATH`, including
+Next.js router code and RSC payloads. The source assets remain unchanged, so
+read-only container filesystems work when the temporary directory is writable
+(for example, `--read-only --tmpfs /tmp` with a writable `/data` volume). Startup
+fails if the temporary export cannot be created. Do not use the placeholder as
+your deployment path or override the Docker frontend build setting.
+
+Older images, including `v0.2.0`, do not have runtime-prefix support. Setting an
+environment variable cannot retrofit those images; upgrade to a supporting image.
+For custom fixed-prefix/local builds, continue to use the same value for
+`NEXT_PUBLIC_BASE_PATH` at frontend build time and `BASE_PATH` at server startup.
+These exports are served unchanged. See [Nix deployment](nix/README.md) for
+fixed-prefix packages built automatically by the NixOS module.
 
 ## Configuration
 
@@ -138,7 +196,7 @@ All configuration is via environment variables:
 | `SESSION_TIMEOUT_HOURS` | `24` | Session expiry in hours |
 | `STATIC_DIR` | `./static` | Frontend static files directory |
 | `ENVIRONMENT` | `development` | Runtime environment |
-| `BASE_PATH` | — | Base path prefix for reverse proxy (e.g. `/oxi`) |
+| `BASE_PATH` | empty (root) | Runtime URL prefix for Docker images (e.g. `/mail` or `/apps/mail`); fixed-prefix custom builds must match their frontend |
 | `RUST_LOG` | `info` | Log level filter |
 
 ## Architecture

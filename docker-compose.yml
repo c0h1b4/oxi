@@ -2,8 +2,6 @@ services:
   app:
     build:
       context: .
-      args:
-        - NEXT_PUBLIC_BASE_PATH=${BASE_PATH:-}
     ports:
       - "3001:3001"
     environment:
@@ -18,7 +16,11 @@ services:
     volumes:
       - oxi-data:/data
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:3001${BASE_PATH:-}/api/health"]
+      test:
+        - CMD-SHELL
+        - >-
+          prefix=$$(printf '%s' "$$BASE_PATH" | sed 's:/*$$::');
+          curl -f "http://localhost:$${PORT:-3001}$${prefix}/api/health"
       interval: 30s
       timeout: 3s
       retries: 3

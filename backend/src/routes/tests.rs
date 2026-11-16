@@ -409,7 +409,7 @@
 
     #[tokio::test]
     async fn directory_redirect_keeps_base_path_and_serves_login_index() {
-        for (base_path, prefix) in [(None, ""), (Some("/oxi"), "/oxi")] {
+        for (base_path, prefix) in [(None, ""), (Some("/mail"), "/mail"), (Some("/apps/mail/"), "/apps/mail")] {
             let dir = setup_static_dir();
             fs::create_dir(dir.path().join("login")).unwrap();
             fs::write(dir.path().join("login/index.html"), "LOGIN PAGE").unwrap();
@@ -433,6 +433,49 @@
             assert!(response.headers().get("location").is_none());
             let body = response.into_body().collect().await.unwrap().to_bytes();
             assert_eq!(body.as_ref(), b"LOGIN PAGE");
+        }
+    }
+
+
+    #[tokio::test]
+    async fn runtime_export_uses_the_same_prefix_as_api_and_directory_redirects() {
+        for prefix in ["", "/mail", "/apps/mail"] {
+            let dir = setup_static_dir();
+            let marker = crate::static_assets::BASE_PATH_PLACEHOLDER;
+            fs::write(dir.path().join("index.html"), format!("<script src=\"{marker}/_next/app.js\"></script>")).unwrap();
+            fs::create_dir_all(dir.path().join("_next")).unwrap();
+            fs::write(dir.path().join("_next/app.js"), format!("const api = '{marker}/api';")).unwrap();
+            fs::create_dir(dir.path().join("login")).unwrap();
+            fs::write(dir.path().join("login/index.html"), format!("{marker}/_next/app.js")).unwrap();
+            let mut config = (*test_config(dir.path().to_str().unwrap())).clone();
+            config.base_path = Some(prefix.to_owned());
+            let _assets = crate::static_assets::prepare(&mut config).unwrap().unwrap();
+            let app = create_router(
+                Arc::new(config), test_store(), test_imap_client(), test_smtp_client(),
+                test_search_engine("/tmp/oxi-test"), test_event_bus(), test_idle_manager(),
+            );
+            for (path, expected) in [
+                ("/", format!("<script src=\"{prefix}/_next/app.js\"></script>")),
+                ("/_next/app.js", format!("const api = '{prefix}/api';")),
+                ("/login/", format!("{prefix}/_next/app.js")),
+            ] {
+                let response = app.clone().oneshot(Request::builder()
+                    .uri(format!("{prefix}{path}")).body(Body::empty()).unwrap()).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                assert_eq!(body.as_ref(), expected.as_bytes());
+            }
+            let response = app.clone().oneshot(Request::builder()
+                .uri(format!("{prefix}/api/health")).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let response = app.clone().oneshot(Request::builder()
+                .uri(format!("{prefix}/login")).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.headers()["location"], format!("{prefix}/login/"));
+            if !prefix.is_empty() {
+                let response = app.oneshot(Request::builder()
+                    .uri("/_next/app.js").body(Body::empty()).unwrap()).await.unwrap();
+                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            }
         }
     }
 
@@ -737,7 +780,8 @@
             (None, "", "/"),
             (Some(""), "", "/"),
             (Some("/"), "", "/"),
-            (Some("/oxi"), "/oxi", "/oxi"),
+            (Some("/mail"), "/mail", "/mail"),
+            (Some("/apps/mail/"), "/apps/mail", "/apps/mail"),
         ] {
             let static_dir = setup_static_dir();
             let data_dir = TempDir::new().unwrap();

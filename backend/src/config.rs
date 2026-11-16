@@ -129,10 +129,11 @@ fn default_serve_static() -> bool {
 }
 
 impl AppConfig {
-    /// Use the root path when no reverse-proxy prefix is configured.
+    /// Use the root path when no reverse-proxy prefix is configured, and strip trailing slashes.
     pub fn normalized_base_path(&self) -> &str {
         self.base_path
             .as_deref()
+            .map(|path| path.trim_end_matches('/'))
             .filter(|path| !path.is_empty())
             .unwrap_or("/")
     }
@@ -170,9 +171,40 @@ impl AppConfig {
     /// struct fields via case-insensitive matching (e.g. `IMAP_HOST` → `imap_host`).
     #[allow(clippy::result_large_err)]
     pub fn load() -> Result<Self, figment::Error> {
-        Figment::new()
-            .merge(Env::raw())
-            .extract()
+        let env = Env::raw();
+        // Validate raw values before Figment can trim whitespace or interpret quotes.
+        for (_, base_path) in env.clone().only(&["base_path"]).iter() {
+            validate_base_path(&base_path)?;
+        }
+        Figment::new().merge(env).extract()
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_base_path(path: &str) -> Result<(), figment::Error> {
+    if path.is_empty() || path == "/" {
+        return Ok(());
+    }
+
+    let valid = path
+        .trim_end_matches('/')
+        .strip_prefix('/')
+        .is_some_and(|prefix| {
+            prefix.split('/').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            })
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(figment::Error::from(format!(
+            "invalid BASE_PATH {path:?}: use an empty value or '/' for root, or a slash-prefixed path \
+             with non-empty segments containing only ASCII letters, digits, '_' or '-' \
+             (for example '/oxi/mail'); trailing slashes are allowed"
+        )))
     }
 }
 
@@ -260,6 +292,93 @@ mod tests {
         unsafe {
             std::env::remove_var("IMAP_HOST");
             std::env::remove_var("DATA_DIR");
+        }
+    }
+
+    #[test]
+    fn normalized_base_path_handles_root_and_trailing_slashes() {
+        for (base_path, expected) in [
+            (None, "/"),
+            (Some(""), "/"),
+            (Some("/"), "/"),
+            (Some("/oxi"), "/oxi"),
+            (Some("/oxi/"), "/oxi"),
+            (Some("/oxi///"), "/oxi"),
+            (Some("/Team_1/mail-v2///"), "/Team_1/mail-v2"),
+        ] {
+            let config = AppConfig {
+                base_path: base_path.map(str::to_owned),
+                ..Figment::new().extract().expect("defaults should load")
+            };
+            assert_eq!(config.normalized_base_path(), expected, "{base_path:?}");
+        }
+    }
+
+    #[test]
+    fn validation_accepts_valid_base_paths() {
+        for (base_path, expected) in [
+            (None, "/"),
+            (Some(""), "/"),
+            (Some("/"), "/"),
+            (Some("/oxi"), "/oxi"),
+            (Some("/oxi/"), "/oxi"),
+            (Some("/oxi///"), "/oxi"),
+            (Some("/Team_1/mail-v2///"), "/Team_1/mail-v2"),
+            (Some("/_/-/0123456789"), "/_/-/0123456789"),
+        ] {
+            validate_base_path(base_path.unwrap_or_default())
+                .unwrap_or_else(|error| panic!("BASE_PATH {base_path:?} should load: {error}"));
+            let config = AppConfig {
+                base_path: base_path.map(str::to_owned),
+                ..Figment::new().extract().expect("defaults should load")
+            };
+            assert_eq!(config.normalized_base_path(), expected, "{base_path:?}");
+        }
+    }
+
+    #[test]
+    fn validation_rejects_malformed_base_paths_with_actionable_errors() {
+        for base_path in [
+            "oxi",
+            "//",
+            "///",
+            "//oxi",
+            "/oxi//mail",
+            "/oxi//mail///",
+            "/.",
+            "/..",
+            "/oxi/./mail",
+            "/oxi/../mail",
+            "/oxi.v2",
+            "/%6fxi",
+            "/oxi/%2Fmail",
+            "/oxi?query=1",
+            "/oxi#mail",
+            " ",
+            " /oxi",
+            "/oxi ",
+            "/oxi /mail",
+            "/oxi\t",
+            "/oxi\n",
+            "/oxi/\u{a0}",
+            "/{mail}",
+            "/{*mail}",
+            "/oxi/{id}",
+            "/:mail",
+            "/mail*",
+            "/oxi\\mail",
+            "/café",
+            "\"/oxi\"",
+        ] {
+            let error = validate_base_path(base_path)
+                .expect_err("malformed BASE_PATH should fail during configuration loading")
+                .to_string();
+            assert!(
+                error.contains("invalid BASE_PATH"),
+                "{base_path:?}: {error}"
+            );
+            assert!(error.contains("ASCII letters"), "{base_path:?}: {error}");
+            assert!(error.contains("/oxi/mail"), "{base_path:?}: {error}");
         }
     }
 

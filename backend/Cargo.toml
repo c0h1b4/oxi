@@ -1,6 +1,6 @@
 [package]
 name = "oxi-email-server"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 
 [dependencies]
@@ -33,7 +33,7 @@ uuid = { version = "1", features = ["v4"] }
 tantivy = "0.22"
 ical = "0.11"
 regex = "1.12.3"
+tempfile = "3"
 
 [dev-dependencies]
 http-body-util = "0.1"
-tempfile = "3"

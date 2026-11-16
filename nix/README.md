@@ -38,7 +38,9 @@ The reverse proxy must preserve this prefix when forwarding requests.
 The module builds the static frontend with `NEXT_PUBLIC_BASE_PATH` set to the
 same prefix as the server's runtime `BASE_PATH`. Next.js embeds this prefix in
 its assets and client code. Changing the runtime environment alone cannot
-change an already-built frontend.
+change an already-built Nix frontend. Published Docker images use a reserved
+placeholder export resolved by the backend at startup instead; see the main
+README for runtime `BASE_PATH` deployment.
 
 Both the combined package and the frontend are overridable:
 
