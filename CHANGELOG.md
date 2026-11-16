@@ -16,6 +16,10 @@ All notable changes are recorded here. oxi uses Semantic Versioning and labels
 
 ### Fixed
 
+- Check IMAP CONDSTORE support before requesting extension-specific SELECT,
+  STATUS, or flag synchronization commands, avoiding rejected commands on
+  servers without CONDSTORE (reported with QQ Mail in #99).
+
 - Declare the editor's ProseMirror dependency directly so isolated Nix builds can
   resolve its runtime modules and TypeScript declarations.
 
