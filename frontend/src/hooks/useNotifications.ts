@@ -79,7 +79,7 @@ export function useNotifications() {
           const notification = new Notification(title, {
             body,
             tag: `oxi-${folder}`,
-            icon: "/notification-icon.svg",
+            icon: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/notification-icon.svg`,
           });
 
           notification.onclick = () => {

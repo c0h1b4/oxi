@@ -1,0 +1,50 @@
+name: Runtime base path
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
+jobs:
+  check:
+    name: Runtime base path
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          shared-key: ci-test
+          cache-on-failure: true
+      - name: Build the published image's frontend template
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_BASE_PATH: /__OXI_BASE_PATH__
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - name: Build server
+        working-directory: backend
+        run: cargo build --locked
+      - name: Check exported assets at multiple runtime prefixes
+        run: python3 tests/check-runtime-base-path.py backend/target/debug/oxi-email-server frontend/out
+      - name: Install browser test tools outside the project
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oxi-browser" --no-package-lock --no-audit --no-fund playwright@1.64.1
+          "$RUNNER_TEMP/oxi-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Check navigation, authentication and WebSockets
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oxi-browser/node_modules/playwright
+        run: node tests/check-runtime-navigation.cjs backend/target/debug/oxi-email-server frontend/out

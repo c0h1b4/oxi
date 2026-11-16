@@ -32,11 +32,13 @@ jobs:
     uses: ./.github/workflows/ci-frontend.yml
   nix:
     uses: ./.github/workflows/ci-nix.yml
+  runtime-base-path:
+    uses: ./.github/workflows/ci-runtime-base-path.yml
 
   gate:
     name: CI Gate
     if: always()
-    needs: [version, backend, frontend, nix]
+    needs: [version, backend, frontend, nix, runtime-base-path]
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
