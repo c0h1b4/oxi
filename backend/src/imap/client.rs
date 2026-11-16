@@ -901,13 +901,15 @@ impl ImapClient for RealImapClient {
     ) -> Result<FolderStatusExtended, ImapError> {
         let mut session = self.pool.checkout(creds).await?;
 
-        let mailbox = session
-            .status(
-                folder,
-                "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)",
-            )
+        let condstore = super::extensions::supports_condstore(&mut session)
             .await
             .map_err(map_imap_error)?;
+        let items = if condstore {
+            "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)"
+        } else {
+            "(MESSAGES UIDNEXT UIDVALIDITY UNSEEN)"
+        };
+        let mailbox = session.status(folder, items).await.map_err(map_imap_error)?;
 
         let result = FolderStatusExtended {
             uid_validity: mailbox.uid_validity.unwrap_or(0),
@@ -929,6 +931,13 @@ impl ImapClient for RealImapClient {
     ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
         let mut session = self.pool.checkout(creds).await?;
 
+        if !super::extensions::supports_condstore(&mut session)
+            .await
+            .map_err(map_imap_error)?
+        {
+            session.recycle();
+            return Err(ImapError::ProtocolError("CONDSTORE is not supported".into()));
+        }
         let mailbox = session
             .select_condstore(folder)
             .await
