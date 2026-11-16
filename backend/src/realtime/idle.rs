@@ -133,8 +133,7 @@ async fn run_idle_session(
         .await
         .map_err(|e| format!("IDLE connect failed: {e}"))?;
 
-    session
-        .select_condstore(folder)
+    imap::extensions::select_mailbox(&mut session, folder)
         .await
         .map_err(|e| format!("IDLE SELECT failed: {e}"))?;
 
@@ -304,11 +303,11 @@ async fn fetch_new_after_idle(
             }
         };
 
-    // Re-SELECT with CONDSTORE to get fresh mailbox state.
-    let mailbox = match session.select_condstore(folder).await {
+    // Re-SELECT using CONDSTORE only when the server supports it.
+    let mailbox = match imap::extensions::select_mailbox(&mut session, folder).await {
         Ok(mb) => mb,
         Err(e) => {
-            tracing::warn!(error = %e, "IDLE fetch: select_condstore failed");
+            tracing::warn!(error = %e, "IDLE fetch: SELECT failed");
             return (session, ReconcileResult::empty());
         }
     };
